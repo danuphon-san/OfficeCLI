@@ -66,13 +66,19 @@ curl -fsSL https://officecli.ai/SKILL.md
 
 That's it. The skill file teaches the agent how to install the binary and use all commands.
 
-> **Technical details:** OfficeCLI ships with a [SKILL.md](SKILL.md) (239 lines, ~8K tokens) that covers command syntax, architecture, and common pitfalls. After installation, your agent can immediately create, read, and modify any Office document.
+> **Technical details:** OfficeCLI ships with a [SKILL.md](SKILL.md) that covers command syntax, architecture, and common pitfalls. After installation, your agent can immediately create, read, and modify any Office document.
 
-## For Humans — Try It with AionUi
+## For Humans
 
-Want to experience the power of OfficeCLI without writing a single command? Install [**AionUi**](https://github.com/iOfficeAI/AionUi) — a desktop app that lets you create and edit Office documents through natural language, powered by OfficeCLI under the hood.
+**Option A — GUI:** Install [**AionUi**](https://github.com/iOfficeAI/AionUi) — a desktop app that lets you create and edit Office documents through natural language, powered by OfficeCLI under the hood. Just describe what you want, and AionUi handles the rest.
 
-Just describe what you want, and AionUi handles the rest.
+**Option B — CLI:** Download the binary for your platform from [GitHub Releases](https://github.com/iOfficeAI/OfficeCLI/releases), then run:
+
+```bash
+officecli install
+```
+
+This copies the binary to your PATH and sets up auto-update — you're ready to go.
 
 ## For Developers — See It Live in 30 Seconds
 
@@ -99,7 +105,7 @@ That's it. Every `add`, `set`, or `remove` command you run will refresh the prev
 # Create a presentation and add content
 officecli create deck.pptx
 officecli add deck.pptx / --type slide --prop title="Q4 Report" --prop background=1A1A2E
-officecli add deck.pptx /slide[1] --type shape \
+officecli add deck.pptx '/slide[1]' --type shape \
   --prop text="Revenue grew 25%" --prop x=2cm --prop y=5cm \
   --prop font=Arial --prop size=24 --prop color=FFFFFF
 
@@ -112,7 +118,7 @@ officecli view deck.pptx outline
 officecli view deck.pptx html
 
 # Get structured JSON for any element
-officecli get deck.pptx /slide[1]/shape[1] --json
+officecli get deck.pptx '/slide[1]/shape[1]' --json
 ```
 
 ```json
@@ -264,7 +270,7 @@ Start simple, go deep only when needed.
 | Layer | Purpose | Commands |
 |-------|---------|----------|
 | **L1: Read** | Semantic views of content | `view` (text, annotated, outline, stats, issues, html) |
-| **L2: DOM** | Structured element operations | `get`, `query`, `set`, `add`, `remove`, `move` |
+| **L2: DOM** | Structured element operations | `get`, `query`, `set`, `add`, `remove`, `move`, `swap` |
 | **L3: Raw XML** | Direct XPath access — universal fallback | `raw`, `raw-set`, `add-part`, `validate` |
 
 ```bash
@@ -278,7 +284,7 @@ officecli add budget.xlsx / --type sheet --prop name="Q2 Report"
 officecli move report.docx /body/p[5] --to /body --index 1
 
 # L3 — raw XML when L2 isn't enough
-officecli raw deck.pptx /slide[1]
+officecli raw deck.pptx '/slide[1]'
 officecli raw-set report.docx document \
   --xpath "//w:p[1]" --action append \
   --xml '<w:r><w:t>Injected text</w:t></w:r>'
@@ -324,7 +330,7 @@ curl -fsSL https://officecli.ai/SKILL.md
 curl -fsSL https://officecli.ai/SKILL.md -o ~/.claude/skills/officecli.md
 ```
 
-**Other agents:** Include the contents of `SKILL.md` (239 lines, ~8K tokens) in your agent's system prompt or tool description.
+**Other agents:** Include the contents of `SKILL.md` in your agent's system prompt or tool description.
 
 </details>
 
@@ -456,7 +462,7 @@ OFFICECLI_SKIP_UPDATE=1 officecli ...          # Skip check for one invocation (
 | [`set`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-set) | Modify element properties |
 | [`add`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-add) | Add element (or clone with `--from <path>`) |
 | [`remove`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-remove) | Remove an element |
-| [`move`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-move) | Move element (`--to <parent> --index N`) |
+| [`move`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-move) | Move element (`--to <parent>`, `--index N`, `--after <path>`, `--before <path>`) |
 | [`swap`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-swap) | Swap two elements |
 | [`validate`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-validate) | Validate against OpenXML schema |
 | [`batch`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-batch) | Multiple operations in one open/save cycle (stdin, `--input`, or `--commands`; stops on first error, `--force` to continue) |
@@ -482,10 +488,10 @@ officecli create report.pptx
 
 # 2. Add content
 officecli add report.pptx / --type slide --prop title="Q4 Results"
-officecli add report.pptx /slide[1] --type shape \
+officecli add report.pptx '/slide[1]' --type shape \
   --prop text="Revenue: $4.2M" --prop x=2cm --prop y=5cm --prop size=28
 officecli add report.pptx / --type slide --prop title="Details"
-officecli add report.pptx /slide[2] --type shape \
+officecli add report.pptx '/slide[2]' --type shape \
   --prop text="Growth driven by new markets" --prop x=2cm --prop y=5cm
 
 # 3. Verify
@@ -495,7 +501,7 @@ officecli validate report.pptx
 # 4. Fix any issues found
 officecli view report.pptx issues --json
 # Address issues based on output, e.g.:
-officecli set report.pptx /slide[1]/shape[1] --prop font=Arial
+officecli set report.pptx '/slide[1]/shape[1]' --prop font=Arial
 ```
 
 ### Template Merge
@@ -588,7 +594,7 @@ yaml-frontmatter:
   ai-agent-compatible: true
   mcp-server: true
   skill-file: SKILL.md
-  skill-file-lines: 239
+
   install-command-unix: curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
   install-command-windows: irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 -->
@@ -606,7 +612,7 @@ keywords: office, cli, ai-agent, automation, docx, xlsx, pptx, openxml, document
 ai-agent-compatible: true
 mcp-server: true
 skill-file: SKILL.md
-skill-file-lines: 239
+skill-file-lines: 403
 alternatives: python-docx, openpyxl, python-pptx, libreoffice --headless
 install-command-unix: curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
 install-command-windows: irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex

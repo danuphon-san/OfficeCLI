@@ -66,7 +66,7 @@ curl -fsSL https://officecli.ai/SKILL.md
 
 이게 전부입니다. 스킬 파일이 에이전트에게 바이너리 설치 방법과 모든 명령어 사용법을 알려줍니다.
 
-> **기술 세부사항:** OfficeCLI에는 [SKILL.md](SKILL.md)(239줄, 약 8K 토큰)가 포함되어 있으며, 명령어 구문, 아키텍처, 자주 발생하는 실수를 다룹니다. 설치 후 에이전트는 즉시 Office 문서를 생성, 읽기, 수정할 수 있습니다.
+> **기술 세부사항:** OfficeCLI에는 [SKILL.md](SKILL.md)가 포함되어 있으며, 명령어 구문, 아키텍처, 자주 발생하는 실수를 다룹니다. 설치 후 에이전트는 즉시 Office 문서를 생성, 읽기, 수정할 수 있습니다.
 
 ## 일반 사용자용 — AionUi를 설치하여 체험
 
@@ -99,7 +99,7 @@ officecli add deck.pptx / --type slide --prop title="Hello, World!"
 # 프레젠테이션을 생성하고 콘텐츠 추가
 officecli create deck.pptx
 officecli add deck.pptx / --type slide --prop title="Q4 Report" --prop background=1A1A2E
-officecli add deck.pptx /slide[1] --type shape \
+officecli add deck.pptx '/slide[1]' --type shape \
   --prop text="Revenue grew 25%" --prop x=2cm --prop y=5cm \
   --prop font=Arial --prop size=24 --prop color=FFFFFF
 
@@ -112,7 +112,7 @@ officecli view deck.pptx outline
 officecli view deck.pptx html
 
 # 모든 요소의 구조화된 JSON 가져오기
-officecli get deck.pptx /slide[1]/shape[1] --json
+officecli get deck.pptx '/slide[1]/shape[1]' --json
 ```
 
 ```json
@@ -258,7 +258,7 @@ echo '[{"command":"set","path":"/slide[1]/shape[1]","props":{"text":"Hello"}},
 | 레이어 | 용도 | 명령어 |
 |--------|------|--------|
 | **L1: 읽기** | 콘텐츠의 시맨틱 뷰 | `view` (text, annotated, outline, stats, issues, html) |
-| **L2: DOM** | 구조화된 요소 작업 | `get`, `query`, `set`, `add`, `remove`, `move` |
+| **L2: DOM** | 구조화된 요소 작업 | `get`, `query`, `set`, `add`, `remove`, `move`, `swap` |
 | **L3: 원시 XML** | XPath 직접 접근 — 범용 폴백 | `raw`, `raw-set`, `add-part`, `validate` |
 
 ```bash
@@ -272,7 +272,7 @@ officecli add budget.xlsx / --type sheet --prop name="Q2 Report"
 officecli move report.docx /body/p[5] --to /body --index 1
 
 # L3 — L2로 부족할 때 원시 XML
-officecli raw deck.pptx /slide[1]
+officecli raw deck.pptx '/slide[1]'
 officecli raw-set report.docx document \
   --xpath "//w:p[1]" --action append \
   --xml '<w:r><w:t>Injected text</w:t></w:r>'
@@ -318,7 +318,7 @@ curl -fsSL https://officecli.ai/SKILL.md
 curl -fsSL https://officecli.ai/SKILL.md -o ~/.claude/skills/officecli.md
 ```
 
-**기타 에이전트:** `SKILL.md`(239줄, 약 8K 토큰)의 내용을 에이전트의 시스템 프롬프트 또는 도구 설명에 포함하세요.
+**기타 에이전트:** `SKILL.md`의 내용을 에이전트의 시스템 프롬프트 또는 도구 설명에 포함하세요.
 
 </details>
 
@@ -452,7 +452,7 @@ OFFICECLI_SKIP_UPDATE=1 officecli ...          # 단일 실행 시 확인 건너
 | [`set`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-set) | 요소 속성 수정 |
 | [`add`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-add) | 요소 추가 (또는 `--from <path>`로 복제) |
 | [`remove`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-remove) | 요소 삭제 |
-| [`move`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-move) | 요소 이동 (`--to <parent> --index N`) |
+| [`move`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-move) | 요소 이동 (`--to <parent>`, `--index N`, `--after <path>`, `--before <path>`) |
 | [`swap`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-swap) | 두 요소 교체 |
 | [`validate`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-validate) | OpenXML 스키마 검증 |
 | [`batch`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-batch) | 한 번의 open/save 사이클에서 여러 작업 실행 (stdin, `--input`, 또는 `--commands`) |
@@ -478,10 +478,10 @@ officecli create report.pptx
 
 # 2. 콘텐츠 추가
 officecli add report.pptx / --type slide --prop title="Q4 Results"
-officecli add report.pptx /slide[1] --type shape \
+officecli add report.pptx '/slide[1]' --type shape \
   --prop text="Revenue: $4.2M" --prop x=2cm --prop y=5cm --prop size=28
 officecli add report.pptx / --type slide --prop title="Details"
-officecli add report.pptx /slide[2] --type shape \
+officecli add report.pptx '/slide[2]' --type shape \
   --prop text="Growth driven by new markets" --prop x=2cm --prop y=5cm
 
 # 3. 검증
@@ -491,7 +491,7 @@ officecli validate report.pptx
 # 4. 문제 수정
 officecli view report.pptx issues --json
 # 출력에 따라 문제 수정:
-officecli set report.pptx /slide[1]/shape[1] --prop font=Arial
+officecli set report.pptx '/slide[1]/shape[1]' --prop font=Arial
 ```
 
 ### 템플릿 병합
