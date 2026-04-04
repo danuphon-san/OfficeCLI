@@ -283,6 +283,17 @@ public partial class PowerPointHandler
         var index = position?.Index;
         sourcePath = ResolveIdPath(sourcePath);
         if (targetParentPath != null) targetParentPath = ResolveIdPath(targetParentPath);
+
+        // Infer --to from --after/--before full path if not specified
+        var anchorFullPath = position?.After ?? position?.Before;
+        if (string.IsNullOrEmpty(targetParentPath) && anchorFullPath != null && anchorFullPath.StartsWith("/"))
+        {
+            var resolvedAnchor = ResolveIdPath(anchorFullPath);
+            var lastSlash = resolvedAnchor.LastIndexOf('/');
+            if (lastSlash > 0)
+                targetParentPath = resolvedAnchor[..lastSlash];
+        }
+
         var presentationPart = _doc.PresentationPart
             ?? throw new InvalidOperationException("Presentation not found");
         var slideParts = GetSlideParts().ToList();
@@ -385,9 +396,29 @@ public partial class PowerPointHandler
         if (srcSlidePart != tgtSlidePart)
             CopyRelationships(srcElement, srcSlidePart, tgtSlidePart);
 
+        // Resolve after/before anchor for shape-level move
+        OpenXmlElement? shapeAfterAnchor = null, shapeBeforeAnchor = null;
+        if (position?.After != null)
+        {
+            var anchorPath = ResolveIdPath(position.After);
+            var (_, anchor) = ResolveSlideElement(anchorPath, slideParts);
+            shapeAfterAnchor = anchor;
+        }
+        else if (position?.Before != null)
+        {
+            var anchorPath = ResolveIdPath(position.Before);
+            var (_, anchor) = ResolveSlideElement(anchorPath, slideParts);
+            shapeBeforeAnchor = anchor;
+        }
+
         srcElement.Remove();
 
-        InsertAtPosition(tgtShapeTree, srcElement, index);
+        if (shapeAfterAnchor != null)
+            shapeAfterAnchor.InsertAfterSelf(srcElement);
+        else if (shapeBeforeAnchor != null)
+            shapeBeforeAnchor.InsertBeforeSelf(srcElement);
+        else
+            InsertAtPosition(tgtShapeTree, srcElement, index);
 
         GetSlide(srcSlidePart).Save();
         if (srcSlidePart != tgtSlidePart)

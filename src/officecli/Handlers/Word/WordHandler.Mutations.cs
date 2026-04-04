@@ -255,6 +255,15 @@ public partial class WordHandler
         var element = NavigateToElement(srcParts)
             ?? throw new ArgumentException($"Source not found: {sourcePath}");
 
+        // Infer --to from --after/--before full path if not specified
+        var anchorFullPath = position?.After ?? position?.Before;
+        if (string.IsNullOrEmpty(targetParentPath) && anchorFullPath != null && anchorFullPath.StartsWith("/"))
+        {
+            var lastSlash = anchorFullPath.LastIndexOf('/');
+            if (lastSlash > 0)
+                targetParentPath = anchorFullPath[..lastSlash];
+        }
+
         // Resolve after/before anchor BEFORE removing the element
         OpenXmlElement? afterAnchor = null, beforeAnchor = null;
         if (position?.After != null)
