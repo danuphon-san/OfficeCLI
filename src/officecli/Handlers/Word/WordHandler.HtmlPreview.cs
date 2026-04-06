@@ -790,9 +790,17 @@ public partial class WordHandler
                 pendingBlockClose = wBlockCount;
             }
 
-            // Check for inline section break (sectPr inside paragraph pPr) — handle column changes
-            if (element is Paragraph sectPara && sectPara.ParagraphProperties?.GetFirstChild<SectionProperties>() != null)
+            // Check for inline section break (sectPr inside paragraph pPr) — handle page breaks and column changes
+            if (element is Paragraph sectPara && sectPara.ParagraphProperties?.GetFirstChild<SectionProperties>() is SectionProperties inlineSectPr)
             {
+                var sectType = inlineSectPr.GetFirstChild<SectionType>();
+                if (sectType?.Val?.Value == SectionMarkValues.NextPage
+                    || sectType?.Val?.Value == SectionMarkValues.EvenPage
+                    || sectType?.Val?.Value == SectionMarkValues.OddPage)
+                {
+                    sb.Append("<!--PAGE_BREAK-->");
+                }
+
                 var nextCols = GetNextSectionColumnCount(elements, ei, bodyColCount);
                 if (nextCols > 1 && !inMultiColumn)
                 {
