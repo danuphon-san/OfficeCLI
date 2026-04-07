@@ -10,6 +10,14 @@ static partial class CommandBuilder
 {
     // ==================== mark ====================
 
+    // Canonical prop names accepted by `mark --prop`. Any other key triggers
+    // the unknown-prop warning. Lower-case for case-insensitive comparison
+    // (the prop dictionary itself is OrdinalIgnoreCase).
+    private static readonly HashSet<string> KnownMarkProps = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "find", "color", "note", "tofix", "regex",
+    };
+
     private static Command BuildMarkCommand(Option<bool> jsonOption)
     {
         var fileArg = new Argument<FileInfo>("file") { Description = "Office document path (.pptx, .xlsx, .docx)" };
@@ -38,10 +46,57 @@ static partial class CommandBuilder
             var rawProps = result.GetValue(propsOpt) ?? Array.Empty<string>();
 
             var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string? deprecatedExpectValue = null;
             foreach (var p in rawProps)
             {
                 var eq = p.IndexOf('=');
-                if (eq > 0) props[p[..eq]] = p[(eq + 1)..];
+                if (eq <= 0) continue;
+                var key = p[..eq];
+                var val = p[(eq + 1)..];
+
+                // (a) Deprecated alias: `expect` was renamed to `tofix` in a052fb6.
+                // Route the value to `tofix` with a deprecation warning on stderr
+                // so old scripts/prompts continue to work instead of silently
+                // losing data. Explicit `--prop tofix=...` takes precedence.
+                if (string.Equals(key, "expect", StringComparison.OrdinalIgnoreCase))
+                {
+                    deprecatedExpectValue = val;
+                    continue;
+                }
+
+                // (c) Unknown prop — warn and ignore instead of dropping silently.
+                // This catches typos like --prop noet=... that previously produced
+                // a mark with missing fields and no diagnostic.
+                if (!KnownMarkProps.Contains(key))
+                {
+                    Console.Error.WriteLine(
+                        $"Warning: unknown property '{key}' for mark, ignored. " +
+                        "Known: find, color, note, tofix, regex.");
+                    continue;
+                }
+
+                props[key] = val;
+            }
+
+            if (deprecatedExpectValue != null)
+            {
+                if (props.ContainsKey("tofix"))
+                {
+                    // Explicit `tofix` wins — the `expect` value is dropped.
+                    // Warn the user the alias was shadowed so they don't wonder
+                    // where their value went.
+                    Console.Error.WriteLine(
+                        "Warning: 'expect' has been renamed to 'tofix'. " +
+                        "An explicit 'tofix' was also provided and takes precedence; " +
+                        "the 'expect' value was ignored. Please update your scripts.");
+                }
+                else
+                {
+                    props["tofix"] = deprecatedExpectValue;
+                    Console.Error.WriteLine(
+                        "Warning: 'expect' has been renamed to 'tofix'. " +
+                        "The value has been applied to 'tofix'. Please update your scripts.");
+                }
             }
 
             // CONSISTENCY(find-regex): 复用 WordHandler.Set.cs:60-61 的 regex→raw-string 转换,
