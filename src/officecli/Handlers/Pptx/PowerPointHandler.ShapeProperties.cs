@@ -1570,6 +1570,16 @@ public partial class PowerPointHandler
                     break;
             }
         }
+
+        // Ensure DrawingML CT_TextCharacterProperties child order (B-R9-2 / B-R13-2).
+        // Our switch arms append children independently (solidFill, latin, ea, ...),
+        // which produces a mixed order that OpenXmlValidator flags as schema violations
+        // and PowerPoint silently drops out-of-order elements. Reorder once at the end.
+        foreach (var rPr in cell.Descendants<Drawing.RunProperties>())
+            ReorderDrawingRunProperties(rPr);
+        foreach (var endRPr in cell.Descendants<Drawing.EndParagraphRunProperties>())
+            ReorderDrawingRunProperties(endRPr);
+
         return unsupported;
     }
 

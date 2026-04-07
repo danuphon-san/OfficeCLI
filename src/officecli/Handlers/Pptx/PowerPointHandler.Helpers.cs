@@ -802,6 +802,81 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// Schema order for DrawingML CT_TextCharacterProperties children (a:rPr / a:endParaRPr / a:defRPr).
+    /// Source: Open-XML-SDK CompositeParticle definition of TextCharacterPropertiesType.
+    /// Children must appear in this order or OpenXmlValidator emits schema warnings and
+    /// PowerPoint silently drops the out-of-order ones.
+    /// </summary>
+    private static readonly (Type type, int order)[] DrawingRunPropChildOrder = new (Type, int)[]
+    {
+        (typeof(Drawing.Outline),              1),   // ln
+        (typeof(Drawing.NoFill),               2),   // noFill
+        (typeof(Drawing.SolidFill),            2),   // solidFill
+        (typeof(Drawing.GradientFill),         2),   // gradFill
+        (typeof(Drawing.BlipFill),             2),   // blipFill
+        (typeof(Drawing.PatternFill),          2),   // pattFill
+        (typeof(Drawing.GroupFill),            2),   // grpFill
+        (typeof(Drawing.EffectList),           3),   // effectLst
+        (typeof(Drawing.EffectDag),            3),   // effectDag
+        (typeof(Drawing.Highlight),            4),   // highlight
+        (typeof(Drawing.UnderlineFollowsText), 5),   // uLnTx
+        (typeof(Drawing.Underline),            5),   // uLn
+        (typeof(Drawing.UnderlineFillText),    6),   // uFillTx
+        (typeof(Drawing.UnderlineFill),        6),   // uFill
+        (typeof(Drawing.LatinFont),            7),   // latin
+        (typeof(Drawing.EastAsianFont),        8),   // ea
+        (typeof(Drawing.ComplexScriptFont),    9),   // cs
+        (typeof(Drawing.SymbolFont),          10),   // sym
+        (typeof(Drawing.HyperlinkOnClick),    11),   // hlinkClick
+        (typeof(Drawing.HyperlinkOnMouseOver),12),   // hlinkMouseOver
+        (typeof(Drawing.RightToLeft),         13),   // rtl
+        (typeof(Drawing.ExtensionList),       14),   // extLst
+    };
+
+    /// <summary>
+    /// Reorder children of a DrawingML RunProperties / EndParagraphRunProperties /
+    /// DefaultRunProperties element into schema-valid order.
+    /// Stable within the same order bucket to preserve relative order of existing fills.
+    /// Unknown child types are pushed to the end (preserved but last).
+    /// </summary>
+    internal static void ReorderDrawingRunProperties(OpenXmlCompositeElement rPr)
+    {
+        if (rPr == null || !rPr.HasChildren) return;
+
+        int OrderOf(OpenXmlElement el)
+        {
+            var t = el.GetType();
+            foreach (var (type, order) in DrawingRunPropChildOrder)
+                if (type == t) return order;
+            return int.MaxValue;
+        }
+
+        var children = rPr.ChildElements.ToList();
+        // Check if already sorted — avoid unnecessary reflows
+        bool needsReorder = false;
+        for (int i = 1; i < children.Count; i++)
+        {
+            if (OrderOf(children[i]) < OrderOf(children[i - 1]))
+            {
+                needsReorder = true;
+                break;
+            }
+        }
+        if (!needsReorder) return;
+
+        // Stable sort by schema order
+        var sorted = children
+            .Select((el, idx) => (el, ord: OrderOf(el), idx))
+            .OrderBy(t => t.ord)
+            .ThenBy(t => t.idx)
+            .Select(t => t.el)
+            .ToList();
+
+        foreach (var c in children) c.Remove();
+        foreach (var c in sorted) rPr.AppendChild(c);
+    }
+
+    /// <summary>
     /// Read a GradientFill element and return a string representation (C1-C2[-angle] or radial:C1-C2[-focus]).
     /// </summary>
     internal static string ReadGradientString(Drawing.GradientFill gradFill)
