@@ -876,7 +876,10 @@ static partial class CommandBuilder
             var html = ppt.RenderSlideHtml(slideNum);
             if (html != null)
             {
-                WatchNotifier.NotifyIfWatching(filePath, new WatchMessage { Action = "replace", Slide = slideNum, Html = html, FullHtml = ppt.ViewAsHtml() });
+                // Slide-scoped replace: the watch server patches its cached _currentHtml in
+                // place via PatchSlideInHtml; bundling a full ViewAsHtml() here is redundant
+                // (and ResidentServer.NotifyWatchSlideChanged already omits it).
+                WatchNotifier.NotifyIfWatching(filePath, new WatchMessage { Action = "replace", Slide = slideNum, Html = html });
                 return;
             }
         }
