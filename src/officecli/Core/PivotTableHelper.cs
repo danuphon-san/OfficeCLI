@@ -63,11 +63,26 @@ internal static class PivotTableHelper
     /// restores the previous value on Dispose. Usage:
     ///   using (PushAxisSortMode(properties)) { ... build pivot ... }
     /// </summary>
+    private static readonly HashSet<string> _validSortModes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "asc", "desc", "locale", "locale-desc"
+    };
+
     private static IDisposable PushAxisSortMode(Dictionary<string, string> properties)
     {
         var prev = _axisSortMode;
         if (properties.TryGetValue("sort", out var mode) && !string.IsNullOrWhiteSpace(mode))
-            _axisSortMode = mode.Trim().ToLowerInvariant();
+        {
+            var normalized = mode.Trim().ToLowerInvariant();
+            // CONSISTENCY(strict-enums): unknown sort tokens are rejected
+            // up front. Empty / whitespace fall through to the default
+            // (no-op) so users can clear the sort by passing an empty
+            // value without seeing an error.
+            if (!_validSortModes.Contains(normalized))
+                throw new ArgumentException(
+                    $"invalid sort: '{mode}'. Valid: asc, desc, locale, locale-desc");
+            _axisSortMode = normalized;
+        }
         return new SortModeScope(prev);
     }
 
@@ -5357,7 +5372,11 @@ internal static class PivotTableHelper
             "difference" or "diff" => ShowDataAsValues.Difference,
             "percent_diff" or "percentdiff" => ShowDataAsValues.PercentageDifference,
             "index" => ShowDataAsValues.Index,
-            _ => null,
+            // CONSISTENCY(strict-enums): unknown showAs tokens are rejected
+            // up front so users see typos at Add/Set time, not on render.
+            _ => throw new ArgumentException(
+                $"invalid showDataAs: '{showAs}'. Valid: normal, percent_of_total, percent_of_row, " +
+                "percent_of_col, running_total, difference, percent_diff, index"),
         };
     }
 
