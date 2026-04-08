@@ -3942,32 +3942,36 @@ internal static class PivotTableHelper
             // date-grouped pivot where year bucket values "2024"/"2025" parse
             // as numeric but render as labels — Excel showed only the grand
             // total row instead of the year hierarchy.
+            // R6-2: a field can be on an axis AND a data field at the same
+            // time (e.g. rows=Region values=Region:count). The axis flag and
+            // the DataField flag are independent, so check each of them
+            // separately instead of if/else-if which silently dropped the
+            // DataField marker.
             bool isDerivedDateGroup = derivedFieldByIdx.ContainsKey(i);
+            bool onAxis = false;
             if (rowFieldIndices.Contains(i))
             {
                 pf.Axis = PivotTableAxisValues.AxisRow;
-                if (isDerivedDateGroup)
-                    AppendFixedBucketItems(pf, derivedFieldByIdx[i]);
-                else
-                    AppendFieldItems(pf, values);
+                onAxis = true;
             }
             else if (colFieldIndices.Contains(i))
             {
                 pf.Axis = PivotTableAxisValues.AxisColumn;
-                if (isDerivedDateGroup)
-                    AppendFixedBucketItems(pf, derivedFieldByIdx[i]);
-                else
-                    AppendFieldItems(pf, values);
+                onAxis = true;
             }
             else if (filterFieldIndices.Contains(i))
             {
                 pf.Axis = PivotTableAxisValues.AxisPage;
+                onAxis = true;
+            }
+            if (onAxis)
+            {
                 if (isDerivedDateGroup)
                     AppendFixedBucketItems(pf, derivedFieldByIdx[i]);
                 else
                     AppendFieldItems(pf, values);
             }
-            else if (valueFields.Any(vf => vf.idx == i))
+            if (valueFields.Any(vf => vf.idx == i))
             {
                 pf.DataField = true;
             }
