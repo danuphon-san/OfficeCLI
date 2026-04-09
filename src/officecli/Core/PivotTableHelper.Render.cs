@@ -2083,6 +2083,15 @@ internal static partial class PivotTableHelper
                 // rowNode.Depth is 1-based; the label goes at column (anchor + depth - 1).
                 int labelCol = anchorColIdx + rowNode.Depth - 1;
                 row.AppendChild(MakeStringCell(labelCol, rowIdx, rowNode.Label));
+                // "Repeat All Item Labels": fill ancestor labels on every row
+                // so outer group names appear on each leaf row, not just the first.
+                if (ActiveRepeatItemLabels && rowNode.Depth >= 2)
+                {
+                    for (int anc = 0; anc < rowNode.Depth - 1; anc++)
+                        row.InsertBefore(
+                            MakeStringCell(anchorColIdx + anc, rowIdx, rowNode.Path[anc]),
+                            row.FirstChild);
+                }
             }
 
             // Label-only rows: compact internal nodes with subtotals off

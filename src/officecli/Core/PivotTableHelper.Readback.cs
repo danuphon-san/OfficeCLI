@@ -147,6 +147,30 @@ internal static partial class PivotTableHelper
             node.Format["layout"] = layout;
         }
 
+        // repeatItemLabels (fillDownLabelsDefault in x14:pivotTableDefinition)
+        {
+            bool repeatLabels = false;
+            var extLst = pivotDef.GetFirstChild<PivotTableDefinitionExtensionList>();
+            if (extLst != null)
+            {
+                foreach (var ext in extLst.Elements<PivotTableDefinitionExtension>())
+                {
+                    foreach (var child in ext.ChildElements)
+                    {
+                        if (child.LocalName == "pivotTableDefinition"
+                            && child.GetAttribute("fillDownLabelsDefault", "").Value == "1")
+                        {
+                            repeatLabels = true;
+                            break;
+                        }
+                    }
+                    if (repeatLabels) break;
+                }
+            }
+            if (repeatLabels)
+                node.Format["repeatLabels"] = "true";
+        }
+
         // Style
         var styleInfo = pivotDef.PivotTableStyle;
         if (styleInfo?.Name?.HasValue == true)

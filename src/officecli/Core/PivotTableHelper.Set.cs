@@ -28,6 +28,8 @@ internal static partial class PivotTableHelper
         using var _subScope = PushSubtotalsOptions(properties);
         // CONSISTENCY(thread-static-pivot-opts): same pattern for layout mode.
         using var _layoutScope = PushLayoutMode(properties);
+        // CONSISTENCY(thread-static-pivot-opts): same pattern for repeatItemLabels.
+        using var _repeatScope = PushRepeatItemLabels(properties);
 
         var unsupported = new List<string>();
         var pivotDef = pivotPart.PivotTableDefinition;
@@ -246,6 +248,46 @@ internal static partial class PivotTableHelper
                         }
                     }
                     // Trigger re-render for geometry change
+                    if (!fieldAreaProps.ContainsKey("rows") && !fieldAreaProps.ContainsKey("cols")
+                        && !fieldAreaProps.ContainsKey("values") && !fieldAreaProps.ContainsKey("filters")
+                        && !fieldAreaProps.ContainsKey("__sort_only__"))
+                    {
+                        fieldAreaProps["__sort_only__"] = "";
+                    }
+                    break;
+                }
+                case "repeatlabels":
+                {
+                    // Write or remove the x14:pivotTableDefinition fillDownLabelsDefault
+                    // extension element. Also trigger re-render so materialized cells
+                    // reflect the label repetition.
+                    bool enable = ParseHelpers.IsTruthy(value);
+                    const string x14Ns = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+                    var extLst = pivotDef.GetFirstChild<PivotTableDefinitionExtensionList>();
+                    // Remove any existing fillDownLabels extension
+                    if (extLst != null)
+                    {
+                        var toRemove = extLst.Elements<PivotTableDefinitionExtension>()
+                            .Where(e => e.Uri == "{962EF5D1-5CA2-4c93-8EF4-DBF5C05439D2}")
+                            .ToList();
+                        foreach (var e in toRemove) e.Remove();
+                        if (!extLst.HasChildren) extLst.Remove();
+                    }
+                    if (enable)
+                    {
+                        var ext = new PivotTableDefinitionExtension
+                        {
+                            Uri = "{962EF5D1-5CA2-4c93-8EF4-DBF5C05439D2}"
+                        };
+                        var x14PivotDef = new OpenXmlUnknownElement("x14", "pivotTableDefinition", x14Ns);
+                        x14PivotDef.SetAttribute(new OpenXmlAttribute("fillDownLabelsDefault", "", "1"));
+                        x14PivotDef.AddNamespaceDeclaration("x14", x14Ns);
+                        ext.AppendChild(x14PivotDef);
+                        extLst = pivotDef.GetFirstChild<PivotTableDefinitionExtensionList>()
+                            ?? pivotDef.AppendChild(new PivotTableDefinitionExtensionList());
+                        extLst.AppendChild(ext);
+                    }
+                    // Trigger re-render
                     if (!fieldAreaProps.ContainsKey("rows") && !fieldAreaProps.ContainsKey("cols")
                         && !fieldAreaProps.ContainsKey("values") && !fieldAreaProps.ContainsKey("filters")
                         && !fieldAreaProps.ContainsKey("__sort_only__"))

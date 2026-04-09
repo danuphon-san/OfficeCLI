@@ -131,6 +131,10 @@ internal static partial class PivotTableHelper
             // key. Add-path warning suppression relies on this rewrite.
             ["showcolumnstripes"] = "showcolstripes",
             ["showcolumnheaders"] = "showcolheaders",
+            // repeatItemLabels aliases
+            ["repeatitemlabels"]  = "repeatlabels",
+            ["repeatalllabels"]   = "repeatlabels",
+            ["filldownlabels"]    = "repeatlabels",
         };
 
     /// <summary>
@@ -189,7 +193,7 @@ internal static partial class PivotTableHelper
             "source", "src", "name", "position", "pos", "style",
             "rows", "cols", "filters", "values",
             "aggregate", "showdataas", "topn",
-            "sort", "layout",
+            "sort", "layout", "repeatlabels",
             "grandtotals", "rowgrandtotals", "colgrandtotals",
             "subtotals", "defaultsubtotal",
             // <pivotTableStyleInfo> bool toggles (see ApplyPivotStyleInfoProps).
@@ -557,6 +561,29 @@ internal static partial class PivotTableHelper
         public void Dispose() { _layoutMode = _prev; }
     }
 
+    // CONSISTENCY(thread-static-pivot-opts): repeatItemLabels — "Repeat All
+    // Item Labels" in Excel's Report Layout menu. When true, outer row axis
+    // labels are repeated on every leaf row instead of appearing only once
+    // at the top of each group. OOXML: fillDownLabelsDefault on x14:pivotTableDefinition.
+    [ThreadStatic] private static bool? _repeatItemLabels;
+
+    private static bool ActiveRepeatItemLabels => _repeatItemLabels ?? false;
+
+    private static IDisposable PushRepeatItemLabels(Dictionary<string, string> properties)
+    {
+        var prev = _repeatItemLabels;
+        if (properties.TryGetValue("repeatlabels", out var val) && !string.IsNullOrWhiteSpace(val))
+            _repeatItemLabels = ParseHelpers.IsTruthy(val);
+        return new RepeatItemLabelsScope(prev);
+    }
+
+    private sealed class RepeatItemLabelsScope : IDisposable
+    {
+        private readonly bool? _prev;
+        public RepeatItemLabelsScope(bool? prev) { _prev = prev; }
+        public void Dispose() { _repeatItemLabels = _prev; }
+    }
+
     /// <summary>
     /// Apply axis ordering (ascending/descending) to an OrderBy clause using
     /// the currently-active sort mode. All axis sort sites use this helper.
@@ -724,6 +751,8 @@ internal static partial class PivotTableHelper
         using var _subScope = PushSubtotalsOptions(properties);
         // CONSISTENCY(thread-static-pivot-opts): same pattern for layout mode.
         using var _layoutScope = PushLayoutMode(properties);
+        // CONSISTENCY(thread-static-pivot-opts): same pattern for repeatItemLabels.
+        using var _repeatScope = PushRepeatItemLabels(properties);
 
         // 1. Read source data to build cache
         var (headers, columnData, columnStyleIds) = ReadSourceData(sourceSheet, sourceRef);

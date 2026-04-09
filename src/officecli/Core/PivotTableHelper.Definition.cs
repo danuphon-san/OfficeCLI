@@ -415,6 +415,27 @@ internal static partial class PivotTableHelper
         var styleInfo = EnsurePivotTableStyle(pivotDef);
         styleInfo.Name = styleName;
 
+        // "Repeat All Item Labels" — OOXML x14:pivotTableDefinition
+        // fillDownLabelsDefault attribute. When enabled, Excel repeats outer
+        // row axis labels on every data row instead of showing them only once
+        // at the top of each group. The attribute lives in an <ext> element
+        // inside pivotTableDefinition's <extLst>.
+        if (ActiveRepeatItemLabels)
+        {
+            const string x14Ns = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+            var ext = new PivotTableDefinitionExtension
+            {
+                Uri = "{962EF5D1-5CA2-4c93-8EF4-DBF5C05439D2}"
+            };
+            var x14PivotDef = new OpenXmlUnknownElement("x14", "pivotTableDefinition", x14Ns);
+            x14PivotDef.SetAttribute(new OpenXmlAttribute("fillDownLabelsDefault", "", "1"));
+            x14PivotDef.AddNamespaceDeclaration("x14", x14Ns);
+            ext.AppendChild(x14PivotDef);
+            var extLst = pivotDef.GetFirstChild<PivotTableDefinitionExtensionList>()
+                ?? pivotDef.AppendChild(new PivotTableDefinitionExtensionList());
+            extLst.AppendChild(ext);
+        }
+
         return pivotDef;
     }
 
