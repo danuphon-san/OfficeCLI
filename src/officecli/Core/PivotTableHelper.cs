@@ -5623,10 +5623,27 @@ internal static class PivotTableHelper
                 for (int i = 0; i < valueFields.Count; i++)
                 {
                     var (idx, func, showAs, name) = valueFields[i];
+                    var funcChanged = false;
                     if (aggOverride != null && i < aggOverride.Length && !string.IsNullOrEmpty(aggOverride[i]))
+                    {
+                        if (!string.Equals(func, aggOverride[i], StringComparison.OrdinalIgnoreCase))
+                            funcChanged = true;
                         func = aggOverride[i];
+                    }
                     if (showOverride != null && i < showOverride.Length && !string.IsNullOrEmpty(showOverride[i]))
                         showAs = showOverride[i];
+                    // R15-5: when aggregate changes, regenerate the display
+                    // name so the DataField header shows "Count of Sales"
+                    // instead of the stale "Sum of Sales". Only rewrite when
+                    // the current name still matches the canonical
+                    // "<AggDisplay> of <sourceHeader>" shape — future explicit
+                    // user-provided names would then survive untouched.
+                    if (funcChanged && idx >= 0 && idx < headers.Length)
+                    {
+                        var sourceHeader = headers[idx];
+                        if (LooksLikeAutoDataFieldName(name, sourceHeader))
+                            name = $"{AggregateDisplayName(func)} of {sourceHeader}";
+                    }
                     valueFields[i] = (idx, func, showAs, name);
                 }
             }
@@ -6281,6 +6298,44 @@ internal static class PivotTableHelper
         "running_total" or "runningtotal" or "runtotal" => true,
         _ => false,
     };
+
+    /// <summary>
+    /// R15-5: canonical English display prefix for the auto-generated
+    /// DataField name ("Sum of Sales", "Count of Sales", ...). Matches the
+    /// displayPrefixes table used by the values-spec round-trip parser.
+    /// </summary>
+    private static string AggregateDisplayName(string func) => func.ToLowerInvariant() switch
+    {
+        "sum" => "Sum",
+        "count" => "Count",
+        "countnums" or "countnum" => "Count Numbers",
+        "average" or "avg" => "Average",
+        "max" => "Max",
+        "min" => "Min",
+        "product" => "Product",
+        "stddev" or "std" => "StdDev",
+        "stddevp" or "stdp" => "StdDevp",
+        "var" or "variance" => "Var",
+        "varp" => "Varp",
+        _ => "Sum",
+    };
+
+    /// <summary>
+    /// R15-5: true when the current DataField name still matches the auto-
+    /// generated "<AggDisplay> of <sourceHeader>" form, so a Set aggregate
+    /// call is safe to rewrite it. Any name that does not end in " of
+    /// <sourceHeader>" is treated as user-provided and left alone.
+    /// </summary>
+    private static bool LooksLikeAutoDataFieldName(string name, string sourceHeader)
+    {
+        if (string.IsNullOrEmpty(name)) return true;
+        var suffix = " of " + sourceHeader;
+        if (!name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) return false;
+        var prefix = name.Substring(0, name.Length - suffix.Length);
+        return prefix is "Sum" or "Count" or "Count Numbers" or "Average" or "Max"
+            or "Min" or "Product" or "StdDev" or "StdDevp" or "Var" or "Varp"
+            or "Std Dev" or "Std Dev p";
+    }
 
     private static DataConsolidateFunctionValues ParseSubtotal(string func)
     {
