@@ -38,6 +38,36 @@ internal static partial class ChartHelper
         var label = parts.Length > 2 ? parts[2].Trim() : $"Ref ({refValue})";
         var dash = parts.Length > 3 ? parts[3].Trim() : "dash";
 
+        // Warn: percent-stacked value axis is 0-1 (displayed 0%-100%). A refValue > 1
+        // is almost always a mistake — user likely forgot to convert 50 → 0.5.
+        // Without this check, Excel silently stretches the val axis to fit (e.g. 5000%),
+        // producing a chart where the real bars are compressed to a thin sliver on the left.
+        if (refValue > 1.0 && IsPercentStackedChart(plotArea))
+        {
+            Console.Error.WriteLine(
+                $"Warning: referenceLine value {refValue.ToString("G", System.Globalization.CultureInfo.InvariantCulture)} "
+                + "on a percent-stacked chart. The value axis is 0-1 (0%-100%); "
+                + $"did you mean {(refValue / 100.0).ToString("G", System.Globalization.CultureInfo.InvariantCulture)}? "
+                + "Excel will auto-scale the axis to fit, compressing the real bars.");
+        }
+
+        // Warn: if spec has 4 parts, parts[2] parses as a number, and parts[3] is a
+        // recognized dash style, the user probably thought the format was
+        // value:color:width:dash (it isn't — there is no width field, line width is
+        // fixed at 1.5pt). Heuristic, not a hard error: a purely numeric label is
+        // legitimate if the user really wanted a number as the series label.
+        if (parts.Length == 4
+            && double.TryParse(parts[2].Trim(),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out _)
+            && IsKnownDashStyle(parts[3].Trim()))
+        {
+            Console.Error.WriteLine(
+                $"Warning: referenceLine label '{parts[2].Trim()}' looks like a number. "
+                + "Format is value:color:label:dash — there is no width field "
+                + "(line width is fixed at 1.5pt). If you intended a numeric label, this warning can be ignored.");
+        }
+
         // Find max data point count from existing series (after removing old ref lines)
         var existingSerCount = CountSeries(plotArea);
         var maxDataPoints = 0;
@@ -170,6 +200,38 @@ internal static partial class ChartHelper
         // If the LineChart is now empty (no series left), remove it entirely
         if (!lineChart.Elements<C.LineChartSeries>().Any())
             lineChart.Remove();
+    }
+
+    /// <summary>
+    /// Returns true if any chart in the plot area uses percent-stacked grouping.
+    /// BarChart/Bar3DChart use BarGrouping; LineChart/AreaChart use Grouping.
+    /// </summary>
+    private static bool IsPercentStackedChart(C.PlotArea plotArea)
+    {
+        foreach (var el in plotArea.Elements<OpenXmlCompositeElement>())
+        {
+            var barGrouping = el.GetFirstChild<C.BarGrouping>()?.Val?.Value;
+            if (barGrouping == C.BarGroupingValues.PercentStacked) return true;
+
+            var grouping = el.GetFirstChild<C.Grouping>()?.Val?.Value;
+            if (grouping == C.GroupingValues.PercentStacked) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Returns true if the given token matches a dash style accepted by ParseDashStyle
+    /// (see ChartHelper.Setter.cs). Used for the referenceLine numeric-label heuristic.
+    /// </summary>
+    private static bool IsKnownDashStyle(string token)
+    {
+        return token.ToLowerInvariant() switch
+        {
+            "solid" or "dot" or "sysdot" or "dash" or "sysdash"
+                or "dashdot" or "sysdash_dot"
+                or "longdash" or "longdashdot" or "longdashdotdot" => true,
+            _ => false
+        };
     }
 
     // ==================== Conditional Coloring ====================

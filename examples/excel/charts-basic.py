@@ -223,18 +223,22 @@ cli(f'add "{FILE}" "/2-Bar Charts" --type chart'
 #   --prop title="Regional Contribution %" \
 #   --prop dataRange=Sheet1!A1:E13 \
 #   --prop x=0 --prop y=19 --prop width=12 --prop height=18 \
-#   --prop referenceLine=50:FF0000:1.5:dash \
+#   --prop referenceLine=0.5:FF0000:Target:dash \
 #   --prop axisLine=333333:1:solid \
 #   --prop catAxisLine=333333:1:solid
 #
-# Features: barPercentStacked, referenceLine (value:color:width:dash), axisLine, catAxisLine
+# Note: on a barPercentStacked chart, the value axis is 0-1 (displayed as 0%-100%),
+# so a 50% reference line must be written as 0.5 — not 50.
+# referenceLine format is value:color:label:dash (no width field; line width is fixed at 1.5pt).
+#
+# Features: barPercentStacked, referenceLine (value:color:label:dash), axisLine, catAxisLine
 # --------------------------------------------------------------------------
 cli(f'add "{FILE}" "/2-Bar Charts" --type chart'
     f' --prop chartType=barPercentStacked'
     f' --prop title="Regional Contribution %"'
     f' --prop dataRange=Sheet1!A1:E13'
     f' --prop x=0 --prop y=19 --prop width=12 --prop height=18'
-    f' --prop referenceLine=50:FF0000:1.5:dash'
+    f' --prop referenceLine=0.5:FF0000:Target:dash'
     f' --prop axisLine=333333:1:solid'
     f' --prop catAxisLine=333333:1:solid')
 

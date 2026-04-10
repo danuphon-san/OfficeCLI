@@ -78,9 +78,11 @@ officecli add data.xlsx /Sheet --type chart \
   --prop gapwidth=50 --prop overlap=0
 
 # 100% stacked bar with reference line and axis lines
+# Note: value axis of a barPercentStacked chart is 0-1 (= 0%-100%), so a 50% line = 0.5
+# referenceLine format: value:color:label:dash (no width field; line is fixed at 1.5pt)
 officecli add data.xlsx /Sheet --type chart \
   --prop chartType=barPercentStacked \
-  --prop referenceLine=50:FF0000:1.5:dash \
+  --prop referenceLine=0.5:FF0000:Target:dash \
   --prop axisLine=333333:1:solid \
   --prop catAxisLine=333333:1:solid
 
