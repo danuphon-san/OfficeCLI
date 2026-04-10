@@ -101,12 +101,28 @@ internal class WatchServer : IDisposable
         return reader.ReadToEnd();
     }
 
+    // Idle timeout is configurable via OFFICECLI_WATCH_IDLE_SECONDS so
+    // tests can exercise the auto-shutdown path in seconds instead of
+    // minutes. Callers that pass an explicit TimeSpan (tests that need
+    // fixed values) bypass the env var. Valid range: 1s .. 24h.
+    private static TimeSpan ResolveIdleTimeout()
+    {
+        var raw = Environment.GetEnvironmentVariable("OFFICECLI_WATCH_IDLE_SECONDS");
+        if (!string.IsNullOrWhiteSpace(raw)
+            && int.TryParse(raw, out var secs)
+            && secs >= 1 && secs <= 86400)
+        {
+            return TimeSpan.FromSeconds(secs);
+        }
+        return TimeSpan.FromMinutes(5);
+    }
+
     public WatchServer(string filePath, int port, TimeSpan? idleTimeout = null, string? initialHtml = null)
     {
         _filePath = Path.GetFullPath(filePath);
         _pipeName = GetWatchPipeName(_filePath);
         _port = port;
-        _idleTimeout = idleTimeout ?? TimeSpan.FromMinutes(5);
+        _idleTimeout = idleTimeout ?? ResolveIdleTimeout();
         _tcpListener = new TcpListener(IPAddress.Loopback, _port);
         if (!string.IsNullOrEmpty(initialHtml))
             _currentHtml = initialHtml;
