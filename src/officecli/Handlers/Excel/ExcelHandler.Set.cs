@@ -972,12 +972,39 @@ public partial class ExcelHandler
 
             // If series sub-path, prefix all properties with series{N}. for ChartSetter
             var chartProps = properties;
-            if (chartMatch.Groups[2].Success)
+            var isSeriesPath = chartMatch.Groups[2].Success;
+            if (isSeriesPath)
             {
                 var seriesIdx = int.Parse(chartMatch.Groups[2].Value);
                 chartProps = new Dictionary<string, string>();
                 foreach (var (key, value) in properties)
                     chartProps[$"series{seriesIdx}.{key}"] = value;
+            }
+
+            // Chart-level position/size Set — TwoCellAnchor mutation. Skip
+            // for series sub-paths (series don't have their own position).
+            // Accepts `x`/`y`/`width`/`height` in the same units as the OLE
+            // object Set path and as chart Add.
+            //
+            // CONSISTENCY(chart-position-set): mirrors the PPTX path
+            // (PowerPointHandler.Set.cs chart case) — same prop keys, same
+            // value grammar — so users learn one vocabulary for all three
+            // document types. Excel differs only in that we mutate a
+            // TwoCellAnchor (row/col markers) instead of a GraphicFrame
+            // Transform, because xlsx charts are cell-anchored by design.
+            if (!isSeriesPath)
+            {
+                var positionUnsupported = ApplyChartPositionSet(
+                    drawingsPart, chartIdx, chartProps);
+                // Drop handled keys from chartProps so the downstream setter
+                // doesn't flag them as unsupported.
+                foreach (var k in new[] { "x", "y", "width", "height" })
+                {
+                    var matched = chartProps.Keys
+                        .FirstOrDefault(key => key.Equals(k, StringComparison.OrdinalIgnoreCase));
+                    if (matched != null && !positionUnsupported.Contains(matched))
+                        chartProps.Remove(matched);
+                }
             }
 
             if (chartInfo.StandardPart != null)

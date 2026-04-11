@@ -1458,6 +1458,127 @@ public partial class ExcelHandler
     }
 
     /// <summary>
+    /// Apply `x` / `y` / `width` / `height` to the N-th chart's
+    /// <see cref="XDR.TwoCellAnchor"/> in a drawings part. Accepts the same
+    /// value grammar as OLE objects and chart Add: integer cell counts, or
+    /// unit-qualified EMU strings ("6cm", "2in", "720pt", raw EMU).
+    ///
+    /// Returns any keys from the input dict that couldn't be applied (parse
+    /// failures, missing anchor, ...). Keys present but successfully applied
+    /// are NOT returned — the caller is expected to strip them before
+    /// forwarding to the chart content setter.
+    ///
+    /// CONSISTENCY(chart-position-set): mirrors the PPTX
+    /// PowerPointHandler.Set.cs chart path — same vocabulary, same units —
+    /// so one prop grammar covers chart position across all three document
+    /// types. The mutation mechanic differs because Excel charts are pinned
+    /// to cells via TwoCellAnchor.
+    /// </summary>
+    private static List<string> ApplyChartPositionSet(
+        DrawingsPart drawingsPart, int chartIdx, Dictionary<string, string> properties)
+    {
+        var unsupported = new List<string>();
+        if (drawingsPart.WorksheetDrawing == null) return unsupported;
+
+        // Find the N-th chart frame (same order as GetExcelCharts).
+        var chartFrames = drawingsPart.WorksheetDrawing
+            .Descendants<XDR.GraphicFrame>()
+            .Where(gf => gf.Descendants<C.ChartReference>().Any() || IsExtendedChartFrame(gf))
+            .ToList();
+        if (chartIdx < 1 || chartIdx > chartFrames.Count) return unsupported;
+        var gf = chartFrames[chartIdx - 1];
+        var anchor = gf.Parent as XDR.TwoCellAnchor;
+        if (anchor?.FromMarker == null || anchor.ToMarker == null)
+        {
+            foreach (var k in new[] { "x", "y", "width", "height" })
+                if (properties.ContainsKey(k)) unsupported.Add(k);
+            return unsupported;
+        }
+
+        var fromM = anchor.FromMarker;
+        var toM = anchor.ToMarker;
+
+        // ---- Position (x, y) → FromMarker cell indices ----
+        // `x` = column index (0-based), `y` = row index (0-based). Integer
+        // only — sub-cell offset is not supported here (matches chart Add).
+        if (properties.TryGetValue("x", out var xStr))
+        {
+            if (int.TryParse(xStr, out var newFromCol) && newFromCol >= 0)
+            {
+                var fromColChild = fromM.GetFirstChild<XDR.ColumnId>();
+                var oldFromCol = int.TryParse(fromColChild?.Text ?? "0", out var ofc) ? ofc : 0;
+                if (fromColChild != null) fromColChild.Text = newFromCol.ToString();
+                // Shift ToMarker column by the same delta to preserve width.
+                var toColChild = toM.GetFirstChild<XDR.ColumnId>();
+                if (toColChild != null && int.TryParse(toColChild.Text ?? "0", out var oldToCol))
+                    toColChild.Text = (oldToCol + (newFromCol - oldFromCol)).ToString();
+                // Reset fromCol offset to 0 (align to cell boundary).
+                var fromColOffChild = fromM.GetFirstChild<XDR.ColumnOffset>();
+                if (fromColOffChild != null) fromColOffChild.Text = "0";
+            }
+            else unsupported.Add("x");
+        }
+
+        if (properties.TryGetValue("y", out var yStr))
+        {
+            if (int.TryParse(yStr, out var newFromRow) && newFromRow >= 0)
+            {
+                var fromRowChild = fromM.GetFirstChild<XDR.RowId>();
+                var oldFromRow = int.TryParse(fromRowChild?.Text ?? "0", out var ofr) ? ofr : 0;
+                if (fromRowChild != null) fromRowChild.Text = newFromRow.ToString();
+                var toRowChild = toM.GetFirstChild<XDR.RowId>();
+                if (toRowChild != null && int.TryParse(toRowChild.Text ?? "0", out var oldToRow))
+                    toRowChild.Text = (oldToRow + (newFromRow - oldFromRow)).ToString();
+                var fromRowOffChild = fromM.GetFirstChild<XDR.RowOffset>();
+                if (fromRowOffChild != null) fromRowOffChild.Text = "0";
+            }
+            else unsupported.Add("y");
+        }
+
+        // ---- Dimensions (width, height) → rebuild ToMarker from FromMarker ----
+        // Reuses the OLE-object path's EMU math (EmuPerColApprox / EmuPerRowApprox
+        // approximation, sub-cell offset preserves precision).
+        if (properties.TryGetValue("width", out var wStr))
+        {
+            long emuTotal;
+            try { emuTotal = ParseAnchorDimensionEmu(wStr, "width"); }
+            catch { unsupported.Add("width"); emuTotal = -1; }
+            if (emuTotal >= 0)
+            {
+                int.TryParse(fromM.GetFirstChild<XDR.ColumnId>()?.Text ?? "0", out var fromCol);
+                long.TryParse(fromM.GetFirstChild<XDR.ColumnOffset>()?.Text ?? "0", out var fromColOff);
+                long wholeCols = emuTotal / EmuPerColApprox;
+                long remCols = emuTotal % EmuPerColApprox;
+                var toColChild = toM.GetFirstChild<XDR.ColumnId>();
+                if (toColChild != null) toColChild.Text = (fromCol + (int)wholeCols).ToString();
+                var toColOffChild = toM.GetFirstChild<XDR.ColumnOffset>();
+                if (toColOffChild != null) toColOffChild.Text = (fromColOff + remCols).ToString();
+            }
+        }
+
+        if (properties.TryGetValue("height", out var hStr))
+        {
+            long emuTotal;
+            try { emuTotal = ParseAnchorDimensionEmu(hStr, "height"); }
+            catch { unsupported.Add("height"); emuTotal = -1; }
+            if (emuTotal >= 0)
+            {
+                int.TryParse(fromM.GetFirstChild<XDR.RowId>()?.Text ?? "0", out var fromRow);
+                long.TryParse(fromM.GetFirstChild<XDR.RowOffset>()?.Text ?? "0", out var fromRowOff);
+                long wholeRows = emuTotal / EmuPerRowApprox;
+                long remRows = emuTotal % EmuPerRowApprox;
+                var toRowChild = toM.GetFirstChild<XDR.RowId>();
+                if (toRowChild != null) toRowChild.Text = (fromRow + (int)wholeRows).ToString();
+                var toRowOffChild = toM.GetFirstChild<XDR.RowOffset>();
+                if (toRowOffChild != null) toRowOffChild.Text = (fromRowOff + remRows).ToString();
+            }
+        }
+
+        drawingsPart.WorksheetDrawing.Save();
+        return unsupported;
+    }
+
+    /// <summary>
     /// Parse x, y (cell indices) + width, height (EMU) for OLE anchors that
     /// need sub-cell precision. See ParseAnchorDimensionEmu for width/height
     /// semantics.

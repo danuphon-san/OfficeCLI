@@ -178,7 +178,8 @@ public partial class WordHandler
 
             // If series sub-path, prefix all properties with series{N}. for ChartSetter
             var chartProps = properties;
-            if (chartMatch.Groups[2].Success)
+            var isSeriesPath = chartMatch.Groups[2].Success;
+            if (isSeriesPath)
             {
                 var seriesIdx = int.Parse(chartMatch.Groups[2].Value);
                 chartProps = new Dictionary<string, string>();
@@ -186,17 +187,39 @@ public partial class WordHandler
                     chartProps[$"series{seriesIdx}.{key}"] = value;
             }
 
+            // Chart-level position/size Set — mutate the hosting wp:inline's
+            // wp:extent. Word inline charts have no positional x/y (they
+            // flow in text), so only width/height are meaningful here.
+            //
+            // CONSISTENCY(chart-position-set): same vocabulary as Excel and
+            // PPTX. x/y are silently dropped (flagged as unsupported) since
+            // inline mode has no absolute position.
+            if (!isSeriesPath && chartInfo.Inline != null)
+            {
+                ApplyWordChartPositionSet(chartInfo.Inline, chartProps, unsupported);
+                // Drop ALL position keys (x/y/width/height) from chartProps
+                // after handling — unsupported ones were already reported by
+                // ApplyWordChartPositionSet. Forwarding them to ChartHelper
+                // would double-report them.
+                foreach (var k in new[] { "x", "y", "width", "height" })
+                {
+                    var matched = chartProps.Keys
+                        .FirstOrDefault(key => key.Equals(k, StringComparison.OrdinalIgnoreCase));
+                    if (matched != null) chartProps.Remove(matched);
+                }
+            }
+
             if (chartInfo.IsExtended)
             {
                 // cx:chart — delegates to ChartExBuilder.SetChartProperties.
                 // Same shared implementation as Excel/PPTX: title/axis/gridline
                 // styling, series fill, histogram binning, etc.
-                unsupported = Core.ChartExBuilder.SetChartProperties(
-                    chartInfo.ExtendedPart!, chartProps);
+                unsupported.AddRange(Core.ChartExBuilder.SetChartProperties(
+                    chartInfo.ExtendedPart!, chartProps));
             }
             else
             {
-                unsupported = Core.ChartHelper.SetChartProperties(chartInfo.StandardPart!, chartProps);
+                unsupported.AddRange(Core.ChartHelper.SetChartProperties(chartInfo.StandardPart!, chartProps));
             }
             _doc.MainDocumentPart?.Document?.Save();
             return unsupported;
