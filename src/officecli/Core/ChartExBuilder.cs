@@ -180,18 +180,58 @@ internal static class ChartExBuilder
             }
             case "histogram":
             {
+                // cx:layoutPr > cx:binning (empty for auto-bin; child cx:binCount
+                // OR cx:binSize for explicit bin count/width). `cx:aggregation`
+                // is for Pareto charts and causes Excel to render the whole
+                // dataset as a single bar.
+                //
+                // NOTE: the Open XML SDK models cx:binCount as a leaf text
+                // element (BinCountXsdunsignedInt → `<cx:binCount>5</cx:binCount>`),
+                // but real Excel writes it as an empty element with a `val`
+                // attribute (`<cx:binCount val="5"/>`). SDK's form is schema-
+                // valid per the generated type metadata but Excel rejects the
+                // whole file with "We found a problem with some content"
+                // and deletes the drawing. Same applies to cx:binSize. Work
+                // around by appending a raw OpenXmlUnknownElement carrying
+                // the correct form.
+                const string cxNs = "http://schemas.microsoft.com/office/drawing/2014/chartex";
                 var lp = new CX.SeriesLayoutProperties();
+                var binning = new CX.Binning();
+
+                // intervalClosed: "r" (default, bins are (a,b]) or "l" (bins are [a,b))
+                var intervalClosed = properties.GetValueOrDefault("intervalClosed") ?? "r";
+                binning.IntervalClosed = intervalClosed.ToLowerInvariant() switch
+                {
+                    "l" => CX.IntervalClosedSide.L,
+                    _   => CX.IntervalClosedSide.R,
+                };
+
+                // underflow / overflow: cut-off values for outlier bins
+                if (properties.TryGetValue("underflowBin", out var underflow))
+                    binning.Underflow = underflow;
+                if (properties.TryGetValue("overflowBin", out var overflow))
+                    binning.Overflow = overflow;
+
+                // binCount (explicit count) XOR binSize (explicit width). If
+                // both are given, binCount wins (it's the more common knob).
                 if (properties.TryGetValue("binCount", out var binCountStr) &&
                     uint.TryParse(binCountStr, out var binCount))
                 {
-                    var binning = new CX.Binning();
-                    binning.AppendChild(new CX.BinCountXsdunsignedInt(binCount.ToString()));
-                    lp.AppendChild(binning);
+                    var binCountEl = new OpenXmlUnknownElement("cx", "binCount", cxNs);
+                    binCountEl.SetAttribute(new OpenXmlAttribute("val", "", binCount.ToString()));
+                    binning.AppendChild(binCountEl);
                 }
-                else
+                else if (properties.TryGetValue("binSize", out var binSizeStr) &&
+                         double.TryParse(binSizeStr, System.Globalization.NumberStyles.Float,
+                             System.Globalization.CultureInfo.InvariantCulture, out var binSize))
                 {
-                    lp.AppendChild(new CX.Aggregation());
+                    var binSizeEl = new OpenXmlUnknownElement("cx", "binSize", cxNs);
+                    binSizeEl.SetAttribute(new OpenXmlAttribute("val", "",
+                        binSize.ToString("G", System.Globalization.CultureInfo.InvariantCulture)));
+                    binning.AppendChild(binSizeEl);
                 }
+
+                lp.AppendChild(binning);
                 return lp;
             }
             default:
