@@ -1377,10 +1377,12 @@ internal static partial class ChartHelper
                 case "gapdepth":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var bar3d = plotArea2?.GetFirstChild<C.Bar3DChart>();
-                    if (bar3d == null) { unsupported.Add(key); break; }
-                    bar3d.RemoveAllChildren<C.GapDepth>();
-                    bar3d.AppendChild(new C.GapDepth { Val = (ushort)ParseHelpers.SafeParseInt(value, "gapDepth") });
+                    var target3d = plotArea2?.GetFirstChild<C.Bar3DChart>() as OpenXmlCompositeElement
+                        ?? plotArea2?.GetFirstChild<C.Line3DChart>() as OpenXmlCompositeElement
+                        ?? plotArea2?.GetFirstChild<C.Area3DChart>() as OpenXmlCompositeElement;
+                    if (target3d == null) { unsupported.Add(key); break; }
+                    target3d.RemoveAllChildren<C.GapDepth>();
+                    target3d.AppendChild(new C.GapDepth { Val = (ushort)ParseHelpers.SafeParseInt(value, "gapDepth") });
                     break;
                 }
 
@@ -1416,7 +1418,7 @@ internal static partial class ChartHelper
                         var dl = new C.DropLines();
                         if (!value.Equals("true", StringComparison.OrdinalIgnoreCase))
                             dl.AppendChild(BuildLineShapeProperties(value));
-                        lc.AppendChild(dl);
+                        InsertLineChartChildInOrder(lc, dl);
                     }
                     break;
                 }
@@ -1432,7 +1434,7 @@ internal static partial class ChartHelper
                         var hl = new C.HighLowLines();
                         if (!value.Equals("true", StringComparison.OrdinalIgnoreCase))
                             hl.AppendChild(BuildLineShapeProperties(value));
-                        lc.AppendChild(hl);
+                        InsertLineChartChildInOrder(lc, hl);
                     }
                     break;
                 }
@@ -1443,13 +1445,42 @@ internal static partial class ChartHelper
                     var lc = plotArea2?.GetFirstChild<C.LineChart>();
                     if (lc == null) { unsupported.Add(key); break; }
                     lc.RemoveAllChildren<C.UpDownBars>();
-                    if (ParseHelpers.IsTruthy(value))
+                    if (value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                        || value.Equals("false", StringComparison.OrdinalIgnoreCase)) break;
+                    if (value.Contains(':') || (ParseHelpers.IsValidBooleanString(value) && ParseHelpers.IsTruthy(value)))
                     {
                         var udb = new C.UpDownBars();
-                        udb.AppendChild(new C.GapWidth { Val = 150 });
-                        udb.AppendChild(new C.UpBars());
-                        udb.AppendChild(new C.DownBars());
-                        lc.AppendChild(udb);
+                        ushort gapWidth = 150;
+                        string? upColor = null, downColor = null;
+                        if (value.Contains(':'))
+                        {
+                            var udbParts = value.Split(':');
+                            if (udbParts.Length >= 1 && ushort.TryParse(udbParts[0], out var gw)) gapWidth = gw;
+                            if (udbParts.Length >= 2 && !string.IsNullOrEmpty(udbParts[1])) upColor = udbParts[1];
+                            if (udbParts.Length >= 3 && !string.IsNullOrEmpty(udbParts[2])) downColor = udbParts[2];
+                        }
+                        udb.AppendChild(new C.GapWidth { Val = gapWidth });
+                        var upBars = new C.UpBars();
+                        if (upColor != null)
+                        {
+                            var upSpPr = new C.ChartShapeProperties();
+                            var upFill = new Drawing.SolidFill();
+                            upFill.AppendChild(BuildChartColorElement(upColor));
+                            upSpPr.AppendChild(upFill);
+                            upBars.AppendChild(upSpPr);
+                        }
+                        udb.AppendChild(upBars);
+                        var downBars = new C.DownBars();
+                        if (downColor != null)
+                        {
+                            var downSpPr = new C.ChartShapeProperties();
+                            var downFill = new Drawing.SolidFill();
+                            downFill.AppendChild(BuildChartColorElement(downColor));
+                            downSpPr.AppendChild(downFill);
+                            downBars.AppendChild(downSpPr);
+                        }
+                        udb.AppendChild(downBars);
+                        InsertLineChartChildInOrder(lc, udb);
                     }
                     break;
                 }
@@ -1821,6 +1852,7 @@ internal static partial class ChartHelper
             "dash" => C.MarkerStyleValues.Dash,
             "dot" => C.MarkerStyleValues.Dot,
             "none" => C.MarkerStyleValues.None,
+            "auto" => C.MarkerStyleValues.Auto,
             _ => C.MarkerStyleValues.Circle
         };
 

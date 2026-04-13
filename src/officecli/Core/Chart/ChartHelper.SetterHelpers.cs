@@ -652,17 +652,23 @@ internal static partial class ChartHelper
     /// </summary>
     internal static void InsertLineChartChildInOrder(C.LineChart lc, OpenXmlElement child)
     {
-        // smooth must come before axId elements
-        if (child.LocalName is "smooth" or "marker")
+        // CT_LineChart schema order: grouping, varyColors, ser*, dLbls?,
+        // dropLines?, hiLowLines?, upDownBars?, marker?, smooth?, extLst?, axId+
+        string[] insertBeforeNames = child.LocalName switch
         {
-            foreach (var sibling in lc.ChildElements)
+            "dropLines" => ["hiLowLines", "upDownBars", "marker", "smooth", "extLst", "axId"],
+            "hiLowLines" => ["upDownBars", "marker", "smooth", "extLst", "axId"],
+            "upDownBars" => ["marker", "smooth", "extLst", "axId"],
+            "marker" => ["smooth", "extLst", "axId"],
+            "smooth" => ["extLst", "axId"],
+            _ => ["extLst", "axId"]
+        };
+        foreach (var sibling in lc.ChildElements)
+        {
+            if (insertBeforeNames.Contains(sibling.LocalName))
             {
-                if (sibling.LocalName is "axId" or "extLst" ||
-                    (child.LocalName == "marker" && sibling.LocalName == "smooth"))
-                {
-                    lc.InsertBefore(child, sibling);
-                    return;
-                }
+                lc.InsertBefore(child, sibling);
+                return;
             }
         }
         lc.AppendChild(child);
