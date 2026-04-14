@@ -2084,6 +2084,7 @@ public partial class ExcelHandler
                         var cellRef = $"{IndexToColumnName(colIdx)}{row}";
                         var cell = FindOrCreateCell(sheetData, cellRef);
                         var cellUnsupported = ApplyCellProperties(cell, worksheet, cellProps);
+                        PruneEmptyCell(cell);
                         // Only add to unsupported once (first cell)
                         if (row == startRow && colIdx == startColIdx)
                             unsupported.AddRange(cellUnsupported);
