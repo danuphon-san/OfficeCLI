@@ -2173,6 +2173,14 @@ public partial class ExcelHandler
             if (tokens.Length > 1 && !desc && !tokens[1].Equals("asc", StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException($"Invalid sort direction '{tokens[1]}'. Expected 'asc' or 'desc'.");
             int keyColIdx = ColumnNameToIndex(colName);
+            // R11-1: distinguish "likely a header/name, not a column letter" from a
+            // genuine out-of-range column letter. Excel's max column is XFD (16384,
+            // 3 letters). Anything that parses past XFD with length >= 4 is almost
+            // certainly a column name like "Score" or "TotalAmount" — give a
+            // targeted error instead of a misleading "outside the range A:B".
+            if (keyColIdx > 16384 && colName.Length >= 4)
+                throw new ArgumentException(
+                    $"Invalid sort column '{tokens[0]}'. Column names are not supported; use column letters (A, B, AA, up to XFD).");
             // Key column must lie within the sort range, otherwise the sort is silently
             // a no-op and writes a malformed sortCondition ref.
             if (keyColIdx < col1 || keyColIdx > col2)
