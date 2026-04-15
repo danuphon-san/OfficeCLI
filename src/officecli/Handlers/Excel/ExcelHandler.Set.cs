@@ -2186,8 +2186,10 @@ public partial class ExcelHandler
         // CONSISTENCY(sort-scope): formula rejection only applies to cells INSIDE the sort
         // column range. A formula in a cell outside [col1..col2] is untouched by sort
         // (its row may be reordered, but the formula text and its refs stay intact).
-        // Helper: test whether a cell reference lies within the sort column range.
-        bool CellInRange(Cell c)
+        // Helper: test whether a cell's column lies within the sort column range.
+        // Name is column-specific: row containment is implied by caller (we iterate
+        // only rowsInRange).
+        bool CellColumnInSortRange(Cell c)
         {
             var cref = c.CellReference?.Value;
             if (cref == null) return false;
@@ -2200,7 +2202,7 @@ public partial class ExcelHandler
         // sort would corrupt the ref anchor.
         foreach (var r in rowsInRange)
             foreach (var c in r.Elements<Cell>())
-                if (CellInRange(c) && c.CellFormula?.FormulaType?.Value == CellFormulaValues.Shared)
+                if (CellColumnInSortRange(c) && c.CellFormula?.FormulaType?.Value == CellFormulaValues.Shared)
                     throw new InvalidOperationException(
                         "Cannot sort range containing shared formulas. Rewrite them as per-cell formulas first.");
 
@@ -2217,7 +2219,7 @@ public partial class ExcelHandler
         // shared-formula check above (per-row scan only).
         foreach (var r in rowsInRange)
             foreach (var c in r.Elements<Cell>())
-                if (CellInRange(c) && c.CellFormula != null)
+                if (CellColumnInSortRange(c) && c.CellFormula != null)
                     throw new InvalidOperationException(
                         $"Cannot sort range containing formulas (cell {c.CellReference?.Value}). " +
                         "Sort would rewrite cell references but leave formula text encoding the old row " +
@@ -2260,6 +2262,19 @@ public partial class ExcelHandler
         // output), so rely on RowIndex values rather than List position.
         var originalIndices = rowsInRange.Select(r => r.RowIndex!.Value).OrderBy(v => v).ToList();
 
+        // R4-1/2/3: capture old→new row mapping BEFORE mutating row indices so we can
+        // rewrite sidecar metadata refs (hyperlinks, comments, dataValidations) that
+        // encode absolute cell refs and would otherwise still point at the old rows.
+        // Key = old row index (from the row object as it existed pre-sort); Value = new
+        // row index it lands on post-sort.
+        var oldToNewRow = new Dictionary<uint, uint>(sortedRows.Count);
+        for (int i = 0; i < sortedRows.Count; i++)
+        {
+            var oldIdx = sortedRows[i].RowIndex!.Value;
+            var newIdx = originalIndices[i];
+            oldToNewRow[oldIdx] = newIdx;
+        }
+
         // Detach from SheetData, invalidate row-index cache
         foreach (var r in rowsInRange) r.Remove();
         InvalidateRowIndex(sd);
@@ -2278,6 +2293,15 @@ public partial class ExcelHandler
                 cell.CellReference = $"{cc}{newIdx}";
             }
         }
+
+        // R4-1/2/3: rewrite sidecar metadata refs that live outside <sheetData> but
+        // encode cell addresses. Only refs pointing into the sort rectangle are
+        // rewritten; refs outside are untouched. See CLAUDE.md "Consistency > Robustness"
+        // — same philosophy as formula rejection: we do not attempt to rewrite refs
+        // that cross the sort boundary (e.g. dataValidation sqref spanning A1:A100 when
+        // only A2:A5 sort) because that would require partial-region splitting; instead
+        // the cell-anchored model covers the common case and leaves other cases intact.
+        RewriteSidecarRefsAfterSort(worksheet, col1, row1, col2, row2, oldToNewRow);
 
         // Reinsert in sorted order, preserving rows outside the data range
         var beforeRow = sd.Elements<Row>().LastOrDefault(r => r.RowIndex?.Value < (uint)dataStartRow);
@@ -2326,6 +2350,105 @@ public partial class ExcelHandler
             anchor.InsertAfterSelf(ss);
         else
             ws.AppendChild(ss);
+    }
+
+    /// <summary>
+    /// R4-1/2/3: remap sidecar metadata cell refs after a sort. Rewrites any
+    /// hyperlink/comment/dataValidation reference that anchors on a single cell
+    /// inside the sort rectangle (col1..col2, row1..row2) using the old→new row
+    /// mapping. Refs outside the rectangle are left alone; multi-cell refs that
+    /// cross the sort boundary are also left alone (same scope-limited philosophy
+    /// as the formula-rejection path — see CONSISTENCY(sort-scope)). DataValidation
+    /// sqref may contain multiple space-separated tokens; each is processed
+    /// independently.
+    /// </summary>
+    private void RewriteSidecarRefsAfterSort(WorksheetPart worksheet,
+        int col1, int row1, int col2, int row2,
+        Dictionary<uint, uint> oldToNewRow)
+    {
+        var ws = GetSheet(worksheet);
+
+        // Helper: is a single cell ref (e.g. "A2") inside the sort rectangle?
+        bool CellInRect(string cref, out string col, out uint row)
+        {
+            col = ""; row = 0;
+            if (string.IsNullOrEmpty(cref)) return false;
+            if (!System.Text.RegularExpressions.Regex.IsMatch(cref, @"^[A-Za-z]+\d+$")) return false;
+            var parsed = ParseCellReference(cref);
+            col = parsed.Column;
+            row = (uint)parsed.Row;
+            int ci = ColumnNameToIndex(col);
+            return ci >= col1 && ci <= col2 && row >= (uint)row1 && row <= (uint)row2;
+        }
+
+        // ---- Hyperlinks ----
+        var hyperlinksEl = ws.GetFirstChild<Hyperlinks>();
+        if (hyperlinksEl != null)
+        {
+            foreach (var h in hyperlinksEl.Elements<Hyperlink>())
+            {
+                var href = h.Reference?.Value;
+                if (href == null) continue;
+                if (CellInRect(href, out var hc, out var hr) && oldToNewRow.TryGetValue(hr, out var newR))
+                {
+                    h.Reference = $"{hc.ToUpperInvariant()}{newR}";
+                }
+            }
+        }
+
+        // ---- Comments ----
+        var commentsPart = worksheet.WorksheetCommentsPart;
+        if (commentsPart?.Comments != null)
+        {
+            var commentList = commentsPart.Comments.GetFirstChild<CommentList>();
+            if (commentList != null)
+            {
+                bool changed = false;
+                foreach (var cmt in commentList.Elements<Comment>())
+                {
+                    var cref = cmt.Reference?.Value;
+                    if (cref == null) continue;
+                    if (CellInRect(cref, out var cc, out var cr) && oldToNewRow.TryGetValue(cr, out var newR))
+                    {
+                        cmt.Reference = $"{cc.ToUpperInvariant()}{newR}";
+                        changed = true;
+                    }
+                }
+                if (changed) commentsPart.Comments.Save();
+            }
+        }
+
+        // ---- DataValidations ----
+        var dvs = ws.GetFirstChild<DataValidations>();
+        if (dvs != null)
+        {
+            foreach (var dv in dvs.Elements<DataValidation>())
+            {
+                var sqref = dv.SequenceOfReferences;
+                if (sqref?.InnerText == null) continue;
+                // sqref is a space-separated list of ref tokens; each token may be
+                // a single cell (A2) or a range (A2:A5). Only single-cell tokens
+                // inside the sort rectangle are remapped; multi-cell ranges are
+                // left untouched (partial-rect rewrite would require splitting).
+                var tokens = sqref.InnerText.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                bool changed = false;
+                for (int i = 0; i < tokens.Length; i++)
+                {
+                    var tok = tokens[i];
+                    if (tok.Contains(':')) continue; // range token — skip
+                    if (CellInRect(tok, out var dc, out var dr) && oldToNewRow.TryGetValue(dr, out var newR))
+                    {
+                        tokens[i] = $"{dc.ToUpperInvariant()}{newR}";
+                        changed = true;
+                    }
+                }
+                if (changed)
+                {
+                    dv.SequenceOfReferences = new ListValue<StringValue>(
+                        tokens.Select(t => new StringValue(t)));
+                }
+            }
+        }
     }
 
     /// <summary>Raw cell value for sorting: resolves SharedString/InlineString, skips number formatting. Precise column-letter match (no prefix bug).</summary>
