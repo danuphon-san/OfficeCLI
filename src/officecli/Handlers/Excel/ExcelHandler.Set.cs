@@ -2239,21 +2239,25 @@ public partial class ExcelHandler
             if (desc) sc.Descending = true;
             ss.AppendChild(sc);
         }
-        // Honor OOXML CT_Worksheet schema order: sortState must come AFTER autoFilter
-        // when an autoFilter is present; otherwise it sits after sheetData. Placing it
-        // directly after sheetData when an autoFilter exists produces an out-of-order
-        // child list that strict validators reject.
-        var autoFilter = ws.GetFirstChild<AutoFilter>();
-        if (autoFilter != null)
-        {
-            autoFilter.InsertAfterSelf(ss);
-        }
+        // Honor OOXML CT_Worksheet schema order. Per ECMA-376 the child sequence that
+        // matters here is:
+        //   sheetData → sheetCalcPr → sheetProtection → protectedRanges → scenarios
+        //     → autoFilter → sortState → dataConsolidate → customSheetViews → mergeCells
+        //     → phoneticPr → conditionalFormatting → dataValidations → hyperlinks → ...
+        // So sortState must be inserted AFTER the latest present predecessor and BEFORE
+        // any later element (mergeCells, hyperlinks, conditionalFormatting, etc.). The
+        // previous fallback `sheetData.InsertAfterSelf` placed sortState before mergeCells
+        // which violates the schema and is rejected by strict validators.
+        var anchor = (OpenXmlElement?)ws.GetFirstChild<AutoFilter>()
+            ?? (OpenXmlElement?)ws.GetFirstChild<Scenarios>()
+            ?? (OpenXmlElement?)ws.GetFirstChild<ProtectedRanges>()
+            ?? (OpenXmlElement?)ws.GetFirstChild<SheetProtection>()
+            ?? (OpenXmlElement?)ws.GetFirstChild<SheetCalculationProperties>()
+            ?? (OpenXmlElement?)ws.GetFirstChild<SheetData>();
+        if (anchor != null)
+            anchor.InsertAfterSelf(ss);
         else
-        {
-            var sheetData = ws.GetFirstChild<SheetData>();
-            if (sheetData != null) sheetData.InsertAfterSelf(ss);
-            else ws.AppendChild(ss);
-        }
+            ws.AppendChild(ss);
     }
 
     /// <summary>Raw cell value for sorting: resolves SharedString/InlineString, skips number formatting. Precise column-letter match (no prefix bug).</summary>
