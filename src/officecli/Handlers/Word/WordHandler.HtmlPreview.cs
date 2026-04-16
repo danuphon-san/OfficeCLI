@@ -77,7 +77,8 @@ public partial class WordHandler
         sb.AppendLine("<style>");
         sb.AppendLine(GenerateWordCss(pgLayout, docDef));
         sb.AppendLine("</style>");
-        // Load document fonts: local files > local() > Google Fonts
+        // Load document fonts: @font-face with metric overrides for all fonts,
+        // Google Fonts only for non-system fonts.
         var docFonts = CollectDocumentFonts();
         if (docFonts.Count > 0)
         {
@@ -88,9 +89,19 @@ public partial class WordHandler
                 sb.Append(fontFaces);
                 sb.AppendLine("</style>");
             }
-            var families = string.Join("&", docFonts.Select(f =>
-                $"family={f.Replace(' ', '+')}:ital,wght@0,400;0,700;1,400;1,700"));
-            sb.AppendLine($"<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?{families}&display=swap\" onerror=\"this.remove()\">");
+            // Filter out system fonts for Google Fonts loading (they're already local)
+            var googleFonts = docFonts.Where(f =>
+                !f.Equals("Arial", StringComparison.OrdinalIgnoreCase)
+                && !f.Equals("Times New Roman", StringComparison.OrdinalIgnoreCase)
+                && !f.Equals("Tahoma", StringComparison.OrdinalIgnoreCase)
+                && !f.Equals("Courier New", StringComparison.OrdinalIgnoreCase)
+                && !f.StartsWith("Symbol") && !f.StartsWith("Wingding")).ToList();
+            if (googleFonts.Count > 0)
+            {
+                var families = string.Join("&", googleFonts.Select(f =>
+                    $"family={f.Replace(' ', '+')}:ital,wght@0,400;0,700;1,400;1,700"));
+                sb.AppendLine($"<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?{families}&display=swap\" onerror=\"this.remove()\">");
+            }
         }
         // KaTeX for math rendering (graceful degradation: shows raw LaTeX when offline)
         sb.AppendLine("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css\" onerror=\"this.remove()\">");
@@ -523,7 +534,7 @@ public partial class WordHandler
             if (nsp?.Line?.Value is string nlv && int.TryParse(nlv, out var nlvi) && nsp.LineRule?.InnerText is "auto" or null)
                 lineH = nlvi / 240.0;
         }
-        if (lineH == 0) lineH = 1.0; // Word default single-line spacing
+        if (lineH == 0) lineH = 1.0; // OOXML default single-line spacing
 
         // docGrid linePitch — controls CJK snap-to-grid line spacing (twips → pt)
         double gridLinePitchPt = 0;
@@ -595,12 +606,8 @@ public partial class WordHandler
         if (!string.IsNullOrEmpty(majFont)) fonts.Add(majFont);
         var minFont = theme?.MinorFont?.LatinFont?.Typeface?.Value;
         if (!string.IsNullOrEmpty(minFont)) fonts.Add(minFont);
-        // Remove generic/system fonts that won't be on Google Fonts
-        fonts.RemoveWhere(f => f.StartsWith("Symbol") || f.StartsWith("Wingding")
-            || f.Equals("Arial", StringComparison.OrdinalIgnoreCase)
-            || f.Equals("Times New Roman", StringComparison.OrdinalIgnoreCase)
-            || f.Equals("Tahoma", StringComparison.OrdinalIgnoreCase)
-            || f.Equals("Courier New", StringComparison.OrdinalIgnoreCase));
+        // Remove fonts that have no usable @font-face (symbols, wingdings)
+        fonts.RemoveWhere(f => f.StartsWith("Symbol") || f.StartsWith("Wingding"));
         return fonts;
     }
 
@@ -659,16 +666,23 @@ public partial class WordHandler
             _themeCjkFont = eaFont;
     }
 
-    /// <summary>Generate @font-face rules with local() for document fonts.</summary>
+    /// <summary>Generate @font-face rules with local() for document fonts.
+    /// Includes ascent-override/descent-override/line-gap-override to force
+    /// the browser to use OS/2 winAscent+winDescent metrics instead of
+    /// the browser's default (which may include hhea lineGap).</summary>
     private static string ResolveLocalFontFaces(HashSet<string> docFonts)
     {
         var sb = new StringBuilder();
         foreach (var font in docFonts)
         {
-            sb.AppendLine($"@font-face {{ font-family: '{font}'; src: local('{font}'); }}");
-            sb.AppendLine($"@font-face {{ font-family: '{font}'; font-weight: bold; src: local('{font} Bold'); }}");
-            sb.AppendLine($"@font-face {{ font-family: '{font}'; font-style: italic; src: local('{font} Italic'); }}");
-            sb.AppendLine($"@font-face {{ font-family: '{font}'; font-weight: bold; font-style: italic; src: local('{font} Bold Italic'); }}");
+            var (ascentPct, descentPct) = FontMetricsReader.GetAscentDescentOverride(font);
+            var overrides = ascentPct > 0
+                ? $" ascent-override: {ascentPct:0.##}%; descent-override: {descentPct:0.##}%; line-gap-override: 0%;"
+                : "";
+            sb.AppendLine($"@font-face {{ font-family: '{font}'; src: local('{font}');{overrides} }}");
+            sb.AppendLine($"@font-face {{ font-family: '{font}'; font-weight: bold; src: local('{font} Bold');{overrides} }}");
+            sb.AppendLine($"@font-face {{ font-family: '{font}'; font-style: italic; src: local('{font} Italic');{overrides} }}");
+            sb.AppendLine($"@font-face {{ font-family: '{font}'; font-weight: bold; font-style: italic; src: local('{font} Bold Italic');{overrides} }}");
         }
         return sb.ToString();
     }

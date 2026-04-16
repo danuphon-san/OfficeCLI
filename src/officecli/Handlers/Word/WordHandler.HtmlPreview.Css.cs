@@ -235,13 +235,51 @@ public partial class WordHandler
 
         if (spacing != null)
         {
+            // contextualSpacing: when enabled and adjacent paragraph has the same style,
+            // spaceBefore/spaceAfter between them is suppressed (set to zero).
+            var hasContextualSpacing = pProps.ContextualSpacing != null
+                || ResolveContextualSpacingFromStyle(styleId);
+            var prevPara = para.PreviousSibling<Paragraph>();
+            var nextPara = para.NextSibling<Paragraph>();
+            var prevStyleId = prevPara?.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+            var nextStyleId = nextPara?.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+            bool suppressBefore = hasContextualSpacing && prevPara != null
+                && (prevStyleId ?? "") == (styleId ?? "");
+            bool suppressAfter = hasContextualSpacing && nextPara != null
+                && (nextStyleId ?? "") == (styleId ?? "");
+
             // Before: try direct, then style fallback (before in twips, beforeLines in hundredths of a line)
             var beforeVal = pProps.SpacingBetweenLines?.Before?.Value
                             ?? styleSpacing?.Before?.Value;
             var beforeLinesVal = pProps.SpacingBetweenLines?.BeforeLines?.Value
                                  ?? styleSpacing?.BeforeLines?.Value;
-            if (beforeVal is string beforeTwips)
-                parts.Add($"{vSpacingPropBefore}:{Units.TwipsToPt(beforeTwips):0.##}pt");
+
+            // Word collapses adjacent spaceBefore/spaceAfter: max(prev.after, cur.before)
+            // instead of adding them. CSS flexbox doesn't collapse margins, so we subtract
+            // the overlap from spaceBefore when the previous sibling has spaceAfter.
+            double prevSpaceAfterPt = 0;
+            if (prevPara != null && !suppressBefore)
+            {
+                var prevPProps = prevPara.ParagraphProperties;
+                var prevSId = prevPProps?.ParagraphStyleId?.Val?.Value;
+                var prevStyleSpacing = ResolveSpacingFromStyle(prevSId);
+                var prevAfter = prevPProps?.SpacingBetweenLines?.After?.Value
+                                ?? prevStyleSpacing?.After?.Value;
+                if (prevAfter is string pa && int.TryParse(pa, out var paTwips))
+                    prevSpaceAfterPt = paTwips / 20.0;
+            }
+
+            if (suppressBefore)
+                parts.Add($"{vSpacingPropBefore}:0");
+            else if (beforeVal is string beforeTwips)
+            {
+                double beforePt = Units.TwipsToPt(beforeTwips);
+                // Collapse: effective spaceBefore = max(0, spaceBefore - prevSpaceAfter)
+                if (prevSpaceAfterPt > 0)
+                    beforePt = Math.Max(0, beforePt - prevSpaceAfterPt);
+                if (beforePt > 0)
+                    parts.Add($"{vSpacingPropBefore}:{beforePt:0.##}pt");
+            }
             else if (beforeLinesVal is int beforeLines)
                 parts.Add($"{vSpacingPropBefore}:{beforeLines / 100.0:0.##}em");
 
@@ -250,7 +288,9 @@ public partial class WordHandler
                            ?? styleSpacing?.After?.Value;
             var afterLinesVal = pProps.SpacingBetweenLines?.AfterLines?.Value
                                 ?? styleSpacing?.AfterLines?.Value;
-            if (afterVal is string afterTwips)
+            if (suppressAfter)
+                parts.Add($"{vSpacingPropAfter}:0");
+            else if (afterVal is string afterTwips)
                 parts.Add($"{vSpacingPropAfter}:{Units.TwipsToPt(afterTwips):0.##}pt");
             else if (afterLinesVal is int afterLines)
                 parts.Add($"{vSpacingPropAfter}:{afterLines / 100.0:0.##}em");
@@ -266,7 +306,7 @@ public partial class WordHandler
                 {
                     if (int.TryParse(lv, out var lvNum))
                     {
-                        // Correct for font metrics: Word uses (winAscent+winDescent)/UPM as base
+                        // Correct for font metrics ratio
                         var paraFont = ResolveParaFontForLineHeight(para);
                         var ratio = FontMetricsReader.GetRatio(paraFont);
                         parts.Add($"line-height:{lvNum / 240.0 * ratio:0.##}");
@@ -285,6 +325,40 @@ public partial class WordHandler
                 var ratio = FontMetricsReader.GetRatio(paraFont);
                 if (ratio > 1.01 || ratio < 0.99) // only if meaningfully different from 1.0
                     parts.Add($"line-height:{ratio:0.##}");
+            }
+
+        }
+
+        // docGrid snap: when type="lines" and paragraph doesn't opt out via snapToGrid=false,
+        // snap line-height to the nearest multiple of linePitch that fits the text.
+        {
+            var snapToGrid = pProps?.SnapToGrid?.Val?.Value ?? true;
+            if (snapToGrid)
+            {
+                var sectPr = _doc.MainDocumentPart?.Document?.Body?.GetFirstChild<SectionProperties>();
+                var dg = sectPr?.GetFirstChild<DocGrid>();
+                if ((dg?.Type?.Value == DocGridValues.Lines || dg?.Type?.Value == DocGridValues.LinesAndChars)
+                    && dg.LinePitch?.Value is int lp && lp > 0)
+                {
+                    double gridPitchPt = lp / 20.0;
+                    var gFont = ResolveParaFontForLineHeight(para);
+                    var gRatio = FontMetricsReader.GetRatio(gFont);
+                    double gSizePt = 0;
+                    var gFirstRun = para.Elements<Run>().FirstOrDefault(r =>
+                        r.ChildElements.Any(c => c is Text t && !string.IsNullOrEmpty(t.Text)));
+                    if (gFirstRun != null)
+                    {
+                        var grProps = ResolveEffectiveRunProperties(gFirstRun, para);
+                        if (grProps.FontSize?.Val?.Value is string gsz && int.TryParse(gsz, out var ghp))
+                            gSizePt = ghp / 2.0;
+                    }
+                    if (gSizePt <= 0) gSizePt = 12.0;
+
+                    double fontHeightPt = gSizePt * gRatio;
+                    double snappedPt = Math.Ceiling(fontHeightPt / gridPitchPt) * gridPitchPt;
+                    parts.RemoveAll(p => p.StartsWith("line-height"));
+                    parts.Add($"line-height:{snappedPt:0.##}pt");
+                }
             }
         }
 
@@ -468,6 +542,28 @@ public partial class WordHandler
             currentStyleId = style.BasedOn?.Val?.Value;
         }
         return null;
+    }
+
+    /// <summary>Resolve contextualSpacing from the style chain.</summary>
+    private bool ResolveContextualSpacingFromStyle(string? styleId)
+    {
+        if (styleId == null)
+        {
+            var defaultStyle = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
+                ?.Elements<Style>().FirstOrDefault(s => s.Type?.Value == StyleValues.Paragraph && s.Default?.Value == true);
+            return defaultStyle?.StyleParagraphProperties?.ContextualSpacing != null;
+        }
+        var visited = new HashSet<string>();
+        var currentStyleId = styleId;
+        while (currentStyleId != null && visited.Add(currentStyleId))
+        {
+            var style = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
+                ?.Elements<Style>().FirstOrDefault(s => s.StyleId?.Value == currentStyleId);
+            if (style == null) break;
+            if (style.StyleParagraphProperties?.ContextualSpacing != null) return true;
+            currentStyleId = style.BasedOn?.Val?.Value;
+        }
+        return false;
     }
 
     /// <summary>
@@ -1038,8 +1134,7 @@ public partial class WordHandler
                 parts.Add($"width:{w / 50.0:0.#}%");
         }
 
-        // Padding — add vertical compensation for CSS vs Word rendering difference
-        // (CSS line-height:1 clips glyph ascenders; Word's layout engine doesn't)
+        // Padding — add vertical compensation for CSS line-height:1 clipping glyph ascenders
         const double CellPadVComp = 3.0; // pt
         var margins = tcPr?.TableCellMargin;
         {
@@ -1338,7 +1433,7 @@ public partial class WordHandler
             padding-bottom: 0.3em; }}
         .doc-footer {{ position: absolute; bottom: {pg.FooterDistancePt:0.#}pt; left: {mL}; right: {mR};
             padding-top: 0.3em; }}
-        h1, h2, h3, h4, h5, h6 {{ line-height: normal; }}
+        h1, h2, h3, h4, h5, h6 {{ line-height: {dd.LineHeight * FontMetricsReader.GetRatio(dd.Font):0.##}; }}
         p {{ margin: 0; margin-bottom: {(dd.SpaceAfterPt > 0 ? $"{dd.SpaceAfterPt:0.##}pt" : "0")}; line-height: {dd.LineHeight * FontMetricsReader.GetRatio(dd.Font):0.##}; text-align: {dd.DefaultAlign};{(dd.DefaultAlign == "justify" ? " text-justify: inter-character;" : "")} text-autospace: ideograph-alpha ideograph-numeric; }}
         p.empty {{ margin: 0; min-height: 1em; }}
         a {{ color: #2B579A; }} a:hover {{ color: #1a3c6e; }}
