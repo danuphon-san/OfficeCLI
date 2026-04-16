@@ -188,7 +188,20 @@ public partial class WordHandler
         var blip = drawing.Descendants<A.Blip>().FirstOrDefault();
         if (blip?.Embed?.Value == null) return;
 
-        var dataUri = LoadImageAsDataUri(blip.Embed.Value);
+        // Prefer the SVG extension rel if present (Office 2019+ keeps a PNG
+        // raster in Embed plus an SVG via a:extLst/asvg:svgBlip). PNG fallback
+        // is often a 1×1 transparent pixel that renders as a blank, so SVG
+        // wins for modern documents that embed vector art.
+        string blipRelId = blip.Embed.Value;
+        var svgBlip = blip.Descendants().FirstOrDefault(e => e.LocalName == "svgBlip");
+        if (svgBlip != null)
+        {
+            var svgRel = svgBlip.GetAttributes()
+                .FirstOrDefault(a => a.LocalName == "embed" || a.LocalName == "link").Value;
+            if (!string.IsNullOrEmpty(svgRel))
+                blipRelId = svgRel;
+        }
+        var dataUri = LoadImageAsDataUri(blipRelId);
         if (dataUri == null) return;
 
         try
