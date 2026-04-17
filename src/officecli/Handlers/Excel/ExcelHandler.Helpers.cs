@@ -110,8 +110,13 @@ public partial class ExcelHandler
         if (type == DataValidationValues.List)
         {
             // list: wrap bare "a,b,c" in quotes; leave cell/range refs and
-            // already-quoted literals alone.
-            if (value.StartsWith("\"") || value.StartsWith("=") || value.Contains("!") || value.Contains(":"))
+            // already-quoted literals alone. V1: a leading `=` signals a
+            // formula-ref (e.g. `=VOpts`, `=$Z$1:$Z$5`) — strip the `=`
+            // (OOXML `<x:formula1>` expects the body without one) and
+            // pass through without quoting.
+            if (value.StartsWith("="))
+                return value.Substring(1);
+            if (value.StartsWith("\"") || value.Contains("!") || value.Contains(":"))
                 return value;
             if (value.Contains(','))
                 return $"\"{value}\"";
@@ -270,6 +275,52 @@ public partial class ExcelHandler
                 if (rule.Priority?.HasValue == true && rule.Priority.Value > max)
                     max = rule.Priority.Value;
         return max + 1;
+    }
+
+    // T6 — built-in Excel table style names. Unknown names are rejected at
+    // Add time rather than silently passed through to Excel.
+    private static readonly HashSet<string> _builtInTableStyles = BuildBuiltInTableStyles();
+    private static HashSet<string> BuildBuiltInTableStyles()
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var tier in new[] { "Light", "Medium", "Dark" })
+            for (int i = 1; i <= 28; i++)
+                set.Add($"TableStyle{tier}{i}");
+        // Pivot styles — users may apply a pivot style to a plain table.
+        foreach (var tier in new[] { "Light", "Medium", "Dark" })
+            for (int i = 1; i <= 28; i++)
+                set.Add($"PivotStyle{tier}{i}");
+        set.Add("TableStyleNone");
+        return set;
+    }
+
+    internal void ValidateTableStyleName(string? styleName)
+    {
+        if (string.IsNullOrEmpty(styleName)) return;
+        if (_builtInTableStyles.Contains(styleName)) return;
+        // Workbook-level customStyles live under <x:tableStyles> on the stylesheet.
+        var styles = _doc.WorkbookPart?.WorkbookStylesPart?.Stylesheet;
+        var tableStyles = styles?.GetFirstChild<TableStyles>();
+        if (tableStyles != null)
+        {
+            foreach (var ts in tableStyles.Elements<TableStyle>())
+                if (ts.Name?.Value == styleName) return;
+        }
+        throw new ArgumentException(
+            $"Unknown table style: '{styleName}'. Use a built-in name like " +
+            $"'TableStyleMedium2', or register a custom style on the workbook first.");
+    }
+
+    /// <summary>
+    /// CF2: stamp the stopIfTrue attribute onto a CF rule when the user
+    /// passed `stopIfTrue=true`. Centralized so every `add cf` branch
+    /// (databar / colorscale / iconset / formulacf / cellIs / topN / ...)
+    /// honors the same flag.
+    /// </summary>
+    internal static void ApplyStopIfTrue(ConditionalFormattingRule rule, Dictionary<string, string> properties)
+    {
+        if (properties.TryGetValue("stopIfTrue", out var v) && ParseHelpers.IsTruthy(v))
+            rule.StopIfTrue = true;
     }
 
     /// <summary>
