@@ -322,8 +322,12 @@ public partial class WordHandler
                 {
                     if (el.LocalName == "oMathPara" || el is M.Paragraph)
                         mathParas.Add(el);
-                    else if (el is Paragraph wp)
+                    else if (el is Paragraph wp && IsOMathParaWrapperParagraph(wp))
                     {
+                        // Only pure-wrapper paragraphs (pPr + single oMathPara child)
+                        // — otherwise /body/p[N] and /body/oMathPara[M] would both
+                        // address the same paragraph (mixed prose + inline math),
+                        // causing Get/Set/Remove to diverge by callsite.
                         var inner = wp.ChildElements.FirstOrDefault(c => c.LocalName == "oMathPara" || c is M.Paragraph);
                         if (inner != null) mathParas.Add(inner);
                     }
