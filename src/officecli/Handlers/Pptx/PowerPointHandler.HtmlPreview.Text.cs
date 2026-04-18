@@ -230,10 +230,8 @@ public partial class PowerPointHandler
             // Underline
             if (rp.Underline?.HasValue == true && rp.Underline.Value != Drawing.TextUnderlineValues.None)
             {
-                // CONSISTENCY(underline-variants): only `dbl` needs an explicit style —
-                // all other OOXML variants (wavy/dotted/dash/heavy/...) still collapse
-                // to plain underline here. Deferred; expand this switch in one pass.
-                if (rp.Underline.Value == Drawing.TextUnderlineValues.Double)
+                var u = rp.Underline.Value;
+                if (u == Drawing.TextUnderlineValues.Double)
                 {
                     // CONSISTENCY(underline-variants): Chromium renders
                     // `text-decoration:underline double` visually identical to
@@ -248,13 +246,81 @@ public partial class PowerPointHandler
                     styles.Add("background-repeat:no-repeat");
                     styles.Add("padding-bottom:7px");
                 }
+                else if (u == Drawing.TextUnderlineValues.Wavy)
+                {
+                    styles.Add("text-decoration:underline wavy");
+                }
+                else if (u == Drawing.TextUnderlineValues.WavyHeavy)
+                {
+                    styles.Add("text-decoration:underline wavy");
+                    styles.Add("text-decoration-thickness:2px");
+                }
+                else if (u == Drawing.TextUnderlineValues.WavyDouble)
+                {
+                    // best-effort: CSS has no wavy+double; emit wavy thicker.
+                    styles.Add("text-decoration:underline wavy");
+                    styles.Add("text-decoration-thickness:2px");
+                }
+                else if (u == Drawing.TextUnderlineValues.Dotted)
+                {
+                    styles.Add("text-decoration:underline dotted");
+                }
+                else if (u == Drawing.TextUnderlineValues.HeavyDotted)
+                {
+                    styles.Add("text-decoration:underline dotted");
+                    styles.Add("text-decoration-thickness:2px");
+                }
+                else if (u == Drawing.TextUnderlineValues.Dash
+                    || u == Drawing.TextUnderlineValues.DashLong)
+                {
+                    styles.Add("text-decoration:underline dashed");
+                }
+                else if (u == Drawing.TextUnderlineValues.DashHeavy
+                    || u == Drawing.TextUnderlineValues.DashLongHeavy
+                    || u == Drawing.TextUnderlineValues.DotDashHeavy
+                    || u == Drawing.TextUnderlineValues.DotDotDashHeavy)
+                {
+                    styles.Add("text-decoration:underline dashed");
+                    styles.Add("text-decoration-thickness:2px");
+                }
+                else if (u == Drawing.TextUnderlineValues.DotDash
+                    || u == Drawing.TextUnderlineValues.DotDotDash)
+                {
+                    // TODO CONSISTENCY(underline-variants): CSS has no dot-dash
+                    // pattern; approximate with dashed.
+                    styles.Add("text-decoration:underline dashed");
+                }
+                else if (u == Drawing.TextUnderlineValues.Heavy)
+                {
+                    styles.Add("text-decoration:underline solid");
+                    styles.Add("text-decoration-thickness:2px");
+                }
                 else
+                {
+                    // TODO CONSISTENCY(underline-variants): exotic combos
+                    // (Words, HeavyWords, etc.) fall back to plain underline.
                     styles.Add("text-decoration:underline");
+                }
             }
 
             // Strikethrough
             if (rp.Strike?.HasValue == true && rp.Strike.Value != Drawing.TextStrikeValues.NoStrike)
-                styles.Add("text-decoration:line-through");
+            {
+                if (rp.Strike.Value == Drawing.TextStrikeValues.DoubleStrike)
+                {
+                    // CONSISTENCY(underline-variants): like `text-decoration:underline
+                    // double`, `line-through double` may render visually identical
+                    // to single at typical font sizes in Chromium. Unlike underline
+                    // we don't polyfill: line-through sits through the glyph, so
+                    // a background-image trick would either be occluded or misplaced.
+                    // Known limitation; kept for forward-compat once engines improve.
+                    styles.Add("text-decoration:line-through double");
+                }
+                else
+                {
+                    styles.Add("text-decoration:line-through");
+                }
+            }
 
             // Color
             var solidFill = rp.GetFirstChild<Drawing.SolidFill>();
