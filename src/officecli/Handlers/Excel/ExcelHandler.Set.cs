@@ -873,18 +873,36 @@ public partial class ExcelHandler
                 ?? throw new ArgumentException($"Comment [{cmtIndex}] not found");
 
             var cmtUnsupported = new List<string>();
+            // CONSISTENCY(xlsx/comment-font): C8 — font.* props on Set rewrite
+            // the single <x:r><x:rPr>, reusing BuildCommentRunProperties. When
+            // `text` and `font.*` appear together, text wins the run payload
+            // and font.* supplies the rPr. When only font.* appears (no text),
+            // preserve the existing run text and just rebuild rPr.
+            string? newCmtText = properties.TryGetValue("text", out var tVal) ? tVal : null;
+            bool hasFontProp = properties.Keys.Any(k =>
+                k.StartsWith("font.", StringComparison.OrdinalIgnoreCase));
+            if (newCmtText != null || hasFontProp)
+            {
+                string runText = newCmtText
+                    ?? string.Concat(cmtElement.CommentText?.Elements<Run>()
+                        .SelectMany(r => r.Elements<Text>()).Select(t => t.Text)
+                        ?? Array.Empty<string>());
+                cmtElement.CommentText = new CommentText(
+                    new Run(
+                        BuildCommentRunProperties(properties),
+                        new Text(runText) { Space = SpaceProcessingModeValues.Preserve }
+                    )
+                );
+            }
             foreach (var (key, value) in properties)
             {
                 switch (key.ToLowerInvariant())
                 {
                     case "text":
-                        cmtElement.CommentText = new CommentText(
-                            new Run(
-                                new RunProperties(new FontSize { Val = 9 }, new Color { Indexed = 81 },
-                                    new RunFont { Val = "Tahoma" }),
-                                new Text(value) { Space = SpaceProcessingModeValues.Preserve }
-                            )
-                        );
+                        // Already applied above.
+                        break;
+                    case var k when k.StartsWith("font."):
+                        // Already applied above.
                         break;
                     case "ref":
                         // Update cell reference (like POI's XSSFComment.setAddress)

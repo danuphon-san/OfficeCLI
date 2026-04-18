@@ -526,8 +526,7 @@ public partial class ExcelHandler
                 var cmtNormalized = (cmtText ?? "").Replace("\r\n", "\n").Replace("\\n", "\n");
                 comment.CommentText = new CommentText(
                     new Run(
-                        new RunProperties(new FontSize { Val = 9 }, new Color { Indexed = 81 },
-                            new RunFont { Val = "Tahoma" }),
+                        BuildCommentRunProperties(properties),
                         new Text(cmtNormalized) { Space = SpaceProcessingModeValues.Preserve }
                     )
                 );

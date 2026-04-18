@@ -1445,6 +1445,54 @@ public partial class ExcelHandler
     private static bool IsTruthy(string? value) =>
         ParseHelpers.IsTruthy(value);
 
+    // CONSISTENCY(xlsx/comment-font): C8 — build the <x:rPr> for comment runs.
+    // When no font.* properties are supplied, keep the legacy Tahoma 9 /
+    // indexed-81 default for back-compat. When any font.* is present, honor
+    // them and fall back to the defaults only for unspecified facets.
+    // Input vocabulary mirrors the cell-level font handling: font.bold,
+    // font.italic, font.underline (single|double), font.size (pt-qualified
+    // or bare), font.color (#FF0000 / FF0000 / rgb() / named), font.name.
+    internal static RunProperties BuildCommentRunProperties(Dictionary<string, string> properties)
+    {
+        bool hasAnyFont = properties.Keys.Any(k =>
+            k.StartsWith("font.", StringComparison.OrdinalIgnoreCase));
+        if (!hasAnyFont)
+        {
+            return new RunProperties(
+                new FontSize { Val = 9 },
+                new Color { Indexed = 81 },
+                new RunFont { Val = "Tahoma" });
+        }
+
+        var rPr = new RunProperties();
+        if (properties.TryGetValue("font.bold", out var fb) && IsTruthy(fb))
+            rPr.AppendChild(new Bold());
+        if (properties.TryGetValue("font.italic", out var fi) && IsTruthy(fi))
+            rPr.AppendChild(new Italic());
+        if (properties.TryGetValue("font.underline", out var fu) && !string.IsNullOrEmpty(fu)
+            && !string.Equals(fu, "none", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(fu, "false", StringComparison.OrdinalIgnoreCase))
+        {
+            var uVal = string.Equals(fu, "double", StringComparison.OrdinalIgnoreCase)
+                ? UnderlineValues.Double : UnderlineValues.Single;
+            rPr.AppendChild(new Underline { Val = uVal });
+        }
+        // Size default 9pt
+        var sizePt = properties.TryGetValue("font.size", out var fs)
+            ? ParseHelpers.ParseFontSize(fs) : 9.0;
+        rPr.AppendChild(new FontSize { Val = sizePt });
+        // Color: explicit overrides default indexed=81
+        if (properties.TryGetValue("font.color", out var fc) && !string.IsNullOrWhiteSpace(fc))
+            rPr.AppendChild(new Color { Rgb = ParseHelpers.NormalizeArgbColor(fc) });
+        else
+            rPr.AppendChild(new Color { Indexed = 81 });
+        // Name default Tahoma
+        var fontName = properties.TryGetValue("font.name", out var fn) && !string.IsNullOrWhiteSpace(fn)
+            ? fn : "Tahoma";
+        rPr.AppendChild(new RunFont { Val = fontName });
+        return rPr;
+    }
+
     private static bool IsValidBooleanString(string? value) =>
         ParseHelpers.IsValidBooleanString(value);
 
@@ -1550,6 +1598,29 @@ public partial class ExcelHandler
         node.Format["ref"] = reference;
         node.Format["author"] = authorName;
         node.Format["anchoredTo"] = $"/{sheetName}/{reference}";
+
+        // CONSISTENCY(xlsx/comment-font): C8 — surface font.* from first run's
+        // rPr so Query/Get round-trips the Add-time formatting. Only report
+        // non-default facets so Tahoma-9-indexed-81 comments stay unadorned.
+        var firstRun = comment.CommentText?.Elements<Run>().FirstOrDefault();
+        var rProps = firstRun?.RunProperties;
+        if (rProps != null)
+        {
+            if (rProps.Elements<Bold>().Any()) node.Format["font.bold"] = true;
+            if (rProps.Elements<Italic>().Any()) node.Format["font.italic"] = true;
+            var u = rProps.Elements<Underline>().FirstOrDefault();
+            if (u != null)
+                node.Format["font.underline"] = u.Val?.InnerText == "double" ? "double" : "single";
+            var clr = rProps.Elements<Color>().FirstOrDefault();
+            if (clr?.Rgb?.HasValue == true)
+                node.Format["font.color"] = ParseHelpers.FormatHexColor(clr.Rgb.Value);
+            var sz = rProps.Elements<FontSize>().FirstOrDefault();
+            if (sz?.Val?.HasValue == true && sz.Val.Value != 9.0)
+                node.Format["font.size"] = $"{sz.Val.Value:0.##}pt";
+            var rf = rProps.Elements<RunFont>().FirstOrDefault();
+            if (rf?.Val?.HasValue == true && rf.Val.Value != "Tahoma")
+                node.Format["font.name"] = rf.Val.Value;
+        }
 
         return node;
     }
