@@ -1928,8 +1928,13 @@ public partial class WordHandler
             return fallbackHtml;
         var sectHasTitlePg = sectionIdx >= 0 && sectionIdx < sections.Count
             && sections[sectionIdx].GetFirstChild<TitlePage>() != null;
-        if (isFirstPageOfSection && sectHasTitlePg && bundle.First != null)
-            return bundle.First;
+        // BUG-R22-01: when titlePg is set on the section, the first page of
+        // the section uses strictly the "first" variant. If no first-type
+        // reference is defined (bundle.First == null), Word renders a blank
+        // header/footer on page 1 — do NOT fall through to Default, which
+        // would show the wrong content.
+        if (isFirstPageOfSection && sectHasTitlePg)
+            return bundle.First ?? string.Empty;
         if (evenAndOddGlobal && pageIsEven && bundle.Even != null)
             return bundle.Even;
         return bundle.Default ?? fallbackHtml;
