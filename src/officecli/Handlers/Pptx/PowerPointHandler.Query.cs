@@ -341,85 +341,10 @@ public partial class PowerPointHandler
             var (animSlidePart, animShape) = ResolveShape(sIdx, shIdx);
             var animShapePathSeg = BuildElementPathSegment("shape", animShape, shIdx);
 
+            var effectCTns = EnumerateShapeAnimationCTns(animSlidePart, animShape);
             var animNode = new DocumentNode { Path = $"/slide[{sIdx}]/{animShapePathSeg}/animation[{aIdx}]", Type = "animation" };
-
-            // Read animation info from timing tree
-            var shapeId = animShape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
-            if (shapeId != null)
-            {
-                var timing = GetSlide(animSlidePart).GetFirstChild<Timing>();
-                if (timing != null)
-                {
-                    var shapeIdStr = shapeId.Value.ToString();
-                    // Find all effect CTns for this shape
-                    var effectCTns = timing.Descendants<CommonTimeNode>()
-                        .Where(ctn => ctn.PresetClass != null && ctn.PresetId != null &&
-                               ctn.GetAttributes().All(a => a.LocalName != "presetClass" || a.Value != "motion") &&
-                               ctn.Descendants<ShapeTarget>().Any(st => st.ShapeId?.Value == shapeIdStr))
-                        .ToList();
-
-                    if (aIdx >= 1 && aIdx <= effectCTns.Count)
-                    {
-                        var effectCTn = effectCTns[aIdx - 1];
-                        var presetId = effectCTn.PresetId?.Value ?? 0;
-                        var clsVal = effectCTn.PresetClass?.Value;
-                        var cls = clsVal == TimeNodePresetClassValues.Exit ? "exit"
-                                : clsVal == TimeNodePresetClassValues.Emphasis ? "emphasis"
-                                : "entrance";
-
-                        var animEffect = effectCTn.Descendants<AnimateEffect>().FirstOrDefault();
-                        var filter = animEffect?.Filter?.Value ?? "";
-
-                        var effectName = filter switch
-                        {
-                            "fly" => "fly",
-                            "fade" => "fade",
-                            "zoom" => "zoom",
-                            "" when presetId == 1 => "appear",
-                            "" when presetId == 24 => "bounce",
-                            _ => presetId switch
-                            {
-                                1 => "appear", 2 => "fly", 10 => "fade",
-                                21 => "zoom", 24 => "bounce", _ => "unknown"
-                            }
-                        };
-
-                        animNode.Format["effect"] = effectName;
-                        animNode.Format["class"] = cls;
-                        animNode.Format["presetId"] = presetId;
-
-                        var dur = 500;
-                        if (int.TryParse(animEffect?.CommonBehavior?.CommonTimeNode?.Duration, out var dd)) dur = dd;
-                        animNode.Format["duration"] = dur;
-
-                        // Easing (stored as 0-100000 on effectCTn)
-                        if (effectCTn.Acceleration?.HasValue == true && effectCTn.Acceleration.Value > 0)
-                            animNode.Format["easein"] = (int)(effectCTn.Acceleration.Value / 1000);
-                        if (effectCTn.Deceleration?.HasValue == true && effectCTn.Deceleration.Value > 0)
-                            animNode.Format["easeout"] = (int)(effectCTn.Deceleration.Value / 1000);
-
-                        // Delay (stored on midCTn start condition)
-                        // Walk up from effectCTn to find the wrapping midCTn that holds the delay.
-                        // The nesting depth can vary: effectCTn > ParallelTimeNode > ChildTimeNodeList > midCTn
-                        CommonTimeNode? midCTn = null;
-                        var cur = effectCTn.Parent;
-                        for (int walkDepth = 0; walkDepth < 5 && cur != null; walkDepth++)
-                        {
-                            if (cur is CommonTimeNode candidate && candidate != effectCTn
-                                && candidate.PresetId == null) // midCTn has no presetId
-                            {
-                                midCTn = candidate;
-                                break;
-                            }
-                            cur = cur.Parent;
-                        }
-                        var midDelayVal = midCTn?.StartConditionList?.GetFirstChild<Condition>()?.Delay?.Value;
-                        if (midDelayVal != null && midDelayVal != "0"
-                            && int.TryParse(midDelayVal, out var dMs) && dMs > 0)
-                            animNode.Format["delay"] = dMs;
-                    }
-                }
-            }
+            if (aIdx >= 1 && aIdx <= effectCTns.Count)
+                PopulateAnimationNode(animNode, effectCTns[aIdx - 1]);
             return animNode;
         }
 
@@ -909,6 +834,7 @@ public partial class PowerPointHandler
                 or "media" or "image"
                 // CONSISTENCY(ole-alias): "oleobject" mirrors Add's case switch
                 or "ole" or "oleobject" or "object" or "embed"
+                or "animation" or "animate"
                 or "tc" or "cell" or "tr" or "row";
         if (!isKnownType)
         {
@@ -1055,6 +981,42 @@ public partial class PowerPointHandler
                     Type = "notes",
                     Text = notesText
                 });
+            }
+            return results;
+        }
+
+        // Animation query: /slide[N]?/shape[M]?/animation (+ optional [attr=val] filter)
+        // Enumerates every entrance/exit/emphasis effect on every shape across all slides.
+        // Motion-path animations are excluded (handled separately).
+        if (rawType is "animation" or "animate")
+        {
+            int animSlideNum = 0;
+            foreach (var slidePart in GetSlideParts())
+            {
+                animSlideNum++;
+                if (parsed.SlideNum.HasValue && parsed.SlideNum.Value != animSlideNum) continue;
+                var animShapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+                if (animShapeTree == null) continue;
+
+                int animShapeIdx = 0;
+                foreach (var animShape in animShapeTree.Elements<Shape>())
+                {
+                    animShapeIdx++;
+                    var effectCTns = EnumerateShapeAnimationCTns(slidePart, animShape);
+                    if (effectCTns.Count == 0) continue;
+                    var shapePathSeg = BuildElementPathSegment("shape", animShape, animShapeIdx);
+                    for (int ai = 0; ai < effectCTns.Count; ai++)
+                    {
+                        var node = new DocumentNode
+                        {
+                            Path = $"/slide[{animSlideNum}]/{shapePathSeg}/animation[{ai + 1}]",
+                            Type = "animation"
+                        };
+                        PopulateAnimationNode(node, effectCTns[ai]);
+                        if (MatchesGenericAttributes(node, parsed.Attributes))
+                            results.Add(node);
+                    }
+                }
             }
             return results;
         }
@@ -1308,5 +1270,86 @@ public partial class PowerPointHandler
         }
 
         return results;
+    }
+
+    // ==================== Animation helpers ====================
+
+    /// <summary>
+    /// Returns the ordered list of entrance/exit/emphasis effect CommonTimeNodes for the given shape.
+    /// Motion-path animations (presetClass="motion") are excluded.
+    /// </summary>
+    private List<CommonTimeNode> EnumerateShapeAnimationCTns(SlidePart slidePart, Shape shape)
+    {
+        var shapeId = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+        if (shapeId == null) return [];
+        var timing = GetSlide(slidePart).GetFirstChild<Timing>();
+        if (timing == null) return [];
+        var shapeIdStr = shapeId.Value.ToString();
+        return timing.Descendants<CommonTimeNode>()
+            .Where(ctn => ctn.PresetClass != null && ctn.PresetId != null &&
+                   ctn.GetAttributes().All(a => a.LocalName != "presetClass" || a.Value != "motion") &&
+                   ctn.Descendants<ShapeTarget>().Any(st => st.ShapeId?.Value == shapeIdStr))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Populates a DocumentNode's Format with effect/class/presetId/duration/easing/delay fields
+    /// from the given animation CommonTimeNode. Mirrors the single-Get implementation.
+    /// </summary>
+    private static void PopulateAnimationNode(DocumentNode animNode, CommonTimeNode effectCTn)
+    {
+        var presetId = effectCTn.PresetId?.Value ?? 0;
+        var clsVal = effectCTn.PresetClass?.Value;
+        var cls = clsVal == TimeNodePresetClassValues.Exit ? "exit"
+                : clsVal == TimeNodePresetClassValues.Emphasis ? "emphasis"
+                : "entrance";
+
+        var animEffect = effectCTn.Descendants<AnimateEffect>().FirstOrDefault();
+        var filter = animEffect?.Filter?.Value ?? "";
+
+        var effectName = filter switch
+        {
+            "fly" => "fly",
+            "fade" => "fade",
+            "zoom" => "zoom",
+            "" when presetId == 1 => "appear",
+            "" when presetId == 24 => "bounce",
+            _ => presetId switch
+            {
+                1 => "appear", 2 => "fly", 10 => "fade",
+                21 => "zoom", 24 => "bounce", _ => "unknown"
+            }
+        };
+
+        animNode.Format["effect"] = effectName;
+        animNode.Format["class"] = cls;
+        animNode.Format["presetId"] = presetId;
+
+        var dur = 500;
+        if (int.TryParse(animEffect?.CommonBehavior?.CommonTimeNode?.Duration, out var dd)) dur = dd;
+        animNode.Format["duration"] = dur;
+
+        if (effectCTn.Acceleration?.HasValue == true && effectCTn.Acceleration.Value > 0)
+            animNode.Format["easein"] = (int)(effectCTn.Acceleration.Value / 1000);
+        if (effectCTn.Deceleration?.HasValue == true && effectCTn.Deceleration.Value > 0)
+            animNode.Format["easeout"] = (int)(effectCTn.Deceleration.Value / 1000);
+
+        // Delay (stored on midCTn start condition)
+        CommonTimeNode? midCTn = null;
+        var cur = effectCTn.Parent;
+        for (int walkDepth = 0; walkDepth < 5 && cur != null; walkDepth++)
+        {
+            if (cur is CommonTimeNode candidate && candidate != effectCTn
+                && candidate.PresetId == null)
+            {
+                midCTn = candidate;
+                break;
+            }
+            cur = cur.Parent;
+        }
+        var midDelayVal = midCTn?.StartConditionList?.GetFirstChild<Condition>()?.Delay?.Value;
+        if (midDelayVal != null && midDelayVal != "0"
+            && int.TryParse(midDelayVal, out var dMs) && dMs > 0)
+            animNode.Format["delay"] = dMs;
     }
 }

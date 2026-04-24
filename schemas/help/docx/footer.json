@@ -13,7 +13,15 @@
   "paths": {
     "positional": ["/footer[N]"]
   },
-  "note": "Mirror of header.json — same surface, stored in FooterParts. Duplicate type per section rejected at Add.",
+  "note": "Mirror of header.json — same surface, stored in FooterParts. Duplicate type per section rejected at Add. A single Add supports at most one text + one field pair. For composite footers like 'Page X of Y' (two fields + literal text), create the footer first, then Add additional runs/fields to its paragraph (/footer[N]/p[1]) one by one — see examples.",
+  "examples": [
+    "Simple page-number footer: Add /, footer, --prop field=page --prop alignment=center",
+    "'Page X of Y' — must be built in steps after creating the footer:",
+    "  1) officecli add file.docx / footer --prop text=\"Page \" --prop alignment=center",
+    "  2) officecli add /footer[1]/p[1] field --prop name=page",
+    "  3) officecli add /footer[1]/p[1] run --prop text=\" of \"",
+    "  4) officecli add /footer[1]/p[1] field --prop name=numpages"
+  ],
   "properties": {
     "type": {
       "type": "enum",
