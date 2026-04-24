@@ -201,7 +201,85 @@ public partial class PowerPointHandler
             return unsupported;
         }
 
-        // Try slideMaster/slideLayout editing: /slideMaster[N]/shape[M] or /slideLayout[N]/shape[M]
+        // Try slidemaster/slidelayout bg-aware path first (case-insensitive):
+        // /slidemaster[N], /slidemaster[N]/slidelayout[M], /slidelayout[N]
+        // Handles background and name props. Falls through for shape-nested paths.
+        {
+            var masterBgMatch = Regex.Match(path, @"^/slidemaster\[(\d+)\](?:/slidelayout\[(\d+)\])?$", RegexOptions.IgnoreCase);
+            var layoutBgMatch = Regex.Match(path, @"^/slidelayout\[(\d+)\]$", RegexOptions.IgnoreCase);
+            if (masterBgMatch.Success || layoutBgMatch.Success)
+            {
+                OpenXmlPart targetPart;
+                OpenXmlPartRootElement targetRoot;
+                if (masterBgMatch.Success)
+                {
+                    var masterIdx = int.Parse(masterBgMatch.Groups[1].Value);
+                    var masters = _doc.PresentationPart?.SlideMasterParts?.ToList() ?? [];
+                    if (masterIdx < 1 || masterIdx > masters.Count)
+                        throw new ArgumentException($"Slide master {masterIdx} not found (total: {masters.Count})");
+                    var mp = masters[masterIdx - 1];
+                    if (masterBgMatch.Groups[2].Success)
+                    {
+                        var lIdx = int.Parse(masterBgMatch.Groups[2].Value);
+                        var layouts = mp.SlideLayoutParts?.ToList() ?? [];
+                        if (lIdx < 1 || lIdx > layouts.Count)
+                            throw new ArgumentException($"Slide layout {lIdx} not found under master {masterIdx} (total: {layouts.Count})");
+                        targetPart = layouts[lIdx - 1];
+                        targetRoot = layouts[lIdx - 1].SlideLayout
+                            ?? throw new InvalidOperationException("Corrupt slide layout");
+                    }
+                    else
+                    {
+                        targetPart = mp;
+                        targetRoot = mp.SlideMaster
+                            ?? throw new InvalidOperationException("Corrupt slide master");
+                    }
+                }
+                else
+                {
+                    var lIdx = int.Parse(layoutBgMatch.Groups[1].Value);
+                    var allLayouts = (_doc.PresentationPart?.SlideMasterParts ?? Enumerable.Empty<SlideMasterPart>())
+                        .SelectMany(m => m.SlideLayoutParts ?? Enumerable.Empty<SlideLayoutPart>()).ToList();
+                    if (lIdx < 1 || lIdx > allLayouts.Count)
+                        throw new ArgumentException($"Slide layout {lIdx} not found (total: {allLayouts.Count})");
+                    targetPart = allLayouts[lIdx - 1];
+                    targetRoot = allLayouts[lIdx - 1].SlideLayout
+                        ?? throw new InvalidOperationException("Corrupt slide layout");
+                }
+
+                var unsupported = new List<string>();
+                foreach (var (key, value) in properties)
+                {
+                    switch (key.ToLowerInvariant())
+                    {
+                        case "background":
+                            ApplyBackground(targetPart, value, ReadBackgroundImageOptions(properties));
+                            break;
+                        case "background.mode":
+                        case "background.alpha":
+                        case "background.scale":
+                            break;
+                        case "name":
+                        {
+                            var csd = targetRoot.GetFirstChild<CommonSlideData>();
+                            if (csd != null) csd.Name = value;
+                            break;
+                        }
+                        default:
+                            if (unsupported.Count == 0)
+                                unsupported.Add($"{key} (valid slidemaster/slidelayout props: background, background.mode, background.alpha, background.scale, name)");
+                            else
+                                unsupported.Add(key);
+                            break;
+                    }
+                }
+                MaybeMutateExistingBackgroundImage(targetPart, properties);
+                SaveBackgroundRoot(targetPart);
+                return unsupported;
+            }
+        }
+
+        // Try slideMaster/slideLayout shape editing: /slideMaster[N]/shape[M] or /slideLayout[N]/shape[M]
         var masterShapeMatch = Regex.Match(path, @"^/(slideMaster|slideLayout)\[(\d+)\](?:/(\w+)\[(\d+)\])?$");
         if (masterShapeMatch.Success)
         {
@@ -1401,70 +1479,6 @@ public partial class PowerPointHandler
             }
             MaybeMutateExistingBackgroundImage(slidePart2, properties);
             slide2.Save();
-            return unsupported;
-        }
-
-        // Try slidemaster path: /slidemaster[N] and /slidemaster[N]/slidelayout[M]
-        // Also accept bare /slidelayout[N] (global index across all masters).
-        var masterSetMatch = Regex.Match(path, @"^/slidemaster\[(\d+)\](?:/slidelayout\[(\d+)\])?$", RegexOptions.IgnoreCase);
-        var layoutSetMatch = Regex.Match(path, @"^/slidelayout\[(\d+)\]$", RegexOptions.IgnoreCase);
-        if (masterSetMatch.Success || layoutSetMatch.Success)
-        {
-            OpenXmlPart targetPart;
-            if (masterSetMatch.Success)
-            {
-                var masterIdx = int.Parse(masterSetMatch.Groups[1].Value);
-                var masters = _doc.PresentationPart?.SlideMasterParts?.ToList() ?? [];
-                if (masterIdx < 1 || masterIdx > masters.Count)
-                    throw new ArgumentException($"Slide master {masterIdx} not found (total: {masters.Count})");
-                var mp = masters[masterIdx - 1];
-                if (masterSetMatch.Groups[2].Success)
-                {
-                    var lIdx = int.Parse(masterSetMatch.Groups[2].Value);
-                    var layouts = mp.SlideLayoutParts?.ToList() ?? [];
-                    if (lIdx < 1 || lIdx > layouts.Count)
-                        throw new ArgumentException($"Slide layout {lIdx} not found under master {masterIdx} (total: {layouts.Count})");
-                    targetPart = layouts[lIdx - 1];
-                }
-                else
-                {
-                    targetPart = mp;
-                }
-            }
-            else
-            {
-                var lIdx = int.Parse(layoutSetMatch.Groups[1].Value);
-                var allLayouts = (_doc.PresentationPart?.SlideMasterParts ?? Enumerable.Empty<SlideMasterPart>())
-                    .SelectMany(m => m.SlideLayoutParts ?? Enumerable.Empty<SlideLayoutPart>()).ToList();
-                if (lIdx < 1 || lIdx > allLayouts.Count)
-                    throw new ArgumentException($"Slide layout {lIdx} not found (total: {allLayouts.Count})");
-                targetPart = allLayouts[lIdx - 1];
-            }
-
-            var unsupported = new List<string>();
-            foreach (var (key, value) in properties)
-            {
-                switch (key.ToLowerInvariant())
-                {
-                    case "background":
-                        ApplyBackground(targetPart, value, ReadBackgroundImageOptions(properties));
-                        break;
-                    case "background.mode":
-                    case "background.alpha":
-                    case "background.scale":
-                        // Paired form handled via "background" case; solo form via
-                        // MaybeMutateExistingBackgroundImage after the loop.
-                        break;
-                    default:
-                        if (unsupported.Count == 0)
-                            unsupported.Add($"{key} (valid slidemaster/slidelayout props: background, background.mode, background.alpha, background.scale)");
-                        else
-                            unsupported.Add(key);
-                        break;
-                }
-            }
-            MaybeMutateExistingBackgroundImage(targetPart, properties);
-            SaveBackgroundRoot(targetPart);
             return unsupported;
         }
 

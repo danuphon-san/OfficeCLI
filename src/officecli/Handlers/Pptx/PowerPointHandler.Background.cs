@@ -73,7 +73,9 @@ public partial class PowerPointHandler
         var cSld = GetCommonSlideData(part)
             ?? throw new InvalidOperationException($"{part.GetType().Name} has no CommonSlideData");
 
-        // Remove any existing background element
+        // Delete any image parts referenced by the existing background, then remove the XML.
+        // Without this step, repeated bg changes leave orphan ImageParts in ppt/media/.
+        DeleteBackgroundImageParts(cSld, part);
         cSld.Background?.Remove();
 
         if (value.Equals("none", StringComparison.OrdinalIgnoreCase) ||
@@ -141,6 +143,24 @@ public partial class PowerPointHandler
         }
     }
 
+    private static void DeleteBackgroundImageParts(CommonSlideData cSld, OpenXmlPart part)
+    {
+        var bgPr = cSld.Background?.BackgroundProperties;
+        if (bgPr == null) return;
+        foreach (var bf in bgPr.Elements<Drawing.BlipFill>().ToList())
+        {
+            var embed = bf.GetFirstChild<Drawing.Blip>()?.Embed?.Value;
+            if (string.IsNullOrEmpty(embed)) continue;
+            try
+            {
+                var refPart = part.GetPartById(embed);
+                if (refPart is ImagePart ip)
+                    part.DeletePart(ip);
+            }
+            catch { /* rel may be missing or already gone */ }
+        }
+    }
+
     private static ImagePart AddBackgroundImagePart(OpenXmlPart part, PartTypeInfo partType) => part switch
     {
         SlidePart sp => sp.AddImagePart(partType),
@@ -161,6 +181,17 @@ public partial class PowerPointHandler
         BackgroundProperties bgPr, OpenXmlPart part, string imagePath,
         BackgroundImageOptions? opts = null)
     {
+        // Reject scale with non-tile mode up-front so the image part isn't created just
+        // to be orphaned by a later throw.
+        if (opts?.Scale != null)
+        {
+            var m = (opts.Mode ?? "stretch").ToLowerInvariant();
+            if (m != "tile")
+                throw new ArgumentException(
+                    $"background.scale is only valid with background.mode=tile (got mode={m}); " +
+                    "set background.mode=tile together with background.scale");
+        }
+
         var (stream, partType) = OfficeCli.Core.ImageSource.Resolve(imagePath);
         using var streamDispose = stream;
 
@@ -220,12 +251,22 @@ public partial class PowerPointHandler
         if (opts.Mode != null || opts.Scale != null)
         {
             var (curMode, curScale) = ReadCurrentBlipFillMode(blipFill);
+            var effectiveMode = opts.Mode ?? curMode;
+            // Scale is meaningful only in tile mode — reject scale-on-stretch/center to
+            // prevent a silent no-op. Callers must set mode=tile to use scale.
+            if (opts.Scale != null && effectiveMode != "tile")
+                throw new ArgumentException(
+                    $"background.scale is only valid with background.mode=tile (current mode: {effectiveMode}); " +
+                    "set background.mode=tile together with background.scale");
             var merged = new BackgroundImageOptions(
-                Mode: opts.Mode ?? curMode,
+                Mode: effectiveMode,
                 Scale: opts.Scale ?? curScale);
+            // Build first, then swap — BuildBlipFillMode validates and may throw, so we
+            // must not remove the existing child before the new one is ready.
+            var newChild = BuildBlipFillMode(merged);
             blipFill.Elements<Drawing.Tile>().ToList().ForEach(e => e.Remove());
             blipFill.Elements<Drawing.Stretch>().ToList().ForEach(e => e.Remove());
-            blipFill.Append(BuildBlipFillMode(merged));
+            blipFill.Append(newChild);
         }
     }
 
