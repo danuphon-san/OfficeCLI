@@ -122,6 +122,87 @@ internal static class SchemaHelpLoader
     }
 
     /// <summary>
+    /// Read the canonical parent of an element from its schema and resolve it
+    /// to a filename in the same format directory. Returns null if the schema
+    /// has no parent declaration or the parent is a root-ish container
+    /// (body / slide / sheet / document / workbook / presentation) — those
+    /// cases are treated as "top-level" for listing purposes.
+    ///
+    /// Schema 'parent' values use element-semantic names (e.g. "row" inside
+    /// table-cell.json), while the listing works over filenames
+    /// (e.g. "table-row"). This method bridges the two namespaces by scanning
+    /// the format's schemas for any whose internal "element" field matches
+    /// the declared parent — that schema's filename is the returned parent.
+    /// </summary>
+    internal static string? GetParentForTree(string format, string element)
+    {
+        // Root-ish parents are treated as "no parent" so top-level elements
+        // (paragraph, table, section, sheet, slide, cell...) don't get buried
+        // under container schemas.
+        var rootLike = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "body", "document", "slide", "sheet", "workbook", "presentation", "styles", "numbering"
+        };
+
+        string? rawParent;
+        try
+        {
+            using var doc = LoadSchema(format, element);
+            if (!doc.RootElement.TryGetProperty("parent", out var p)) return null;
+
+            rawParent = p.ValueKind switch
+            {
+                JsonValueKind.String => p.GetString(),
+                JsonValueKind.Array => p.EnumerateArray()
+                                        .Select(a => a.GetString())
+                                        .FirstOrDefault(s => !string.IsNullOrEmpty(s)),
+                _ => null,
+            };
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (string.IsNullOrEmpty(rawParent)) return null;
+
+        // Parent can be "paragraph|body" — take the first element-typed segment
+        // (i.e. the first segment that isn't a root-like container).
+        var parts = rawParent!.Split('|', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => !string.IsNullOrEmpty(s) && !rootLike.Contains(s))
+            .ToList();
+        if (parts.Count == 0) return null;
+
+        var parentName = parts[0];
+
+        // Resolve element-name → filename. Look for a schema file whose stem
+        // matches verbatim first (common case), then fall back to scanning
+        // for any schema whose internal "element" field matches.
+        var siblings = ListElements(NormalizeFormat(format));
+        if (siblings.Contains(parentName, StringComparer.OrdinalIgnoreCase))
+            return parentName;
+
+        foreach (var sib in siblings)
+        {
+            try
+            {
+                using var sibDoc = LoadSchema(format, sib);
+                if (sibDoc.RootElement.TryGetProperty("element", out var elEl)
+                    && string.Equals(elEl.GetString(), parentName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return sib;
+                }
+            }
+            catch { /* skip bad schemas */ }
+        }
+
+        // Couldn't resolve — surface the raw name; caller will treat it as
+        // top-level (since it's not in the filename set), which is safe.
+        return parentName;
+    }
+
+    /// <summary>
     /// Check whether a schema's top-level operations[verb] is true. Used by
     /// `officecli help &lt;format&gt; &lt;verb&gt;` to filter the element list.
     /// </summary>

@@ -139,8 +139,42 @@ static partial class CommandBuilder
                 ? $"Elements for {canonicalFormat}:"
                 : $"Elements for {canonicalFormat} supporting '{verb}':";
             Console.WriteLine(header);
+
+            // Build parent → children map for tree rendering. Children whose
+            // declared parent isn't itself in the filtered set float back up
+            // to top-level so nothing disappears under a filter.
+            var filteredSet = new HashSet<string>(filtered, StringComparer.Ordinal);
+            var parentOf = filtered.ToDictionary(
+                el => el,
+                el => SchemaHelpLoader.GetParentForTree(canonicalFormat, el),
+                StringComparer.Ordinal);
+
+            var topLevel = new List<string>();
+            var byParent = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             foreach (var el in filtered)
-                Console.WriteLine($"  {el}");
+            {
+                var pr = parentOf[el];
+                if (pr != null && filteredSet.Contains(pr))
+                {
+                    if (!byParent.TryGetValue(pr, out var list))
+                        byParent[pr] = list = new List<string>();
+                    list.Add(el);
+                }
+                else
+                {
+                    topLevel.Add(el);
+                }
+            }
+
+            void WriteNode(string el, int depth)
+            {
+                Console.WriteLine($"{new string(' ', 2 + depth * 2)}{el}");
+                if (byParent.TryGetValue(el, out var kids))
+                    foreach (var kid in kids)
+                        WriteNode(kid, depth + 1);
+            }
+            foreach (var el in topLevel)
+                WriteNode(el, 0);
             Console.WriteLine();
 
             var detailHint = verb == null
