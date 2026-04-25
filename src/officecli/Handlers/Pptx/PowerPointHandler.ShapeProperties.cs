@@ -24,8 +24,21 @@ public partial class PowerPointHandler
     {
         var unsupported = new List<string>();
 
-        foreach (var (key, value) in properties)
+        // CONSISTENCY(prop-order): fill carriers (fill/gradient/pattern) must run
+        // before modifier props (opacity attaches alpha to the resulting solidFill);
+        // otherwise opacity auto-creates a white fill that fill= then overwrites.
+        // Mirrors the implicit ordering in Add.Shape.cs which processes fill first.
+        var orderedKeys = properties.Keys
+            .OrderBy(k => k.ToLowerInvariant() switch
+            {
+                "fill" or "gradient" or "pattern" => 0,
+                _ => 1
+            })
+            .ToList();
+
+        foreach (var key in orderedKeys)
         {
+            var value = properties[key];
             if (value is null) { unsupported.Add(key); continue; }
             switch (key.ToLowerInvariant())
             {
