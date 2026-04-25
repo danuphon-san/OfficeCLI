@@ -12,10 +12,27 @@ if (args.Length == 1 && args[0] == "__update-check__")
     return 0;
 }
 
+// Unify `--help` with `help` so AI agents see one help surface, not two.
+//   officecli [--help|-h|-?]              → officecli help
+//   officecli <cmd> [--help|-h|-?] [...]  → officecli help <cmd>
+// The `help` command renders schema details for docx/xlsx/pptx, EarlyDispatchHelp
+// for mcp/skills/install, and forwards to the SCL `<cmd> --help` for everything
+// else — making `help` the single source of truth, with `--help` as a compatibility
+// alias. Done before any other dispatch so it overrides early-dispatch + SCL.
+if (args.Length > 0 && args.Any(a => a is "--help" or "-h" or "-?"))
+{
+    var firstNonHelp = args.FirstOrDefault(a => a is not "--help" and not "-h" and not "-?");
+    args = firstNonHelp == null
+        ? new[] { "help" }
+        : new[] { "help", firstNonHelp };
+}
+
 // `--help`/`-h` on early-dispatch commands (mcp/skills/install) should
 // reach System.CommandLine so the registered Command stubs print proper
 // usage. Without this, e.g. `install --help` would otherwise run
 // InstallBinary() before erroring "Unknown target: --help".
+// (Note: with the unification above this path rarely fires — it remains
+// as a defense-in-depth in case the rewrite ever changes shape.)
 static bool HasHelpFlag(string[] a)
 {
     for (int i = 1; i < a.Length; i++)
