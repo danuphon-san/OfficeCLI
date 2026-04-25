@@ -27,9 +27,19 @@ if (args.Length == 1 && args[0] == "__update-check__")
 if (args.Length > 0)
 {
     if (args[0] is "--help" or "-h" or "-?")
-        args = new[] { "help" };
+    {
+        // `officecli --help docx [add chart]` → `officecli help docx [add chart]`.
+        // Preserve trailing tokens so flag-style invocations can drill into
+        // schema details, not just the root banner.
+        var tail = args.Skip(1).ToArray();
+        args = tail.Length == 0
+            ? new[] { "help" }
+            : new[] { "help" }.Concat(tail).ToArray();
+    }
     else if (args.Length >= 2 && args[1] is "--help" or "-h" or "-?")
+    {
         args = new[] { "help", args[0] };
+    }
 }
 
 // MCP commands: officecli mcp [target]
