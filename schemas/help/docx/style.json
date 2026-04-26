@@ -377,6 +377,24 @@
       "examples": ["--prop pbdr.bottom=single:6:#FF0000", "--prop pbdr.all=single:4:auto"],
       "readback": "style on the bare key, sub-attrs as <key>.sz / <key>.color / <key>.space",
       "enforcement": "report"
+    },
+    "numId": {
+      "type": "int",
+      "description": "numbering instance ID this style references. Paragraphs using --prop style=<id> inherit numbering through ResolveNumPrFromStyle without their own numPr — the canonical multi-level outline pattern (Heading1..9). Requires the numId to already exist in /numbering.",
+      "aliases": ["numid"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop numId=3"],
+      "readback": "integer numId on style/pPr/numPr",
+      "enforcement": "report"
+    },
+    "ilvl": {
+      "type": "int",
+      "description": "list level (0-8) for the style-borne numPr.",
+      "aliases": ["numLevel", "numlevel"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop ilvl=0"],
+      "readback": "integer 0-8",
+      "enforcement": "report"
     }
   }
 }

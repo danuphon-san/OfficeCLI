@@ -620,7 +620,13 @@ public partial class WordHandler
         bool hasFormat = properties.ContainsKey("format")
                        || properties.ContainsKey("text")
                        || properties.ContainsKey("indent")
-                       || properties.ContainsKey("type");
+                       || properties.ContainsKey("type")
+                       || properties.ContainsKey("name")
+                       || properties.ContainsKey("styleLink")
+                       || properties.ContainsKey("numStyleLink")
+                       || properties.Keys.Any(k =>
+                            k.StartsWith("level", StringComparison.OrdinalIgnoreCase)
+                            && k.Length > 5 && char.IsDigit(k[5]));
         if (hasAbsId && hasFormat)
             throw new ArgumentException(
                 "--prop abstractNumId conflicts with --prop format/text/indent/type. " +
