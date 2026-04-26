@@ -1023,9 +1023,10 @@ public class ResidentServer : IDisposable
 
             if (allUnsupported.Count > 0)
             {
-                if (resultPath.StartsWith("/styles/", StringComparison.Ordinal))
+                if (_handler is WordHandler)
                 {
-                    var hint = OfficeCli.Core.StyleUnsupportedHints.Format(allUnsupported);
+                    var scope = resultPath.StartsWith("/styles/", StringComparison.Ordinal) ? "/styles" : resultPath;
+                    var hint = OfficeCli.Core.StyleUnsupportedHints.Format(allUnsupported, scope);
                     if (hint != null) Console.Error.WriteLine("WARNING: " + hint);
                 }
                 else

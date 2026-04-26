@@ -506,16 +506,18 @@ static partial class CommandBuilder
                     var addMsg = $"Added {type} at {resultPath}";
 
                     // Surface silent-drop props that the curated Add helper
-                    // could not consume. Currently only AddStyle populates
-                    // this. Use the curated-hint formatter (no raw-set
-                    // recommendation) so users learn the right curated
-                    // alternative instead of being pushed to the escape
-                    // hatch.
+                    // could not consume. AddStyle / AddParagraph / AddRun
+                    // populate LastAddUnsupportedProps. Use the curated
+                    // hint formatter (no raw-set recommendation) so users
+                    // learn the right curated alternative instead of being
+                    // pushed to the escape hatch. Scope label = result path
+                    // truncated to the meaningful prefix (/styles,
+                    // /body/p[N], /body/p[N]/r[N]).
                     if (handler is OfficeCli.Handlers.WordHandler addWh
-                        && addWh.LastAddUnsupportedProps.Count > 0
-                        && resultPath.StartsWith("/styles/", StringComparison.Ordinal))
+                        && addWh.LastAddUnsupportedProps.Count > 0)
                     {
-                        var hint = OfficeCli.Core.StyleUnsupportedHints.Format(addWh.LastAddUnsupportedProps);
+                        var scope = ScopeLabelForWordPath(resultPath);
+                        var hint = OfficeCli.Core.StyleUnsupportedHints.Format(addWh.LastAddUnsupportedProps, scope);
                         if (hint != null) addMsg += "\nWARNING: " + hint;
                     }
                     return addMsg;
@@ -831,6 +833,21 @@ static partial class CommandBuilder
             }
         }
         return result;
+    }
+
+    /// <summary>
+    /// Reduce a Word handler result path to the meaningful scope label for
+    /// UNSUPPORTED messages — "/styles", "/body/p[N]", "/body/p[N]/r[N]".
+    /// Stops at the first segment that is not a known top-level Word
+    /// container so unfamiliar paths fall back to the full path.
+    /// </summary>
+    private static string ScopeLabelForWordPath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return "/";
+        if (path.StartsWith("/styles/", StringComparison.Ordinal)) return "/styles";
+        // Trim everything past the last bracketed-segment we recognize for
+        // paragraph/run paths. Keep the path as-is for everything else.
+        return path;
     }
 
     internal static string FormatUnsupported(IEnumerable<string> unsupported, string? scope = null)

@@ -47,10 +47,12 @@ internal static class StyleUnsupportedHints
 
     /// <summary>
     /// Returns a single-line message of the form
-    /// <c>UNSUPPORTED props on /styles: foo (use bar instead), baz (not supported on styles)</c>.
-    /// Empty input returns null.
+    /// <c>UNSUPPORTED props on &lt;path&gt;: foo (use bar instead), baz (not supported)</c>.
+    /// Empty input returns null. <paramref name="scope"/> labels the surface
+    /// in the message ("/styles", "/body/p[…]", etc.) so the user knows
+    /// where the rejection happened; pass null for a generic phrasing.
     /// </summary>
-    public static string? Format(IEnumerable<string> unsupported)
+    public static string? Format(IEnumerable<string> unsupported, string? scope = null)
     {
         var list = unsupported.Where(p => !string.IsNullOrEmpty(p)).Distinct().ToList();
         if (list.Count == 0) return null;
@@ -58,8 +60,9 @@ internal static class StyleUnsupportedHints
         var parts = list.Select(prop =>
             Hints.TryGetValue(prop, out var hint)
                 ? $"{prop} ({hint})"
-                : $"{prop} (not supported on styles)");
+                : $"{prop} (not supported)");
 
-        return $"UNSUPPORTED props on /styles: {string.Join(", ", parts)}";
+        var label = string.IsNullOrEmpty(scope) ? "props" : $"props on {scope}";
+        return $"UNSUPPORTED {label}: {string.Join(", ", parts)}";
     }
 }
