@@ -17,11 +17,20 @@
   "properties": {
     "effect": {
       "type": "enum",
-      "description": "animation preset.",
-      "values": ["fade", "fly", "wipe", "zoom", "spin", "swivel", "bounce", "grow", "float", "appear", "disappear"],
+      "description": "animation preset. spin/grow/wave require class=emphasis; appear/fade/fly/zoom/wipe/bounce/float/swivel/split/wheel/checkerboard/blinds/dissolve/flash/box/circle/diamond/plus/strips/wedge/random work for entrance and exit. (disappear is not supported — use class=exit + appear or fade.)",
+      "values": ["appear", "fade", "fly", "zoom", "wipe", "bounce", "float", "swivel", "split", "wheel", "checkerboard", "blinds", "dissolve", "flash", "box", "circle", "diamond", "plus", "strips", "wedge", "random", "spin", "grow", "wave"],
       "add": true, "set": true, "get": true,
-      "examples": ["--prop effect=fade"],
+      "examples": ["--prop effect=fade", "--prop effect=spin --prop class=emphasis"],
       "readback": "effect name",
+      "enforcement": "report"
+    },
+    "class": {
+      "type": "enum",
+      "description": "animation category — entrance, exit, or emphasis. spin/grow/wave only work with emphasis.",
+      "values": ["entrance", "exit", "emphasis"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop class=entrance"],
+      "readback": "entrance | exit | emphasis",
       "enforcement": "report"
     },
     "trigger": {
@@ -35,8 +44,9 @@
     "duration": {
       "type": "length",
       "description": "Animation duration in milliseconds (integer).",
+      "aliases": ["dur"],
       "add": true, "set": true, "get": true,
-      "examples": ["--prop duration=500"],
+      "examples": ["--prop duration=500", "--prop dur=2000"],
       "readback": "duration in milliseconds",
       "enforcement": "report"
     },

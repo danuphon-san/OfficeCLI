@@ -375,7 +375,11 @@ public partial class PowerPointHandler
                 // Build animation value string from properties
                 var effect = properties.GetValueOrDefault("effect", "fade");
                 var cls = properties.GetValueOrDefault("class", "entrance");
-                var duration = properties.GetValueOrDefault("duration", "500");
+                // CONSISTENCY(animation-dur-alias): accept "dur" as alias for
+                // "duration" — mirrors the short name used elsewhere (transition
+                // dur attribute) and matches user intuition.
+                var duration = properties.GetValueOrDefault("duration")
+                    ?? properties.GetValueOrDefault("dur", "500");
                 var trigger = properties.GetValueOrDefault("trigger", "onclick");
 
                 // Map trigger property to animation format
@@ -404,11 +408,13 @@ public partial class PowerPointHandler
                 ApplyShapeAnimation(animSlidePart, animShape, animValue);
                 GetSlide(animSlidePart).Save();
 
-                // Count animations on this shape
-                var animShapeId = animShape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0;
-                var timing = GetSlide(animSlidePart).GetFirstChild<Timing>();
-                var animCount = timing?.Descendants<ShapeTarget>()
-                    .Count(st => st.ShapeId?.Value == animShapeId.ToString()) ?? 0;
+                // Count animations on this shape — must match Get's enumeration
+                // (effect-bearing CommonTimeNodes), not raw ShapeTarget references.
+                // CONSISTENCY(animation-index): mirror EnumerateShapeAnimationCTns
+                // in Query.cs — counting ShapeTargets over-counts effects like
+                // fly/swivel that emit multiple p:anim per single user effect,
+                // returning a stale path like animation[2] for the first add.
+                var animCount = EnumerateShapeAnimationCTns(animSlidePart, animShape).Count;
                 return $"{parentPath}/animation[{animCount}]";
     }
 
