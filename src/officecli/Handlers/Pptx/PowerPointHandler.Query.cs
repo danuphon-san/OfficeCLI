@@ -345,9 +345,10 @@ public partial class PowerPointHandler
             var animShapePathSeg = BuildElementPathSegment("shape", animShape, shIdx);
 
             var effectCTns = EnumerateShapeAnimationCTns(animSlidePart, animShape);
+            if (aIdx < 1 || aIdx > effectCTns.Count)
+                throw new ArgumentException($"Animation {aIdx} not found at /slide[{sIdx}]/{animShapePathSeg} (total: {effectCTns.Count})");
             var animNode = new DocumentNode { Path = $"/slide[{sIdx}]/{animShapePathSeg}/animation[{aIdx}]", Type = "animation" };
-            if (aIdx >= 1 && aIdx <= effectCTns.Count)
-                PopulateAnimationNode(animNode, effectCTns[aIdx - 1]);
+            PopulateAnimationNode(animNode, effectCTns[aIdx - 1]);
             return animNode;
         }
 
