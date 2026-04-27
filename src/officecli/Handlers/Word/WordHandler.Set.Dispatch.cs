@@ -199,7 +199,7 @@ public partial class WordHandler
     private List<string> SetTocPath(System.Text.RegularExpressions.Match tocMatch, Dictionary<string, string> properties)
     {
         var unsupported = new List<string>();
-        var tocIdx = int.Parse(tocMatch.Groups[1].Value);
+        var tocIdx = tocMatch.Groups[1].Success ? int.Parse(tocMatch.Groups[1].Value) : 1;
         var tocParas = FindTocParagraphs();
         if (tocIdx < 1 || tocIdx > tocParas.Count)
             throw new ArgumentException($"TOC {tocIdx} not found (total: {tocParas.Count})");

@@ -208,8 +208,9 @@ public partial class WordHandler
         var fieldSetMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/field\[(\d+)\]$");
         if (fieldSetMatch.Success) return SetFieldPath(fieldSetMatch, properties);
 
-        // TOC paths: /toc[N]
-        var tocMatch = System.Text.RegularExpressions.Regex.Match(path, @"/toc\[(\d+)\]$");
+        // TOC paths: /toc[N], /toc (= first), /tableofcontents alias.
+        var tocMatch = System.Text.RegularExpressions.Regex.Match(path,
+            @"^/(?:toc|tableofcontents)(?:\[(\d+)\])?$");
         if (tocMatch.Success) return SetTocPath(tocMatch, properties);
 
         // Footnote paths: /footnote[N] or .../footnote[N]

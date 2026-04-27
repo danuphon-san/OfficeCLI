@@ -384,11 +384,15 @@ public partial class WordHandler
             return enNode;
         }
 
-        // TOC paths: /toc[N]
-        var tocMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/toc\[(\d+)\]$");
+        // TOC paths: /toc[N], /toc (= first), /tableofcontents (long alias).
+        // CONSISTENCY(toc-aliases): the type alias `tableofcontents` is already
+        // accepted by Add (WordHandler.Add.cs) and the help text documents
+        // both `/toc` and `/tableofcontents` — Get must mirror them.
+        var tocMatch = System.Text.RegularExpressions.Regex.Match(path,
+            @"^/(?:toc|tableofcontents)(?:\[(\d+)\])?$");
         if (tocMatch.Success)
         {
-            var tocIdx = int.Parse(tocMatch.Groups[1].Value);
+            var tocIdx = tocMatch.Groups[1].Success ? int.Parse(tocMatch.Groups[1].Value) : 1;
             var tocParas = FindTocParagraphs();
             if (tocIdx < 1 || tocIdx > tocParas.Count)
                 throw new ArgumentException($"TOC {tocIdx} not found (total: {tocParas.Count})");
