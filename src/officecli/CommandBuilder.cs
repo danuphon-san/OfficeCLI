@@ -645,6 +645,14 @@ static partial class CommandBuilder
         foreach (var prop in props ?? Array.Empty<string>())
         {
             var eqIdx = prop.IndexOf('=');
+            // BUG-R40-B12: previously `eqIdx > 0` silently dropped both
+            // `--prop =value` (empty key, eqIdx==0) and `--prop key`
+            // (no equals, eqIdx==-1). Surface the empty-key form as a
+            // hard error so AI callers don't waste a turn wondering why
+            // their property had no effect.
+            if (eqIdx == 0)
+                throw new ArgumentException(
+                    $"Invalid --prop '{prop}': key is empty. Use key=value (e.g. --prop name=Title).");
             if (eqIdx > 0)
                 dict[prop[..eqIdx]] = prop[(eqIdx + 1)..];
         }
