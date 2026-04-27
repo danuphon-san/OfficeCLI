@@ -76,6 +76,40 @@ public partial class ExcelHandler
             if (sheetCount <= 1)
                 throw new InvalidOperationException($"Cannot remove the last sheet. A workbook must contain at least one sheet.");
 
+            // CONSISTENCY(remove-sheet-chart-refs): a chart on another
+            // sheet may carry <c:f>SheetName!$A$1:$B$2</c:f> references
+            // pointing at the sheet about to disappear. The Open XML
+            // SDK doesn't follow these into a dependency graph, so the
+            // chart silently survives and Excel surfaces a confusing
+            // "external links" warning when the file is reopened
+            // (Excel reads the orphaned `SheetName!` prefix as a
+            // pointer to a separate workbook). Refuse with a clear
+            // message — named ranges referencing the sheet are
+            // already cleaned up below as a passive cleanup, but a
+            // chart series carries layout intent that the user almost
+            // certainly wants to handle explicitly.
+            var sheetIdForCheck = sheet.Id?.Value;
+            var sheetWsPartForCheck = sheetIdForCheck != null
+                ? workbookPart.GetPartById(sheetIdForCheck) as WorksheetPart
+                : null;
+            var refToken = sheetName + "!";
+            var quotedRefToken = "'" + sheetName + "'!";
+            foreach (var otherWsPart in workbookPart.WorksheetParts)
+            {
+                if (sheetWsPartForCheck != null && ReferenceEquals(otherWsPart, sheetWsPartForCheck)) continue;
+                if (otherWsPart.DrawingsPart == null) continue;
+                foreach (var dp in otherWsPart.DrawingsPart.ChartParts)
+                {
+                    var chartXml = dp.ChartSpace?.InnerXml;
+                    if (chartXml == null) continue;
+                    if (chartXml.Contains(refToken, StringComparison.OrdinalIgnoreCase)
+                        || chartXml.Contains(quotedRefToken, StringComparison.OrdinalIgnoreCase))
+                        throw new ArgumentException(
+                            $"Cannot remove sheet '{sheetName}': it is referenced by a chart in this workbook. " +
+                            $"Remove or repoint the chart first.");
+                }
+            }
+
             // R10-2: capture pivot cache definitions referenced by this
             // sheet's pivot table parts BEFORE deleting the worksheet part,
             // so we can prune any caches that become orphaned by the

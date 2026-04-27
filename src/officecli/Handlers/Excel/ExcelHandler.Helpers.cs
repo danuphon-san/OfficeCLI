@@ -1568,6 +1568,31 @@ public partial class ExcelHandler
         return (p[0], p[1]);
     }
 
+    // CONSISTENCY(merge-overlap): centralize the "insert one MergeCell"
+    // policy. Excel rejects overlapping <mergeCell> entries with a
+    // "found a problem" repair dialog, but the OOXML SDK happily
+    // appends them. Mirrors the T4 overlap-throws pattern used by
+    // tables and AutoFilter+table.
+    // - Exact-match ref: no-op (idempotent re-Add stays consistent
+    //   with prior dedup behavior).
+    // - Geometric overlap with a non-identical range: throw.
+    // - Otherwise: append.
+    private static void InsertMergeCellChecked(MergeCells mergeCells, string newRangeRef)
+    {
+        var refUpper = newRangeRef.ToUpperInvariant();
+        foreach (var existing in mergeCells.Elements<MergeCell>())
+        {
+            if (existing.Reference?.Value is not string er) continue;
+            var erUpper = er.ToUpperInvariant();
+            if (string.Equals(erUpper, refUpper, StringComparison.Ordinal)) return; // idempotent
+            if (RangesOverlap(refUpper, erUpper))
+                throw new ArgumentException(
+                    $"Merge range '{refUpper}' overlaps existing merged range '{er}'. " +
+                    $"Excel rejects overlapping mergeCell entries.");
+        }
+        mergeCells.AppendChild(new MergeCell { Reference = refUpper });
+    }
+
     private DocumentNode GetCellRange(string sheetName, SheetData sheetData, string range, int depth, WorksheetPart? part = null)
     {
         var parts = range.Split(':');

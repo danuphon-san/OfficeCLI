@@ -629,12 +629,7 @@ public partial class ExcelHandler
                 sheetEl.AppendChild(mergeCellsEl);
             }
             foreach (var rangeRef in mergeRange.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                var existing = mergeCellsEl.Elements<MergeCell>()
-                    .Any(mc => string.Equals(mc.Reference?.Value, rangeRef, StringComparison.OrdinalIgnoreCase));
-                if (!existing)
-                    mergeCellsEl.AppendChild(new MergeCell { Reference = rangeRef });
-            }
+                InsertMergeCellChecked(mergeCellsEl, rangeRef);
             mergeCellsEl.Count = (uint)mergeCellsEl.Elements<MergeCell>().Count();
         }
 

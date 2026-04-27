@@ -646,12 +646,7 @@ public partial class ExcelHandler
                             ws.AppendChild(mergeCellsEl);
                         }
                         foreach (var rangeRef in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                        {
-                            var existing = mergeCellsEl.Elements<MergeCell>()
-                                .FirstOrDefault(m => m.Reference?.Value?.Equals(rangeRef, StringComparison.OrdinalIgnoreCase) == true);
-                            if (existing == null)
-                                mergeCellsEl.AppendChild(new MergeCell { Reference = rangeRef });
-                        }
+                            InsertMergeCellChecked(mergeCellsEl, rangeRef);
                         mergeCellsEl.Count = (uint)mergeCellsEl.Elements<MergeCell>().Count();
                     }
                     break;
@@ -822,6 +817,35 @@ public partial class ExcelHandler
                             }
                         }
 
+                        // CONSISTENCY(sheet-rename-refs): chart series formulas
+                        // (<c:f>SheetName!$A$1:$B$2</c:f>) must follow the
+                        // rename or Excel reopens the file with an "external
+                        // links" warning, treating the orphan SheetName!
+                        // prefix as a pointer to a separate workbook. Walk
+                        // every WorksheetPart's drawing → chart parts and
+                        // rewrite the formula text in-place. Both quoted
+                        // ('Sheet With Spaces'!) and bare (Sheet1!) forms
+                        // are handled because oldRef/newRef already include
+                        // the trailing '!' and quoting decision.
+                        foreach (var anyWsPart in workbookPart.WorksheetParts)
+                        {
+                            if (anyWsPart.DrawingsPart == null) continue;
+                            foreach (var chartPart in anyWsPart.DrawingsPart.ChartParts)
+                            {
+                                if (chartPart.ChartSpace == null) continue;
+                                bool changed = false;
+                                foreach (var f in chartPart.ChartSpace.Descendants<DocumentFormat.OpenXml.Drawing.Charts.Formula>())
+                                {
+                                    if (f.Text != null && f.Text.Contains(oldRef, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        f.Text = f.Text.Replace(oldRef, newRef, StringComparison.OrdinalIgnoreCase);
+                                        changed = true;
+                                    }
+                                }
+                                if (changed) chartPart.ChartSpace.Save();
+                            }
+                        }
+
                         workbook.Save();
                     }
                     break;
@@ -896,13 +920,7 @@ public partial class ExcelHandler
                         ws.AppendChild(mergeCells);
                     }
                     foreach (var part in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                    {
-                        var rangeRef = part.ToUpperInvariant();
-                        var existing = mergeCells.Elements<MergeCell>()
-                            .FirstOrDefault(m => m.Reference?.Value?.Equals(rangeRef, StringComparison.OrdinalIgnoreCase) == true);
-                        if (existing == null)
-                            mergeCells.AppendChild(new MergeCell { Reference = rangeRef });
-                    }
+                        InsertMergeCellChecked(mergeCells, part.ToUpperInvariant());
                     mergeCells.Count = (uint)mergeCells.Elements<MergeCell>().Count();
                     break;
                 }
@@ -1325,13 +1343,7 @@ public partial class ExcelHandler
                             ws.AppendChild(mergeCells);
                         }
 
-                        // Avoid duplicate
-                        var existing = mergeCells.Elements<MergeCell>()
-                            .FirstOrDefault(m => m.Reference?.Value?.Equals(rangeRef, StringComparison.OrdinalIgnoreCase) == true);
-                        if (existing == null)
-                        {
-                            mergeCells.AppendChild(new MergeCell { Reference = rangeRef });
-                        }
+                        InsertMergeCellChecked(mergeCells, rangeRef);
                         mergeCells.Count = (uint)mergeCells.Elements<MergeCell>().Count();
                     }
                     else
