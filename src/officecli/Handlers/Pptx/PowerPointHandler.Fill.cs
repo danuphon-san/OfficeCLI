@@ -120,10 +120,12 @@ public partial class PowerPointHandler
         if (alphaVal == null || alphaVal >= 100000) return hex;
         var alphaByte = (int)Math.Round(alphaVal.Value / 100000.0 * 255);
         alphaByte = Math.Clamp(alphaByte, 0, 255);
-        // FormatHexColor returns "#RRGGBB"; splice AA in after the '#'.
+        // CONSISTENCY(color-input-form): emit CSS #RRGGBBAA so re-feeding the
+        // value into Add/Set round-trips correctly (NormalizeArgbColor /
+        // SanitizeColorForOoxml treat #-prefixed 8-hex as RRGGBBAA).
         return hex.StartsWith('#')
-            ? $"#{alphaByte:X2}{hex[1..]}"
-            : $"{alphaByte:X2}{hex}";
+            ? $"{hex}{alphaByte:X2}"
+            : $"{hex}{alphaByte:X2}";
     }
 
     private static void ApplyShapeFill(ShapeProperties spPr, string value)

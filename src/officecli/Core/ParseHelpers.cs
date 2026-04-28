@@ -88,7 +88,11 @@ internal static class ParseHelpers
             var alpha = rawValue[..2];
             if (string.Equals(alpha, "FF", StringComparison.OrdinalIgnoreCase))
                 return "#" + rawValue[2..].ToUpperInvariant();
-            return "#" + rawValue.ToUpperInvariant();
+            // CONSISTENCY(color-input-form): emit CSS #RRGGBBAA on output when
+            // the value carries a hash prefix, mirroring the input form accepted
+            // by NormalizeArgbColor / SanitizeColorForOoxml. The internal storage
+            // stays AARRGGBB (OOXML/POI convention).
+            return "#" + rawValue.Substring(2, 6).ToUpperInvariant() + rawValue[..2].ToUpperInvariant();
         }
         // Try resolving named colors (e.g. "silver" → "#C0C0C0")
         var resolved = TryResolveColorInput(rawValue);
@@ -257,6 +261,7 @@ internal static class ParseHelpers
         var resolved = TryResolveColorInput(value);
         if (resolved != null) return "FF" + resolved;
 
+        var hadHashPrefix = value.StartsWith('#');
         var hex = value.TrimStart('#').ToUpperInvariant();
         if (hex.Length == 3 && hex.All(char.IsAsciiHexDigit))
         {
@@ -266,7 +271,14 @@ internal static class ParseHelpers
         if (hex.Length == 6 && hex.All(char.IsAsciiHexDigit))
             return "FF" + hex;
         if (hex.Length == 8 && hex.All(char.IsAsciiHexDigit))
+        {
+            // CONSISTENCY(color-input-form): #-prefixed 8-hex is CSS RRGGBBAA
+            // (alpha last); bare 8-hex stays in OOXML AARRGGBB (alpha first).
+            // Mirrors SanitizeColorForOoxml.
+            if (hadHashPrefix)
+                return hex.Substring(6, 2) + hex[..6];
             return hex;
+        }
         throw new ArgumentException(
             $"Invalid color value: '{value}'. Expected 6-digit hex RGB (e.g. FF0000), " +
             $"8-digit AARRGGBB (e.g. 80FF0000), 3-digit shorthand (e.g. F00), " +
@@ -337,11 +349,30 @@ internal static class ParseHelpers
         var resolved = TryResolveColorInput(value);
         if (resolved != null) return (resolved, null);
 
+        // CONSISTENCY(color-input-form): treat the leading '#' as a signal that
+        // the input follows the CSS #RRGGBBAA convention (alpha last). Bare
+        // 8-hex (no '#') keeps the OOXML/POI AARRGGBB convention (alpha first).
+        // Without this distinction, "#FFFFFFAA" was being parsed as AARRGGBB,
+        // silently dropping the trailing AA byte and storing rgb=FFFFAA — the
+        // user's RGB and alpha were both corrupted.
+        var hadHashPrefix = value.StartsWith('#');
         var hex = value.TrimStart('#').ToUpperInvariant();
         if (hex.Length == 8 && hex.All(char.IsAsciiHexDigit))
         {
-            var alphaByte = Convert.ToByte(hex[..2], 16); // AA portion: 00=transparent, FF=opaque
-            var rgb = hex[2..];                            // RRGGBB portion
+            byte alphaByte;
+            string rgb;
+            if (hadHashPrefix)
+            {
+                // CSS #RRGGBBAA — alpha is the trailing pair
+                rgb = hex[..6];
+                alphaByte = Convert.ToByte(hex.Substring(6, 2), 16);
+            }
+            else
+            {
+                // OOXML/POI AARRGGBB — alpha is the leading pair
+                alphaByte = Convert.ToByte(hex[..2], 16);
+                rgb = hex[2..];
+            }
             if (alphaByte == 0xFF)
                 return (rgb, null);
             var alphaPercent = (int)(alphaByte / 255.0 * 100000);
