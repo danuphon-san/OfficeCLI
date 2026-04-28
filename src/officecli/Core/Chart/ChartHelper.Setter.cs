@@ -1221,9 +1221,14 @@ internal static partial class ChartHelper
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea2 == null) { unsupported.Add(key); break; }
                     var smoothVal = ParseHelpers.IsTruthy(value);
+                    bool smoothApplied = false;
                     // Chart-level smooth on LineChart — insert before axId per CT_LineChart schema
                     foreach (var lc in plotArea2.Elements<C.LineChart>())
-                    { lc.RemoveAllChildren<C.Smooth>(); InsertLineChartChildInOrder(lc, new C.Smooth { Val = smoothVal }); }
+                    {
+                        lc.RemoveAllChildren<C.Smooth>();
+                        InsertLineChartChildInOrder(lc, new C.Smooth { Val = smoothVal });
+                        smoothApplied = true;
+                    }
                     // Also set per-series smooth for line and scatter series
                     foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
                     {
@@ -1231,8 +1236,12 @@ internal static partial class ChartHelper
                         {
                             ser.RemoveAllChildren<C.Smooth>();
                             InsertSeriesChildInOrder(ser, new C.Smooth { Val = smoothVal });
+                            smoothApplied = true;
                         }
                     }
+                    // BUG-FIX(B5): smooth has no effect on area/bar/column/pie/etc.
+                    // Surface as UNSUPPORTED so the caller doesn't think it took.
+                    if (!smoothApplied) unsupported.Add(key);
                     break;
                 }
 
