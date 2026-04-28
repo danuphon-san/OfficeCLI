@@ -170,6 +170,16 @@ public partial class WordHandler
             else
                 pProps.WidowControl = new WidowControl { Val = false };
         }
+        // CONSISTENCY(add-set-symmetry): Set accepts wordWrap via the toggle
+        // fallback in WordHandler.Set.cs; Add mirrors it so callers can build
+        // CJK right-aligned paragraphs (which need wordWrap=false to preserve
+        // trailing whitespace on right-aligned lines) in one call.
+        if (properties.TryGetValue("wordwrap", out var addWW) || properties.TryGetValue("wordWrap", out addWW))
+        {
+            pProps.WordWrap = IsTruthy(addWW)
+                ? new WordWrap()
+                : new WordWrap { Val = false };
+        }
         // CONSISTENCY(add-set-symmetry): Set supports contextualSpacing (WordHandler.Set.cs:529);
         // Add must accept the same prop so the "Add then Get" lifecycle test pattern works
         // without falling back to a separate Set call. Mirrors keepNext/keepLines toggle

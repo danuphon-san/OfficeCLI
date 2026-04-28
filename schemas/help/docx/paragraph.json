@@ -337,6 +337,14 @@
       "examples": ["--prop widowControl=true"],
       "enforcement": "report"
     },
+    "wordWrap": {
+      "type": "bool",
+      "description": "Latin-word break behaviour in CJK paragraphs. Set false to allow ASCII text/whitespace to participate in CJK character flow — required for right-aligned CJK lines that rely on trailing underlined whitespace to align with adjacent lines.",
+      "aliases": ["wordwrap"],
+      "add": true, "set": true, "get": false,
+      "examples": ["--prop wordWrap=false"],
+      "enforcement": "report"
+    },
     "contextualSpacing": {
       "type": "bool",
       "description": "suppress space between paragraphs of the same style. Applied on Add/Set to paragraph pPr; also valid on Style.",
