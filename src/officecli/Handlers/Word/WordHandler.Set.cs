@@ -378,7 +378,17 @@ public partial class WordHandler
                         firstPara.AppendChild(newRun);
                     break;
                 }
-                case "size" or "font" or "bold" or "italic" or "color" or "highlight" or "underline" or "strike":
+                // Per-script font slots and CS run flags follow the same dispatch
+                // as bare bold/italic/size — ApplyRunFormatting handles the
+                // canonical and alias forms, so they are listed here for the
+                // header/footer route to reach it (mirrors body-paragraph Set
+                // dispatch in Set.Element.cs).
+                case "size" or "font" or "bold" or "italic" or "color" or "highlight" or "underline" or "strike"
+                  or "font.latin" or "font.ea" or "font.eastasia" or "font.eastasian"
+                  or "font.cs" or "font.complexscript" or "font.complex"
+                  or "bold.cs" or "italic.cs" or "size.cs"
+                  or "font.bold.cs" or "font.italic.cs" or "font.size.cs"
+                  or "boldcs" or "italiccs" or "sizecs":
                     // Apply run-level formatting to all runs in the container
                     foreach (var run in container.Descendants<Run>())
                         ApplyRunFormatting(EnsureRunProperties(run), key, value);
