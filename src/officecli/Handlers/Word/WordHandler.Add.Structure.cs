@@ -31,7 +31,11 @@ public partial class WordHandler
             "continuous" => SectionMarkValues.Continuous,
             "evenpage" or "even" => SectionMarkValues.EvenPage,
             "oddpage" or "odd" => SectionMarkValues.OddPage,
-            _ => throw new ArgumentException($"Invalid section break type: '{breakType}'. Valid values: nextPage, continuous, evenPage, oddPage.")
+            // R7-fuzz-3: nextColumn is a valid OOXML SectionMarkValues
+            // member used to start a new column inside multi-column layouts
+            // — the whitelist had skipped it, surfacing as a hard reject.
+            "nextcolumn" or "column" => SectionMarkValues.NextColumn,
+            _ => throw new ArgumentException($"Invalid section break type: '{breakType}'. Valid values: nextPage, continuous, evenPage, oddPage, nextColumn.")
         };
 
         // Create a paragraph with section properties to mark the break
