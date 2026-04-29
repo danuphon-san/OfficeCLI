@@ -1211,7 +1211,8 @@ public partial class WordHandler
             Shading => 27,
             // fitText = 28
             VerticalTextAlignment => 29,
-            // rtl = 30, cs = 31, em = 32
+            RightToLeftText => 30,
+            // cs = 31, em = 32
             Languages => 33,
             _ => 100,
         };
