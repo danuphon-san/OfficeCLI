@@ -63,6 +63,98 @@
       "examples": ["--prop direction=rtl", "--prop rightToLeft=true"],
       "readback": "rtl when set; absent when default (ltr)",
       "enforcement": "report"
+    },
+    "zoom": {
+      "type": "number",
+      "description": "sheetView zoom percentage (10-400). Emitted only when non-default (≠100).",
+      "add": false, "set": false, "get": true,
+      "readback": "zoom percentage 10-400",
+      "enforcement": "report"
+    },
+    "gridlines": {
+      "type": "bool",
+      "description": "sheetView gridline visibility. Emitted only when hidden (false); default-on is omitted (CONSISTENCY(default-omission)).",
+      "add": false, "set": false, "get": true,
+      "readback": "true | false",
+      "enforcement": "report"
+    },
+    "headings": {
+      "type": "bool",
+      "description": "row/column header visibility. Emitted only when hidden (false); default-on is omitted (CONSISTENCY(default-omission)).",
+      "add": false, "set": false, "get": true,
+      "readback": "row/column headings visible",
+      "enforcement": "report"
+    },
+    "visibility": {
+      "type": "enum",
+      "values": ["hidden", "veryHidden"],
+      "description": "workbook-level sheet state when not visible. Emitted alongside hidden=true; absent for default-visible sheets.",
+      "add": false, "set": false, "get": true,
+      "readback": "if hidden",
+      "enforcement": "report"
+    },
+    "protect": {
+      "type": "bool",
+      "description": "sheet protection state (read from <sheetProtection sheet=true>). Emitted only when protection is enabled.",
+      "add": false, "set": false, "get": true,
+      "readback": "true if sheet protection enabled",
+      "enforcement": "report"
+    },
+    "orientation": {
+      "type": "string",
+      "description": "PageSetup orientation (portrait | landscape). Emitted only when set on the sheet.",
+      "add": false, "set": false, "get": true,
+      "readback": "page orientation (portrait|landscape)",
+      "enforcement": "report"
+    },
+    "paperSize": {
+      "type": "number",
+      "description": "PageSetup paper-size code (OOXML enumeration; e.g. 1=Letter, 9=A4).",
+      "add": false, "set": false, "get": true,
+      "readback": "OOXML paper size code",
+      "enforcement": "report"
+    },
+    "fitToPage": {
+      "type": "string",
+      "description": "PageSetup fit-to-page width x height (e.g. '1x1' = fit to one page).",
+      "add": false, "set": false, "get": true,
+      "readback": "WxH fit-to-page settings",
+      "enforcement": "report"
+    },
+    "printArea": {
+      "type": "string",
+      "description": "defined-name _xlnm.Print_Area for this sheet, with the leading 'SheetName!' prefix stripped so the value round-trips as an A1 range.",
+      "add": false, "set": false, "get": true,
+      "readback": "A1 range string",
+      "enforcement": "report"
+    },
+    "margin.top": {
+      "type": "string",
+      "description": "PageMargins top margin in inches (e.g. '0.75in').",
+      "add": false, "set": false, "get": true,
+      "readback": "margin in inches",
+      "enforcement": "report"
+    },
+    "margin.bottom": {
+      "type": "string",
+      "description": "PageMargins bottom margin in inches.",
+      "add": false, "set": false, "get": true,
+      "readback": "margin in inches",
+      "enforcement": "report"
+    },
+    "margin.left": {
+      "type": "string",
+      "description": "PageMargins left margin in inches.",
+      "add": false, "set": false, "get": true,
+      "readback": "margin in inches",
+      "enforcement": "report"
+    },
+    "margin.right": {
+      "type": "string",
+      "description": "PageMargins right margin in inches.",
+      "add": false, "set": false, "get": true,
+      "readback": "margin in inches",
+      "enforcement": "report"
     }
   },
   "children": [

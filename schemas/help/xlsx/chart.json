@@ -33,6 +33,7 @@
     "y":          { "type": "length", "add": true, "set": true,  "get": true, "description": "absolute Y position from sheet origin; accepts cm/in/pt/EMU. Ignored if anchor= is set.", "examples": ["--prop y=3cm"] },
     "width":      { "type": "length", "add": true, "set": true,  "get": true, "description": "chart frame width; accepts cm/in/pt/EMU. Ignored if anchor= is set.", "examples": ["--prop width=18cm"] },
     "height":     { "type": "length", "add": true, "set": true,  "get": true, "description": "chart frame height; accepts cm/in/pt/EMU. Ignored if anchor= is set.", "examples": ["--prop height=10cm"] },
+    "seriesCount": { "type": "number", "add": false, "set": false, "get": true, "description": "number of data series in the chart (extended cx:chart only).", "readback": "number of data series", "enforcement": "report" },
 
     "preset":         { "type": "string", "aliases": ["theme", "style.preset"], "add": true, "set": true, "get": false, "description": "named style bundle. Values: minimal, dark, corporate, magazine, dashboard, colorful, monochrome (alias mono).", "examples": ["--prop preset=minimal", "--prop preset=corporate"] },
     "style":          { "type": "number", "aliases": ["styleid"], "add": true, "set": true, "get": false, "description": "built-in chart style id 1..48; pass 'none' to clear.", "examples": ["--prop style=2"] },

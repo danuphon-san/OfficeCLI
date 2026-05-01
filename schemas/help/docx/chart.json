@@ -64,6 +64,13 @@
       "readback": "length in cm (e.g. \"2cm\")",
       "enforcement": "report"
     },
+    "seriesCount": {
+      "type": "number",
+      "description": "number of data series in the chart (extended cx:chart only).",
+      "add": false, "set": false, "get": true,
+      "readback": "number of data series",
+      "enforcement": "report"
+    },
 
     "preset":         { "type": "string", "aliases": ["theme", "style.preset"], "add": true, "set": true, "get": false, "description": "named style bundle. Values: minimal, dark, corporate, magazine, dashboard, colorful, monochrome (alias mono).", "examples": ["--prop preset=minimal", "--prop preset=dark"] },
     "style":          { "type": "number", "aliases": ["styleid"], "add": true, "set": true, "get": false, "description": "built-in chart style id 1..48; pass 'none' to clear.", "examples": ["--prop style=2"] },
