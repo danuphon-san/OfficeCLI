@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.CommandLine;
+using OfficeCli.Core;
 using OfficeCli.Help;
 
 namespace OfficeCli;
@@ -103,12 +104,13 @@ static partial class CommandBuilder
             Description = "Element name when a verb was given (e.g. 'help docx add chart').",
             Arity = ArgumentArity.ZeroOrOne,
         };
-        // Scoped to `help` only — `help all`/`help <fmt> all` emit NDJSON
-        // (one self-contained JSON object per line, no envelope, no outer
-        // array). The text dump is line-oriented but ad-hoc; --jsonl lets AI
-        // agents and scripts consume the same data without parsing custom
-        // tokens like `ops:[asgqr]`. Other help forms ignore --jsonl since
-        // they're either single documents (use --json) or human-readable
+        // Scoped to `help` only — `help all`/`help <fmt> all` can emit either:
+        //   --json   one envelope-wrapped JSON document (matches other CLI
+        //            commands; one parse for the whole corpus)
+        //   --jsonl  NDJSON (one self-contained JSON object per line, no
+        //            envelope, streaming-friendly)
+        // Mutually exclusive on `help all`. Other help forms ignore --jsonl
+        // since they're either single documents (use --json) or human-readable
         // listings with no JSON form.
         var jsonlOption = new Option<bool>("--jsonl")
         {
@@ -183,6 +185,16 @@ static partial class CommandBuilder
 
     private static int RunHelp(string? format, string? verb, string? element, bool json, bool jsonl, RootCommand? rootCommand)
     {
+        // --json and --jsonl are mutually exclusive on `help all` / `help <fmt>
+        // all`: the first emits one envelope-wrapped JSON document, the second
+        // emits NDJSON. Combining them has no coherent meaning. Reject early
+        // with a clear message rather than silently picking one.
+        if (json && jsonl)
+        {
+            Console.Error.WriteLine("error: --json and --jsonl are mutually exclusive.");
+            return 1;
+        }
+
         // Case 1: no args — print SCL's default help (Description, Usage,
         // Options, full Commands list with arg signatures + descriptions),
         // then append the schema-driven reference block. The SCL output is
@@ -206,6 +218,12 @@ static partial class CommandBuilder
                     "error: 'help all' takes no further arguments. Pipe to grep to filter.");
                 return 1;
             }
+            if (json)
+            {
+                Console.WriteLine(OutputFormatter.WrapEnvelope(
+                    SchemaHelpFlatRenderer.RenderAllJsonArray()));
+                return 0;
+            }
             Console.Write(jsonl
                 ? SchemaHelpFlatRenderer.RenderAllJsonl()
                 : SchemaHelpFlatRenderer.RenderAll());
@@ -221,6 +239,12 @@ static partial class CommandBuilder
             && string.Equals(element, "all", StringComparison.OrdinalIgnoreCase))
         {
             var canonical = SchemaHelpLoader.NormalizeFormat(format);
+            if (json)
+            {
+                Console.WriteLine(OutputFormatter.WrapEnvelope(
+                    SchemaHelpFlatRenderer.RenderAllJsonArray(canonical)));
+                return 0;
+            }
             Console.Write(jsonl
                 ? SchemaHelpFlatRenderer.RenderAllJsonl(canonical)
                 : SchemaHelpFlatRenderer.RenderAll(canonical));
@@ -247,6 +271,7 @@ static partial class CommandBuilder
             Console.WriteLine("  officecli help <format> <verb> <element>        Verb-filtered element detail");
             Console.WriteLine("  officecli help <format> <element> --json        Raw schema JSON");
             Console.WriteLine("  officecli help all                              Flat dump of every (format,element,property) — pipe to grep");
+            Console.WriteLine("  officecli help all --json                       Same dump as one envelope-wrapped JSON document");
             Console.WriteLine("  officecli help all --jsonl                      Same dump as NDJSON (one JSON object per line)");
             Console.WriteLine();
             Console.Write("  Formats: ");

@@ -85,6 +85,29 @@ internal static class SchemaHelpFlatRenderer
     internal static string RenderAllJsonl(string? onlyFormat = null)
     {
         var sb = new StringBuilder();
+        foreach (var record in EnumerateRecords(onlyFormat))
+            sb.AppendLine(record.ToJsonString(JsonlOptions));
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// JSON-array variant: returns the same per-record schema as
+    /// <see cref="RenderAllJsonl"/> but as a single JSON array so the output
+    /// is one parseable document. Pair with OutputFormatter.WrapEnvelope to
+    /// match the {success, data, warnings} envelope used by other --json
+    /// commands. Use --jsonl when streaming is preferable; --json when one
+    /// JSON.parse call is.
+    /// </summary>
+    internal static string RenderAllJsonArray(string? onlyFormat = null)
+    {
+        var arr = new JsonArray();
+        foreach (var record in EnumerateRecords(onlyFormat))
+            arr.Add((JsonNode)record);
+        return arr.ToJsonString(JsonlOptions);
+    }
+
+    private static IEnumerable<JsonObject> EnumerateRecords(string? onlyFormat)
+    {
         foreach (var format in SchemaHelpLoader.ListFormats())
         {
             if (onlyFormat != null && !string.Equals(format, onlyFormat, StringComparison.OrdinalIgnoreCase))
@@ -98,13 +121,12 @@ internal static class SchemaHelpFlatRenderer
 
                 using (doc)
                 {
-                    sb.AppendLine(BuildElementJsonRow(format, element, doc));
-                    foreach (var line in BuildPropertyJsonRows(format, element, doc))
-                        sb.AppendLine(line);
+                    yield return BuildElementRecord(format, element, doc);
+                    foreach (var prop in BuildPropertyRecords(format, element, doc))
+                        yield return prop;
                 }
             }
         }
-        return sb.ToString();
     }
 
     private static readonly JsonSerializerOptions JsonlOptions = new()
@@ -113,7 +135,7 @@ internal static class SchemaHelpFlatRenderer
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    private static string BuildElementJsonRow(string format, string element, JsonDocument doc)
+    private static JsonObject BuildElementRecord(string format, string element, JsonDocument doc)
     {
         var root = doc.RootElement;
         var obj = new JsonObject
@@ -131,10 +153,10 @@ internal static class SchemaHelpFlatRenderer
             foreach (var p in paths) arr.Add((JsonNode?)JsonValue.Create(p));
             obj["paths"] = arr;
         }
-        return obj.ToJsonString(JsonlOptions);
+        return obj;
     }
 
-    private static IEnumerable<string> BuildPropertyJsonRows(string format, string element, JsonDocument doc)
+    private static IEnumerable<JsonObject> BuildPropertyRecords(string format, string element, JsonDocument doc)
     {
         if (!doc.RootElement.TryGetProperty("properties", out var props)
             || props.ValueKind != JsonValueKind.Object) yield break;
@@ -184,7 +206,7 @@ internal static class SchemaHelpFlatRenderer
                     obj["example"] = SingleLine(first.GetString()!, 80);
             }
 
-            yield return obj.ToJsonString(JsonlOptions);
+            yield return obj;
         }
     }
 
