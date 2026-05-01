@@ -3,6 +3,7 @@
 
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace OfficeCli.Help;
 
@@ -68,6 +69,137 @@ internal static class SchemaHelpFlatRenderer
             }
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// NDJSON variant of <see cref="RenderAll"/>: one JSON object per line, no
+    /// outer array, no envelope, no header comments. Each line is independently
+    /// parseable so consumers can stream through `while read line; jq ...` or
+    /// load straight into a JSONL-aware tool. Schema (per record):
+    ///   {"format":...,"element":...,"kind":"ELEM","ops":"asgqr","paths":[...]}
+    ///   {"format":...,"element":...,"kind":"PROP","name":...,"type":...,
+    ///    "ops":"as-g-","values":[...],"aliases":[...],"description":...,"example":...}
+    /// `ops` keeps the 5-char asgqr/- string from the text variant so consumers
+    /// only have to learn one ops vocabulary across both renderers.
+    /// </summary>
+    internal static string RenderAllJsonl(string? onlyFormat = null)
+    {
+        var sb = new StringBuilder();
+        foreach (var format in SchemaHelpLoader.ListFormats())
+        {
+            if (onlyFormat != null && !string.Equals(format, onlyFormat, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            foreach (var element in SchemaHelpLoader.ListElements(format))
+            {
+                JsonDocument doc;
+                try { doc = SchemaHelpLoader.LoadSchema(format, element); }
+                catch { continue; }
+
+                using (doc)
+                {
+                    sb.AppendLine(BuildElementJsonRow(format, element, doc));
+                    foreach (var line in BuildPropertyJsonRows(format, element, doc))
+                        sb.AppendLine(line);
+                }
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static readonly JsonSerializerOptions JsonlOptions = new()
+    {
+        WriteIndented = false,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    private static string BuildElementJsonRow(string format, string element, JsonDocument doc)
+    {
+        var root = doc.RootElement;
+        var obj = new JsonObject
+        {
+            ["format"] = format,
+            ["element"] = element,
+            ["kind"] = "ELEM",
+            ["ops"] = FormatOps(root),
+        };
+
+        var paths = CollectPaths(root);
+        if (paths.Count > 0)
+        {
+            var arr = new JsonArray();
+            foreach (var p in paths) arr.Add((JsonNode?)JsonValue.Create(p));
+            obj["paths"] = arr;
+        }
+        return obj.ToJsonString(JsonlOptions);
+    }
+
+    private static IEnumerable<string> BuildPropertyJsonRows(string format, string element, JsonDocument doc)
+    {
+        if (!doc.RootElement.TryGetProperty("properties", out var props)
+            || props.ValueKind != JsonValueKind.Object) yield break;
+
+        foreach (var prop in props.EnumerateObject())
+        {
+            if (prop.Value.ValueKind != JsonValueKind.Object) continue;
+
+            var obj = new JsonObject
+            {
+                ["format"] = format,
+                ["element"] = element,
+                ["kind"] = "PROP",
+                ["name"] = prop.Name,
+                ["type"] = TryGetString(prop.Value, "type") ?? "any",
+                ["ops"] = FormatOps(prop.Value),
+            };
+
+            if (prop.Value.TryGetProperty("values", out var values)
+                && values.ValueKind == JsonValueKind.Array)
+            {
+                var arr = new JsonArray();
+                foreach (var v in values.EnumerateArray())
+                    if (v.ValueKind == JsonValueKind.String) arr.Add((JsonNode?)JsonValue.Create(v.GetString()));
+                if (arr.Count > 0) obj["values"] = arr;
+            }
+
+            if (prop.Value.TryGetProperty("aliases", out var aliases)
+                && aliases.ValueKind == JsonValueKind.Array)
+            {
+                var arr = new JsonArray();
+                foreach (var a in aliases.EnumerateArray())
+                    if (a.ValueKind == JsonValueKind.String) arr.Add((JsonNode?)JsonValue.Create(a.GetString()));
+                if (arr.Count > 0) obj["aliases"] = arr;
+            }
+
+            var desc = TryGetString(prop.Value, "description")
+                       ?? TryGetString(prop.Value, "readback");
+            if (!string.IsNullOrEmpty(desc))
+                obj["description"] = SingleLine(desc!, 120);
+
+            if (prop.Value.TryGetProperty("examples", out var examples)
+                && examples.ValueKind == JsonValueKind.Array)
+            {
+                var first = examples.EnumerateArray().FirstOrDefault();
+                if (first.ValueKind == JsonValueKind.String)
+                    obj["example"] = SingleLine(first.GetString()!, 80);
+            }
+
+            yield return obj.ToJsonString(JsonlOptions);
+        }
+    }
+
+    private static List<string> CollectPaths(JsonElement root)
+    {
+        var parts = new List<string>();
+        if (!root.TryGetProperty("paths", out var paths)
+            || paths.ValueKind != JsonValueKind.Object) return parts;
+        foreach (var kind in new[] { "stable", "positional" })
+        {
+            if (paths.TryGetProperty(kind, out var arr) && arr.ValueKind == JsonValueKind.Array)
+                foreach (var p in arr.EnumerateArray())
+                    if (p.ValueKind == JsonValueKind.String) parts.Add(p.GetString()!);
+        }
+        return parts;
     }
 
     private static void AppendElementRow(StringBuilder sb, string format, string element, JsonDocument doc)

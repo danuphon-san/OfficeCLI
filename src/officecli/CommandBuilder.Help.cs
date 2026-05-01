@@ -103,16 +103,29 @@ static partial class CommandBuilder
             Description = "Element name when a verb was given (e.g. 'help docx add chart').",
             Arity = ArgumentArity.ZeroOrOne,
         };
+        // Scoped to `help` only — `help all`/`help <fmt> all` emit NDJSON
+        // (one self-contained JSON object per line, no envelope, no outer
+        // array). The text dump is line-oriented but ad-hoc; --jsonl lets AI
+        // agents and scripts consume the same data without parsing custom
+        // tokens like `ops:[asgqr]`. Other help forms ignore --jsonl since
+        // they're either single documents (use --json) or human-readable
+        // listings with no JSON form.
+        var jsonlOption = new Option<bool>("--jsonl")
+        {
+            Description = "(help all only) Emit NDJSON: one JSON object per line, no envelope.",
+        };
 
         var command = new Command("help", "Show schema-driven capability reference for officecli.");
         command.Add(formatArg);
         command.Add(secondArg);
         command.Add(thirdArg);
         command.Add(jsonOption);
+        command.Add(jsonlOption);
 
         command.SetAction(result =>
         {
             var json = result.GetValue(jsonOption);
+            var jsonl = result.GetValue(jsonlOption);
             var format = result.GetValue(formatArg);
             var second = result.GetValue(secondArg);
             var third = result.GetValue(thirdArg);
@@ -162,13 +175,13 @@ static partial class CommandBuilder
                 }
             }
 
-            return SafeRun(() => RunHelp(format, verb, element, json, rootCommand), json);
+            return SafeRun(() => RunHelp(format, verb, element, json, jsonl, rootCommand), json);
         });
 
         return command;
     }
 
-    private static int RunHelp(string? format, string? verb, string? element, bool json, RootCommand? rootCommand)
+    private static int RunHelp(string? format, string? verb, string? element, bool json, bool jsonl, RootCommand? rootCommand)
     {
         // Case 1: no args — print SCL's default help (Description, Usage,
         // Options, full Commands list with arg signatures + descriptions),
@@ -193,7 +206,9 @@ static partial class CommandBuilder
                     "error: 'help all' takes no further arguments. Pipe to grep to filter.");
                 return 1;
             }
-            Console.Write(SchemaHelpFlatRenderer.RenderAll());
+            Console.Write(jsonl
+                ? SchemaHelpFlatRenderer.RenderAllJsonl()
+                : SchemaHelpFlatRenderer.RenderAll());
             return 0;
         }
 
@@ -206,7 +221,9 @@ static partial class CommandBuilder
             && string.Equals(element, "all", StringComparison.OrdinalIgnoreCase))
         {
             var canonical = SchemaHelpLoader.NormalizeFormat(format);
-            Console.Write(SchemaHelpFlatRenderer.RenderAll(canonical));
+            Console.Write(jsonl
+                ? SchemaHelpFlatRenderer.RenderAllJsonl(canonical)
+                : SchemaHelpFlatRenderer.RenderAll(canonical));
             return 0;
         }
 
@@ -230,6 +247,7 @@ static partial class CommandBuilder
             Console.WriteLine("  officecli help <format> <verb> <element>        Verb-filtered element detail");
             Console.WriteLine("  officecli help <format> <element> --json        Raw schema JSON");
             Console.WriteLine("  officecli help all                              Flat dump of every (format,element,property) — pipe to grep");
+            Console.WriteLine("  officecli help all --jsonl                      Same dump as NDJSON (one JSON object per line)");
             Console.WriteLine();
             Console.Write("  Formats: ");
             Console.WriteLine(string.Join(", ", SchemaHelpLoader.ListFormats()));
