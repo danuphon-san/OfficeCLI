@@ -58,7 +58,7 @@ These are the deliverable standards every deck MUST meet. Violating any one = no
 
 Rule of thumb: **min shape height ≈ font_pt × 0.05cm**. An 18pt sublabel in a 0.8cm-tall box will overflow — `view annotated` catches this.
 
-Title must be **≥ 2× body size** (36pt over 20pt works; 28pt over 20pt looks timid). Four legit exceptions to body ≥ 18pt: chart axis labels, legends, footer / page number, and ≤ 5-word KPI sublabels (e.g. "Active users"). Descriptive sentences must be ≥ 18pt. Left-align body; center only titles and hero numbers.
+Title must be **≥ 2× body size** (36pt over 20pt works; 28pt over 20pt looks timid). Four legit exceptions to body ≥ 18pt: chart axis labels, legends, footer / page number, and ≤ 5-word KPI sublabels (e.g. "Active users"). Descriptive sentences must be ≥ 18pt. Left-align body; center only titles and hero numbers. If "the cards won't fit", drop cards instead of shrinking font.
 
 **Two fonts max, one palette.** One heading font + one body font (e.g. Georgia + Calibri). One dominant brand color (60–70% weight) + one supporting + one accent. Never mix 4+ colors in body content.
 
@@ -72,23 +72,18 @@ Title must be **≥ 2× body size** (36pt over 20pt works; 28pt over 20pt looks 
 
 Before declaring done, the per-slide render (see QA) MUST satisfy:
 
-- **Type hierarchy met** — see Requirements table above (title ≥ 36pt, body ≥ 18pt, title ≥ 2× body). Verify via `view annotated`.
 - **No placeholder tokens rendered as content.** `{{name}}`, `$fy$24`, `<TODO>`, `lorem`, `xxxx`, empty `()`/`[]` in chart titles never appear.
 - **No overflow past slide edges.** For 16:9 (33.87 × 19.05cm), every shape satisfies `x + width ≤ 33.87cm` AND `y + height ≤ 19.05cm`. `get` and check — don't eyeball.
 - **No text overflow inside shapes.** A 72pt KPI in a 4cm-tall box clips. Shrink the number, enlarge the box, or shorten the text — never trim content to fit.
 - **Cover slide is content-rich.** Title + subtitle + presenter/client block + date + a brand band or key-takeaway strap. A cover with 80% whitespace reads as a stub.
-- **Contrast floor.** On dark backgrounds (brightness < 30%), body text MUST be `FFFFFF` or > 80%-bright. Mid-gray on dark navy is invisible on projection.
-- **Animation restraint.** ≤ 1 per slide, ≤ 600ms — full rules in Animation restraint below.
+- **Contrast.** On fills with brightness < 30% (`1E2761`, `36454F`, `000000`, deep forest / berry / cherry), every run of body text, card body, chart series fill, and icon color must be `FFFFFF` or brightness > 80%. Mid-gray (`6B7B8D` ≈ 44%) reads fine on a laptop and vanishes on projection. Verify via `view html` after the dark-fill pass.
 - **No `\$`, `\t`, `\n` literals in slide text.** If `view text` shows these, a shell-escape leaked — delete and re-enter via heredoc batch.
 
 If any fails, STOP and fix before declaring done.
 
-### Hard rules — typography / contrast / notes / KPI fit
+### KPI fit math
 
-- **Body floors at 18pt** (absolute floor 16pt for tiny sublabels; 18pt is the working floor for all paragraph and card body text per the Requirements table). Exceptions are non-primary-read elements only: chart axis labels, legends, footer / page number, and KPI sublabels of ≤ 5 words (e.g. "Active users", "MoM growth"). Full descriptive sentences never qualify — shrink the sentence or split the slide, do not shrink the font. "The cards won't fit" is never a reason to drop below floor; it is a reason to drop cards.
-- **Dark backgrounds force near-white body.** When fill brightness < 30% (`1E2761`, `36454F`, `000000`, deep forest / berry / cherry), every run of body text, card body, chart series fill, and icon color must be `FFFFFF` or brightness > 80%. Mid-gray (`6B7B8D` ≈ 44%) reads fine on a laptop screen and disappears under projector glare. Check with `view html` after the dark-fill pass.
-- **Content slides carry speaker notes.** Every slide that is neither cover nor closing must have `--type notes --prop text="..."`. The speaker needs a script; the audience should not read the slide verbatim. Missing notes on a content slide is not shippable.
-- **KPI text fits the card — pre-compute, don't eyeball.** In a 7cm-wide card at 60pt Georgia bold, values with `$` and `.` (wide glyphs) wrap at 4 characters. `$9.4M` breaks the card; use `$9M` + "USD millions" sublabel, or move to the 3-card 9.78cm layout. Upper bound: `max_size_pt ≈ card_width_cm × denom`, where denom = 10 for 1–2 chars, 7 for 3–4 chars, 5 for 5+ chars.
+**KPI text must fit the card — pre-compute, don't eyeball.** In a 7cm-wide card at 60pt Georgia bold, values with `$` and `.` (wide glyphs) wrap at 4 characters. `$9.4M` breaks the card; use `$9M` + "USD millions" sublabel, or move to the 3-card 9.78cm layout. Upper bound: `max_size_pt ≈ card_width_cm × denom`, where denom = 10 for 1–2 chars, 7 for 3–4 chars, 5 for 5+ chars.
 
 ### `layout=blank` and alt text
 
