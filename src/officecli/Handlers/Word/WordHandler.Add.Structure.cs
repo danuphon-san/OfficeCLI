@@ -538,6 +538,21 @@ public partial class WordHandler
             sp.After = SpacingConverter.ParseWordSpacing(sSAfter).ToString();
             hasPPr = true;
         }
+        // CONSISTENCY(add-set-symmetry): mirror SetStylePath's lineSpacing case
+        // (WordHandler.Set.Dispatch.cs:1403). Without this, `add /styles … --prop
+        // lineSpacing=1.5x` was silent-dropped while `set /styles/X --prop
+        // lineSpacing=1.5x` worked, breaking dump → batch round-trip on style
+        // entries (BUG-R2-08 / BT-8).
+        if (properties.TryGetValue("linespacing", out var sLineSpacing) || properties.TryGetValue("lineSpacing", out sLineSpacing))
+        {
+            var sp = stylePPr.SpacingBetweenLines ?? (stylePPr.SpacingBetweenLines = new SpacingBetweenLines());
+            var (twips, isMultiplier) = SpacingConverter.ParseWordLineSpacing(sLineSpacing);
+            sp.Line = twips.ToString();
+            sp.LineRule = isMultiplier
+                ? new DocumentFormat.OpenXml.EnumValue<LineSpacingRuleValues>(LineSpacingRuleValues.Auto)
+                : new DocumentFormat.OpenXml.EnumValue<LineSpacingRuleValues>(LineSpacingRuleValues.Exact);
+            hasPPr = true;
+        }
         // Reading direction: <w:bidi/> on style pPr (mirrors AddParagraph).
         // Without this, `add /styles --prop direction=rtl` either fell through
         // to the dotted-key probe (which writes <w:rtl/> on rPr but skips
@@ -711,7 +726,8 @@ public partial class WordHandler
             "name", "styleName", "stylename",
             "type", "basedon", "basedOn", "next",
             "align", "alignment", "spacebefore", "spaceBefore",
-            "spaceafter", "spaceAfter", "font", "size", "bold", "italic", "color",
+            "spaceafter", "spaceAfter", "linespacing", "lineSpacing",
+            "font", "size", "bold", "italic", "color",
             "direction", "dir", "bidi",
             "font.ascii", "font.hAnsi", "font.eastAsia", "font.cs",
             "numId", "numid", "ilvl", "numLevel", "numlevel",
