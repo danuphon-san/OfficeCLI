@@ -227,13 +227,71 @@ internal static class RawXmlHelper
     public static List<ValidationError> ValidateDocument(OpenXmlPackage package)
     {
         var validator = new OpenXmlValidator(DocumentFormat.OpenXml.FileFormatVersions.Microsoft365);
-        return validator.Validate(package)
-            .Select(e => new ValidationError(
-                e.ErrorType.ToString(),
-                e.Description,
-                e.Path?.XPath,
-                e.Part?.Uri.ToString()))
-            .ToList();
+        // BUG-R6-08: documents containing w:numPicBullet can trip an NRE
+        // inside SDK validation when one of its child accessors hits a
+        // null. Materialise per-error with try/catch so a single problem
+        // entry doesn't bring the whole `validate` command down. Surface
+        // the exception as a synthetic ValidationError instead of
+        // bubbling out as a process-level crash.
+        var errors = new List<ValidationError>();
+        IEnumerable<DocumentFormat.OpenXml.Validation.ValidationErrorInfo> raw;
+        try
+        {
+            raw = validator.Validate(package);
+        }
+        catch (Exception ex)
+        {
+            errors.Add(new ValidationError(
+                "ValidatorException",
+                $"Validator threw before producing results: {ex.GetType().Name}: {ex.Message}",
+                null, null));
+            return errors;
+        }
+        // The IEnumerable is lazy — iterate with try/catch so one bad
+        // error entry does not abort the rest.
+        using var enumerator = raw.GetEnumerator();
+        while (true)
+        {
+            DocumentFormat.OpenXml.Validation.ValidationErrorInfo? e = null;
+            try
+            {
+                if (!enumerator.MoveNext()) break;
+                e = enumerator.Current;
+            }
+            catch (NullReferenceException nre)
+            {
+                errors.Add(new ValidationError(
+                    "ValidatorNullReference",
+                    $"SDK validator hit a null while inspecting next error: {nre.Message}",
+                    null, null));
+                continue;
+            }
+            catch (Exception ex)
+            {
+                errors.Add(new ValidationError(
+                    "ValidatorException",
+                    $"SDK validator threw while inspecting next error: {ex.GetType().Name}: {ex.Message}",
+                    null, null));
+                continue;
+            }
+            if (e == null) continue;
+            try
+            {
+                errors.Add(new ValidationError(
+                    e.ErrorType.ToString(),
+                    e.Description,
+                    e.Path?.XPath,
+                    e.Part?.Uri.ToString()));
+            }
+            catch (Exception ex)
+            {
+                errors.Add(new ValidationError(
+                    "ValidatorException",
+                    $"Failed to materialise validation error: {ex.GetType().Name}: {ex.Message}",
+                    null, null));
+            }
+        }
+        return errors;
     }
 
     private static void TryAddNamespace(XmlNamespaceManager nsManager, string prefix, string uri)
