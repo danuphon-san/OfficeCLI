@@ -177,15 +177,22 @@ public static class BatchEmitter
         {
             if (child.Type == "header")
             {
+                // BUG-DUMP23-03: skip orphaned header parts (present in the
+                // package but not referenced by any section's w:headerReference).
+                // Re-emitting them as `add header type=default` collides with
+                // the real default header on batch replay ("Header of type
+                // 'default' already exists"). Only re-emit parts that a section
+                // actually links to.
+                if (!headerPathToType.TryGetValue(child.Path, out var ht)) continue;
                 hIdx++;
-                var t = headerPathToType.TryGetValue(child.Path, out var ht) ? ht : "default";
-                EmitHeaderFooterPart(word, child.Path, "header", hIdx, items, t);
+                EmitHeaderFooterPart(word, child.Path, "header", hIdx, items, ht);
             }
             else if (child.Type == "footer")
             {
+                // BUG-DUMP23-03: same orphan guard as header above.
+                if (!footerPathToType.TryGetValue(child.Path, out var ft)) continue;
                 fIdx++;
-                var t = footerPathToType.TryGetValue(child.Path, out var ft) ? ft : "default";
-                EmitHeaderFooterPart(word, child.Path, "footer", fIdx, items, t);
+                EmitHeaderFooterPart(word, child.Path, "footer", fIdx, items, ft);
             }
         }
     }
