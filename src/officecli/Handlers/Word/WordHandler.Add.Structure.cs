@@ -544,14 +544,12 @@ public partial class WordHandler
                 $"Style with name '{styleName}' already exists. Pick a unique --prop name.");
 
         // Built-in styles must not have customStyle=true, or Word won't recognize them
-        // (e.g. TOC won't find Heading1 if it's marked as custom)
-        var builtInIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "Normal", "Heading1", "Heading2", "Heading3", "Heading4", "Heading5",
-            "Heading6", "Heading7", "Heading8", "Heading9", "Title", "Subtitle",
-            "Quote", "IntenseQuote", "ListParagraph", "NoSpacing", "TOCHeading"
-        };
-        var isBuiltIn = builtInIds.Contains(styleId);
+        // (e.g. TOC won't find Heading1 if it's marked as custom).
+        // BUG-023 — single source of truth: reuse the upsert set above so that
+        // DefaultParagraphFont / TableNormal / NoList (idempotent re-adds on
+        // dump→batch) don't get stamped customStyle=true and break Word's
+        // run-style fallback chain.
+        var isBuiltIn = builtInIdsForUpsert.Contains(styleId);
 
         var newStyle = new Style
         {
