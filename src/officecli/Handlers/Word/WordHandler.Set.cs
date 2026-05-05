@@ -552,7 +552,14 @@ public partial class WordHandler
         }
         else
             size = style == BorderValues.Nil ? 0u : style == BorderValues.Thick ? 12u : 4u;
-        string? color = parts.Length > 2 ? SanitizeHex(parts[2]) : null;
+        // BUG-R7-02: dump emits "nil;0;;0" for nil borders (empty color
+        // segment). SanitizeHex rejects empty input with "Invalid color
+        // value: ''", breaking round-trip on any docx with nil paragraph
+        // borders. Treat an empty color segment as "no color" (null) rather
+        // than a parse error — this matches dump's emit semantics.
+        string? color = (parts.Length > 2 && !string.IsNullOrEmpty(parts[2]))
+            ? SanitizeHex(parts[2])
+            : null;
         uint space = 0u;
         if (parts.Length > 3 && !uint.TryParse(parts[3], out space))
             throw new ArgumentException($"Invalid border space '{parts[3]}', expected integer. Format: STYLE[;SIZE[;COLOR[;SPACE]]]");
