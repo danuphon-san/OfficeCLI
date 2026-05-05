@@ -476,13 +476,33 @@ public partial class WordHandler
             {
                 rfCs = fCs;
             }
-            if (rfAscii != null || rfHAnsi != null || rfEa != null || rfCs != null)
+            // BUG-DUMP14-03: theme-font slot support — bind a run to a theme
+            // major/minor font (rFonts/@*Theme) instead of a literal face.
+            string? rfAsciiTheme = null, rfHAnsiTheme = null, rfEaTheme = null, rfCsTheme = null;
+            if (properties.TryGetValue("font.asciiTheme", out var fAT) || properties.TryGetValue("font.asciitheme", out fAT))
+                rfAsciiTheme = fAT;
+            if (properties.TryGetValue("font.hAnsiTheme", out var fHAT) || properties.TryGetValue("font.hansitheme", out fHAT))
+                rfHAnsiTheme = fHAT;
+            if (properties.TryGetValue("font.eaTheme", out var fEAT) || properties.TryGetValue("font.eatheme", out fEAT) || properties.TryGetValue("font.eastasiatheme", out fEAT))
+                rfEaTheme = fEAT;
+            if (properties.TryGetValue("font.csTheme", out var fCST) || properties.TryGetValue("font.cstheme", out fCST))
+                rfCsTheme = fCST;
+            if (rfAscii != null || rfHAnsi != null || rfEa != null || rfCs != null
+                || rfAsciiTheme != null || rfHAnsiTheme != null || rfEaTheme != null || rfCsTheme != null)
             {
                 var rFonts = new RunFonts();
                 if (rfAscii != null) rFonts.Ascii = rfAscii;
                 if (rfHAnsi != null) rFonts.HighAnsi = rfHAnsi;
                 if (rfEa != null) rFonts.EastAsia = rfEa;
                 if (rfCs != null) rFonts.ComplexScript = rfCs;
+                if (rfAsciiTheme != null)
+                    rFonts.AsciiTheme = new EnumValue<ThemeFontValues>(new ThemeFontValues(rfAsciiTheme));
+                if (rfHAnsiTheme != null)
+                    rFonts.HighAnsiTheme = new EnumValue<ThemeFontValues>(new ThemeFontValues(rfHAnsiTheme));
+                if (rfEaTheme != null)
+                    rFonts.EastAsiaTheme = new EnumValue<ThemeFontValues>(new ThemeFontValues(rfEaTheme));
+                if (rfCsTheme != null)
+                    rFonts.ComplexScriptTheme = new EnumValue<ThemeFontValues>(new ThemeFontValues(rfCsTheme));
                 rProps.AppendChild(rFonts);
             }
             // BUG-R6-03 / F-3: rStyle binds the paragraph mark above (so the

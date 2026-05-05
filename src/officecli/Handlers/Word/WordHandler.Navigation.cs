@@ -1959,6 +1959,19 @@ public partial class WordHandler
                     else if (hAnsi != null) node.Format["font.latin"] = hAnsi;
                 }
                 if (!string.IsNullOrEmpty(rFonts.EastAsia?.Value)) node.Format["font.ea"] = rFonts.EastAsia!.Value!;
+                // BUG-DUMP14-03: theme-font slots (asciiTheme/hAnsiTheme/
+                // eastAsiaTheme/cstheme) bind a run to a theme major/minor
+                // font instead of a literal face name. Without surfacing
+                // them, documents using theme fonts lose all font bindings
+                // on round-trip (only literal Ascii/HighAnsi were read).
+                if (rFonts.AsciiTheme?.HasValue == true)
+                    node.Format["font.asciiTheme"] = rFonts.AsciiTheme.InnerText;
+                if (rFonts.HighAnsiTheme?.HasValue == true)
+                    node.Format["font.hAnsiTheme"] = rFonts.HighAnsiTheme.InnerText;
+                if (rFonts.EastAsiaTheme?.HasValue == true)
+                    node.Format["font.eaTheme"] = rFonts.EastAsiaTheme.InnerText;
+                if (rFonts.ComplexScriptTheme?.HasValue == true)
+                    node.Format["font.csTheme"] = rFonts.ComplexScriptTheme.InnerText;
             }
             // <w:lang/> three slots: val (latin) / eastAsia / bidi (cs).
             // CONSISTENCY(canonical-keys): mirror font.latin/font.ea/font.cs vocabulary.
