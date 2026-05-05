@@ -614,6 +614,30 @@ public static class BatchEmitter
                 case "sdt":
                     EmitSdt(word, child.Path, items);
                     break;
+                case "equation":
+                    // BUG-DUMP13-03: a bare <m:oMathPara> direct child of
+                    // <w:body> (not wrapped in a w:p) surfaces in
+                    // bodyNode.Children as type="equation". Without this case
+                    // it fell to `default: break` and was silently dropped.
+                    // Mirror the EmitParagraph equation branch shape.
+                    {
+                        var eqFull = word.Get(child.Path);
+                        var mode = eqFull.Format.TryGetValue("mode", out var m) ? m?.ToString() : "display";
+                        var eqProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["mode"] = string.IsNullOrEmpty(mode) ? "display" : mode
+                        };
+                        if (!string.IsNullOrEmpty(eqFull.Text))
+                            eqProps["formula"] = eqFull.Text!;
+                        items.Add(new BatchItem
+                        {
+                            Command = "add",
+                            Parent = "/body",
+                            Type = "equation",
+                            Props = eqProps
+                        });
+                    }
+                    break;
                 default:
                     // Unknown body-level child types — skip for v0.5.
                     break;
