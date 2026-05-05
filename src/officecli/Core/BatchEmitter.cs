@@ -917,7 +917,14 @@ public static class BatchEmitter
                 // BUG-DUMP14-02: <w:r><w:tab/></w:r> surfaces as type="tab"
                 // with empty Text. Without inclusion the tab-only run was
                 // dropped from the runs pipeline and round-trip lost the tab.
-                || c.Type == "tab")
+                || c.Type == "tab"
+                // BUG-DUMP25-01: BookmarkStart children carry intra-paragraph
+                // position relative to sibling runs. Including them in the
+                // unified runs list keeps DOM order on emit; the foreach loop
+                // below has a dedicated bookmark branch that mirrors the
+                // round-4 / round-10 standalone emit (with deferral support
+                // for cross-paragraph spans).
+                || c.Type == "bookmark")
             .ToList();
         var breaks = runs.Where(c => c.Type == "break").ToList();
         // CONSISTENCY(bookmark-roundtrip): bookmarks are paragraph-level
@@ -1110,49 +1117,10 @@ public static class BatchEmitter
         var paraTargetPath = $"{parentPath}/p[{targetIndex}]";
         EmitTabStops(paraTargetPath, pTabs, items);
 
-        // CONSISTENCY(bookmark-roundtrip): emit `add bookmark` for each
-        // bookmarkStart child. Get surfaces these as type="bookmark" with
-        // name in Format; AddBookmark consumes name/id and rebuilds the
-        // BookmarkStart/BookmarkEnd pair. Without this, every bookmark in
-        // the source document was silently dropped on dump.
-        foreach (var bm in bookmarks)
-        {
-            var bmProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            if (bm.Format.TryGetValue("name", out var bmName) && bmName != null)
-            {
-                var s = bmName.ToString();
-                if (!string.IsNullOrEmpty(s)) bmProps["name"] = s;
-            }
-            if (bmProps.Count == 0) continue; // skip unnamed/anonymous bookmarks
-            // BUG-DUMP10-04: forward cross-paragraph bookmark span offset
-            // so AddBookmark can place the BookmarkEnd N paragraphs
-            // downstream instead of collapsing it into the start paragraph.
-            bool deferred = false;
-            if (bm.Format.TryGetValue("endPara", out var bmEnd) && bmEnd != null)
-            {
-                var s = bmEnd.ToString();
-                if (!string.IsNullOrEmpty(s) && s != "0")
-                {
-                    bmProps["endPara"] = s;
-                    deferred = true;
-                }
-            }
-            var bmItem = new BatchItem
-            {
-                Command = "add",
-                Parent = paraTargetPath,
-                Type = "bookmark",
-                Props = bmProps
-            };
-            // Deferred bookmarks must run after every host paragraph exists
-            // (the End sibling is at index startIdx + endPara). When ctx is
-            // null (header/footer/cell paths) fall back to inline emit —
-            // those scopes don't host multi-paragraph bookmarks in practice.
-            if (deferred && ctx != null)
-                ctx.DeferredBookmarks.Add(bmItem);
-            else
-                items.Add(bmItem);
-        }
+        // BUG-DUMP25-01: bookmarks now emit inline from the runs loop below
+        // so their intra-paragraph DOM position relative to sibling runs is
+        // preserved on round-trip. See the `if (run.Type == "bookmark")`
+        // branch after CoalesceHyperlinkRuns.
 
         // BUG-DUMP4-06: emit inline SdtRun children. Mirror EmitSdt's whitelist
         // — AddSdt consumes type/alias/tag/items/format and the visible text.
@@ -1200,6 +1168,45 @@ public static class BatchEmitter
             // / textwrapping. BUG-DUMP5-02: emitting from the unified runs
             // loop keeps each break at its source position instead of hoisting
             // every break to the front of the paragraph.
+            // BUG-DUMP25-01: bookmark child emitted in DOM order so a
+            // BookmarkStart between runs survives round-trip at its
+            // original intra-paragraph offset. Mirrors the round-4 /
+            // round-10 emit logic (props=name[,endPara]; deferred
+            // bookmarks pushed onto ctx.DeferredBookmarks so the End
+            // sibling can land in a downstream paragraph).
+            if (run.Type == "bookmark")
+            {
+                var bmProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (run.Format.TryGetValue("name", out var bmName) && bmName != null)
+                {
+                    var s = bmName.ToString();
+                    if (!string.IsNullOrEmpty(s)) bmProps["name"] = s;
+                }
+                if (bmProps.Count == 0) continue; // skip unnamed/anonymous bookmarks
+                bool deferred = false;
+                if (run.Format.TryGetValue("endPara", out var bmEnd) && bmEnd != null)
+                {
+                    var s = bmEnd.ToString();
+                    if (!string.IsNullOrEmpty(s) && s != "0")
+                    {
+                        bmProps["endPara"] = s;
+                        deferred = true;
+                    }
+                }
+                var bmItem = new BatchItem
+                {
+                    Command = "add",
+                    Parent = paraTargetPath,
+                    Type = "bookmark",
+                    Props = bmProps
+                };
+                if (deferred && ctx != null)
+                    ctx.DeferredBookmarks.Add(bmItem);
+                else
+                    items.Add(bmItem);
+                continue;
+            }
+
             if (run.Type == "break")
             {
                 var breakType = run.Format.TryGetValue("breakType", out var bt) ? bt?.ToString() : null;

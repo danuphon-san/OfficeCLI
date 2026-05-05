@@ -1753,9 +1753,17 @@ public partial class WordHandler
                     .Where(u => u.NamespaceUri == wNs2
                         && (u.LocalName == "fldChar" || u.LocalName == "instrText"))
                     .ToList();
+                // BUG-DUMP25-01: include direct-child BookmarkStart elements in
+                // the DOM-ordered merge so a bookmark sitting between two runs
+                // surfaces as `r, bookmark, r` rather than the legacy
+                // `r, r, bookmark` (every bookmark hoisted to the tail of
+                // node.Children). The trailing standalone bookmark loop below
+                // is now skipped when this branch surfaces them.
+                var paraBookmarks = para.Elements<BookmarkStart>().ToList();
                 var ordered = runs.Select(r => (pos: descendantPos.TryGetValue(r, out var p) ? p : int.MaxValue, kind: "run", el: (OpenXmlElement)r))
                     .Concat(inlineEqsAll.Select(e => (pos: descendantPos.TryGetValue(e, out var p) ? p : int.MaxValue, kind: "eq", el: (OpenXmlElement)e)))
                     .Concat(bareFieldUnknowns.Select(u => (pos: descendantPos.TryGetValue(u, out var p) ? p : int.MaxValue, kind: u.LocalName == "fldChar" ? "fieldChar" : "instrText", el: (OpenXmlElement)u)))
+                    .Concat(paraBookmarks.Select(b => (pos: descendantPos.TryGetValue(b, out var p) ? p : int.MaxValue, kind: "bookmark", el: (OpenXmlElement)b)))
                     .OrderBy(t => t.pos)
                     .ToList();
                 int bareFieldIdx = 0;
@@ -1802,6 +1810,17 @@ public partial class WordHandler
                             inlineEqIdx++;
                         }
                         node.Children.Add(ElementToNode(entry.el, eqPath, depth - 1));
+                    }
+                    else if (entry.kind == "bookmark")
+                    {
+                        // BUG-DUMP25-01: emit BookmarkStart at its DOM position
+                        // (sandwiched between sibling runs/equations) so dump→
+                        // batch round-trips preserve mid-paragraph bookmark
+                        // offsets like Word's _GoBack resume-cursor mark.
+                        // Path index counts bookmarks among themselves to
+                        // stay 1-based, mirroring the legacy bmIdx counter.
+                        int bmPathIdx = paraBookmarks.IndexOf((BookmarkStart)entry.el);
+                        node.Children.Add(ElementToNode(entry.el, $"{path}/bookmark[{bmPathIdx + 1}]", depth - 1));
                     }
                     else
                     {
@@ -1908,16 +1927,12 @@ public partial class WordHandler
                     node.Children.Add(synthNode);
                     runIdx++;
                 }
-                // CONSISTENCY(bookmark-roundtrip): surface BookmarkStart
-                // children so BatchEmitter can re-emit `add bookmark` rows.
-                // Without this, dump silently dropped every bookmark on a
-                // paragraph, breaking REF/HYPERLINK targets.
-                int bmIdx = 0;
-                foreach (var bm in para.Elements<BookmarkStart>())
-                {
-                    node.Children.Add(ElementToNode(bm, $"{path}/bookmark[{bmIdx + 1}]", depth - 1));
-                    bmIdx++;
-                }
+                // BUG-DUMP25-01: BookmarkStart children are now surfaced
+                // inside the DOM-ordered `ordered` merge above, so a
+                // bookmark between two runs round-trips at its original
+                // intra-paragraph offset. The legacy standalone loop here
+                // (which appended every bookmark at the tail of
+                // node.Children) is intentionally left empty.
                 // BUG-DUMP4-06: surface inline SdtRun (content control) children
                 // so BatchEmitter can re-emit a typed `add sdt` row carrying
                 // alias/tag/type metadata. Without this, GetAllRuns unwrapped
