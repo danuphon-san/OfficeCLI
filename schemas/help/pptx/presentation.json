@@ -225,6 +225,89 @@
       "description": "PrintingProperties HiddenSlides flag — include hidden slides in printed output.",
       "readback": "true when set",
       "enforcement": "report"
+    },
+    "print.what": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "PrintingProperties PrintWhat — what gets printed (slides, handouts1/2/3/4/6/9, notes, outline).",
+      "readback": "print-what enum inner text",
+      "enforcement": "report"
+    },
+    "print.scaleToFitPaper": {
+      "type": "bool",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "PrintingProperties ScaleToFitPaper flag — scale slides to fill the paper page.",
+      "readback": "true when set",
+      "enforcement": "report"
+    },
+    "show.loop": {
+      "type": "bool",
+      "aliases": ["showloop"],
+      "add": false,
+      "set": true,
+      "get": true,
+      "description": "ShowProperties Loop flag — auto-restart slideshow when reaching the end.",
+      "examples": [
+        "--prop show.loop=true"
+      ],
+      "readback": "true when set",
+      "enforcement": "report"
+    },
+    "show.narration": {
+      "type": "bool",
+      "aliases": ["shownarration"],
+      "add": false,
+      "set": true,
+      "get": true,
+      "description": "ShowProperties ShowNarration flag — play recorded narration during slideshow.",
+      "examples": [
+        "--prop show.narration=true"
+      ],
+      "readback": "true|false",
+      "enforcement": "report"
+    },
+    "show.animation": {
+      "type": "bool",
+      "aliases": ["showanimation"],
+      "add": false,
+      "set": true,
+      "get": true,
+      "description": "ShowProperties ShowAnimation flag — play animations during slideshow.",
+      "examples": [
+        "--prop show.animation=true"
+      ],
+      "readback": "true|false",
+      "enforcement": "report"
+    },
+    "show.useTimings": {
+      "type": "bool",
+      "aliases": ["usetimings", "show.usetimings"],
+      "add": false,
+      "set": true,
+      "get": true,
+      "description": "ShowProperties UseTimings flag — use stored slide timings during slideshow.",
+      "examples": [
+        "--prop show.useTimings=true"
+      ],
+      "readback": "true|false",
+      "enforcement": "report"
+    },
+    "removePersonalInfo": {
+      "type": "bool",
+      "aliases": ["removepersonalinfoonsave"],
+      "add": false,
+      "set": true,
+      "get": true,
+      "description": "ExtendedProperties RemovePersonalInfoOnSave — strip author/last-saved-by metadata on save.",
+      "examples": [
+        "--prop removePersonalInfo=true"
+      ],
+      "readback": "true when set",
+      "enforcement": "report"
     }
   }
 }

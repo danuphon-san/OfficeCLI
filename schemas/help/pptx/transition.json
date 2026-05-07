@@ -9,6 +9,8 @@
   "properties": {
     "transition": { "type":"enum", "values":["morph","fade","push","wipe","split","cut","random","wheel","blinds","checker","comb","cover","dissolve","flash","fly","plus","strips","wedge","zoom"], "set":true, "get":true, "description":"transition type token", "readback":"transition type token", "examples":["--prop transition=morph"], "enforcement":"report" },
     "advanceTime": { "type":"string", "set":true, "get":true, "description":"auto-advance after time (ms, or 'none' to clear)", "readback":"ms string", "examples":["--prop advanceTime=3000","--prop advanceTime=none"], "enforcement":"report" },
-    "advanceClick": { "type":"bool", "set":true, "get":true, "description":"advance on click (default true)", "readback":"true | false", "examples":["--prop advanceClick=true"], "enforcement":"report" }
+    "advanceClick": { "type":"bool", "set":true, "get":true, "description":"advance on click (default true)", "readback":"true | false", "examples":["--prop advanceClick=true"], "enforcement":"report" },
+    "transitionDuration": { "type":"number", "set":false, "get":true, "description":"transition duration in milliseconds (CT_TransitionStartSoundAction @dur on PowerPoint 2010+ extLst transition).", "readback":"integer ms", "enforcement":"report" },
+    "transitionSpeed": { "type":"enum", "values":["fast","med","slow"], "set":false, "get":true, "description":"legacy transition speed token (CT_SlideTransition @spd) — fast/med/slow.", "readback":"speed token", "enforcement":"report" }
   }
 }

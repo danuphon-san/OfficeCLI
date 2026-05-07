@@ -45,6 +45,15 @@
       "readback": "true on continuation cells",
       "enforcement": "report"
     },
+    "vmerge": {
+      "type": "bool",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "true on cells continued from a vertical merge anchor (CT_TableCell @vMerge). Surfaced by Query for table cells.",
+      "readback": "true on continuation cells",
+      "enforcement": "report"
+    },
     "image.relId": {
       "type": "string",
       "add": false,
