@@ -118,7 +118,43 @@ public static class BlankDocCreator
         settingsPart.Settings = settings;
         settingsPart.Settings.Save();
 
-        mainPart.Document = new Document(new Body(sectPr));
+        var document = new Document(new Body(sectPr));
+        // Declare common namespaces on <w:document> so later raw-set
+        // injections (DrawingML textboxes <wps:wsp>, VML fallbacks <v:shape>,
+        // pictures <pic:pic>, math <m:oMath>, ...) validate without each
+        // call site re-declaring them. Mirrors what Word itself stamps on
+        // save. Without this, mc:AlternateContent / mc:Choice Requires="wps"
+        // fails MarkupCompatibility validation because the wps prefix is
+        // not in scope at the AlternateContent element.
+        document.AddNamespaceDeclaration("r", "http://schemas.openxmlformats.org/officeDocument/2006/relationships");
+        document.AddNamespaceDeclaration("m", "http://schemas.openxmlformats.org/officeDocument/2006/math");
+        document.AddNamespaceDeclaration("v", "urn:schemas-microsoft-com:vml");
+        document.AddNamespaceDeclaration("o", "urn:schemas-microsoft-com:office:office");
+        document.AddNamespaceDeclaration("w10", "urn:schemas-microsoft-com:office:word");
+        document.AddNamespaceDeclaration("wne", "http://schemas.microsoft.com/office/word/2006/wordml");
+        document.AddNamespaceDeclaration("wp", "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing");
+        document.AddNamespaceDeclaration("wp14", "http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing");
+        document.AddNamespaceDeclaration("a", "http://schemas.openxmlformats.org/drawingml/2006/main");
+        document.AddNamespaceDeclaration("pic", "http://schemas.openxmlformats.org/drawingml/2006/picture");
+        document.AddNamespaceDeclaration("wps", "http://schemas.microsoft.com/office/word/2010/wordprocessingShape");
+        document.AddNamespaceDeclaration("wpg", "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup");
+        document.AddNamespaceDeclaration("wpi", "http://schemas.microsoft.com/office/word/2010/wordprocessingInk");
+        document.AddNamespaceDeclaration("wpc", "http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas");
+        document.AddNamespaceDeclaration("w15", "http://schemas.microsoft.com/office/word/2012/wordml");
+        // Mark 2010+/2012 namespaces as Ignorable so older readers degrade gracefully.
+        document.MCAttributes ??= new DocumentFormat.OpenXml.MarkupCompatibilityAttributes();
+        var existingIgnorable = document.MCAttributes.Ignorable?.Value;
+        var ignorableTokens = new System.Collections.Generic.HashSet<string>(
+            (existingIgnorable ?? "").Split(' ', System.StringSplitOptions.RemoveEmptyEntries));
+        // Only mark prefixes that appear unwrapped (outside mc:AlternateContent)
+        // as Ignorable — w14/wp14/w15 carry attributes like paraId/anchorId
+        // directly. wps/wpg/wpi/wpc only appear inside mc:Choice and are
+        // already gated by mc:Fallback, so they don't need (and shouldn't get)
+        // Ignorable. Mirrors LibreOffice's docxexport MainXmlNamespaces.
+        foreach (var p in new[] { "w14", "w15", "wp14" })
+            ignorableTokens.Add(p);
+        document.MCAttributes.Ignorable = string.Join(" ", ignorableTokens);
+        mainPart.Document = document;
 
         // docDefaults: align with POI / LibreOffice convention — do not bake
         // locale-specific defaults (e.g. eastAsia = "宋体" or cs = "Arabic
