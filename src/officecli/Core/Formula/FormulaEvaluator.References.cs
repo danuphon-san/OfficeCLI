@@ -61,6 +61,9 @@ internal partial class FormulaEvaluator
 
         var colMin = Math.Min(c1, c2); var colMax = Math.Max(c1, c2);
         var rowMin = Math.Min(r1, r2); var rowMax = Math.Max(r1, r2);
+        // Excel sheet limits: rows 1..1048576, cols 1..16384 (XFD).
+        if (rowMin < 1 || rowMax > ExcelMaxRow) return null;
+        if (colMin < 1 || colMax > ExcelMaxCol) return null;
         return new RefArg(sheet, colMin, rowMin, colMax - colMin + 1, rowMax - rowMin + 1);
     }
 
@@ -84,7 +87,11 @@ internal partial class FormulaEvaluator
         if (IsCellRef(s))
         {
             var (col, row) = ParseRef(s);
-            return new RefArg(sheet, ColToIndex(col), row, 1, 1);
+            var colIdx = ColToIndex(col);
+            // Excel sheet limits: row 1..1048576, col 1..16384 (XFD).
+            if (row < 1 || row > ExcelMaxRow) return null;
+            if (colIdx < 1 || colIdx > ExcelMaxCol) return null;
+            return new RefArg(sheet, colIdx, row, 1, 1);
         }
         return null;
     }
@@ -157,6 +164,9 @@ internal partial class FormulaEvaluator
         if (height < 0) { newRow += height + 1; height = -height; }
         if (width < 0) { newCol += width + 1; width = -width; }
         if (newRow < 1 || newCol < 1) return FormulaResult.Error("#REF!");
+        // Excel sheet limits: rows 1..1048576, cols 1..16384 (XFD).
+        if (newRow > ExcelMaxRow || newCol > ExcelMaxCol) return FormulaResult.Error("#REF!");
+        if (newRow + height - 1 > ExcelMaxRow || newCol + width - 1 > ExcelMaxCol) return FormulaResult.Error("#REF!");
 
         return ResolveRef(new RefArg(baseRef.Sheet, newCol, newRow, width, height));
     }
