@@ -43,6 +43,14 @@ public partial class PowerPointHandler
                 selector = unindexedSlideMatch.Groups[1].Value;
         }
 
+        // Strip any remaining combinator prefixes like "table > " so that
+        // "slide > table > tr" (after slide> is stripped above) resolves to "tr".
+        // PPTX has at most two nesting levels relevant to query (slide > X > Y),
+        // and the engine always queries globally — the ancestor prefix is advisory.
+        var remainingCombinator = Regex.Match(selector, @"^\s*\w[\w\[\]=@'""\s]*\s*>\s*(.+)$");
+        if (remainingCombinator.Success)
+            selector = remainingCombinator.Groups[1].Value.Trim();
+
         // Element type
         var typeMatch = Regex.Match(selector, @"^(\w+)");
         if (typeMatch.Success)
@@ -54,7 +62,8 @@ public partial class PowerPointHandler
                 or "table" or "chart" or "placeholder"
                 or "connector" or "connection"
                 or "group" or "notes"
-                or "zoom" or "slidezoom")
+                or "zoom" or "slidezoom"
+                or "tr" or "row" or "tc" or "cell")
                 elementType = t;
         }
 
@@ -112,7 +121,8 @@ public partial class PowerPointHandler
     {
         // Element type filter
         if (selector.ElementType is "picture" or "pic" or "video" or "audio" or "table" or "chart"
-            or "placeholder" or "connector" or "connection" or "group" or "notes" or "zoom")
+            or "placeholder" or "connector" or "connection" or "group" or "notes" or "zoom"
+            or "tr" or "row" or "tc" or "cell")
             return false;
 
         // BUG-BT-R33-1: `query textbox` previously matched every shape including

@@ -2326,6 +2326,58 @@ public partial class WordHandler
             return results;
         }
 
+        // CONSISTENCY(query-combinator-table): "table > row", "table > cell",
+        // "row > cell" combinators — walk body tables emitting the right-hand
+        // side element type.  ParseSelector already splits on '>' so we have
+        // parsed.Element = left-hand, parsed.ChildSelector.Element = right-hand.
+        bool isTableRowCombinator =
+            parsed.ChildSelector != null &&
+            parsed.Element is "table" or "tbl" &&
+            parsed.ChildSelector.Element is "row" or "tr";
+        bool isTableCellCombinator =
+            parsed.ChildSelector != null &&
+            parsed.Element is "table" or "tbl" &&
+            parsed.ChildSelector.Element is "cell" or "tc";
+        bool isRowCellCombinator =
+            parsed.ChildSelector != null &&
+            parsed.Element is "row" or "tr" &&
+            parsed.ChildSelector.Element is "cell" or "tc";
+        if (isTableRowCombinator || isTableCellCombinator || isRowCellCombinator)
+        {
+            int tblIdxC = 0;
+            foreach (var tbl in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Table>())
+            {
+                tblIdxC++;
+                int rowIdxC = 0;
+                foreach (var row in tbl.Elements<TableRow>())
+                {
+                    rowIdxC++;
+                    if (isTableRowCombinator)
+                    {
+                        var rowPath = $"/body/tbl[{tblIdxC}]/tr[{rowIdxC}]";
+                        var rowNode = ElementToNode(row, rowPath, 0);
+                        if (parsed.ChildSelector!.ContainsText == null ||
+                            rowNode.Text?.Contains(parsed.ChildSelector.ContainsText, StringComparison.OrdinalIgnoreCase) == true)
+                            results.Add(rowNode);
+                    }
+                    else
+                    {
+                        int cellIdxC = 0;
+                        foreach (var cell in row.Elements<TableCell>())
+                        {
+                            cellIdxC++;
+                            var cellPath = $"/body/tbl[{tblIdxC}]/tr[{rowIdxC}]/tc[{cellIdxC}]";
+                            var cellNode = ElementToNode(cell, cellPath, 0);
+                            if (parsed.ChildSelector!.ContainsText == null ||
+                                cellNode.Text?.Contains(parsed.ChildSelector.ContainsText, StringComparison.OrdinalIgnoreCase) == true)
+                                results.Add(cellNode);
+                        }
+                    }
+                }
+            }
+            return results;
+        }
+
         int paraIdx = -1;
         int mathParaIdx = -1;
         foreach (var element in body.ChildElements)

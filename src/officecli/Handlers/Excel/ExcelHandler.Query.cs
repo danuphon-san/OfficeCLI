@@ -992,6 +992,23 @@ public partial class ExcelHandler
             return results;
         }
 
+        // CONSISTENCY(query-combinator-xlsx): "row > cell" (and space combinator
+        // "row cell") — LHS is a parent scope hint, RHS is the target element type.
+        // ParseCellSelector ignores the combinator and extracts only the LHS type,
+        // so "row > cell" dispatches as "row" and returns rows instead of cells.
+        // Detect the pattern early and re-dispatch with the RHS selector so the
+        // correct branch fires.  Same fix applies to any "X > cell" variant.
+        var xlCombinatorMatch = Regex.Match(selectorForType, @"^\w[\w\[\]!=@'""\.]*\s*[> ]\s*(.+)$");
+        if (xlCombinatorMatch.Success)
+        {
+            var rhsSelector = xlCombinatorMatch.Groups[1].Value.Trim();
+            var rhsType = Regex.Match(rhsSelector, @"^(\w+)").Groups[1].Value.ToLowerInvariant();
+            // Only redirect when RHS is a known cell-level type; otherwise fall through
+            // to let ParseCellSelector handle it (e.g. "sheet > row" should stay "row").
+            if (rhsType is "cell")
+                return Query(rhsSelector);
+        }
+
         var parsed = ParseCellSelector(selector);
 
         // Handle validation queries
