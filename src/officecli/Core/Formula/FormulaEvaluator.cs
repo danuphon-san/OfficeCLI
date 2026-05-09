@@ -371,9 +371,16 @@ internal partial class FormulaEvaluator
                         tokens.Add(refToken);
                         continue;
                     }
+                    if (string.IsNullOrEmpty(body))
+                        throw new NameResolutionException(stripped);
                     if (!_expandingNames.Add(stripped))
                         throw new NameResolutionException(stripped);
-                    try { tokens.AddRange(Tokenize(body)); }
+                    try
+                    {
+                        var inner = Tokenize(body);
+                        if (inner.Count == 0) throw new NameResolutionException(stripped);
+                        tokens.AddRange(inner);
+                    }
                     catch (NotSupportedException) { throw new NameResolutionException(stripped); }
                     finally { _expandingNames.Remove(stripped); }
                     continue;

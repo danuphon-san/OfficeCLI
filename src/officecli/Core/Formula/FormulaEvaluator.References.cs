@@ -146,7 +146,18 @@ internal partial class FormulaEvaluator
     private FormulaResult? EvalOffset(List<object> args)
     {
         if (args.Count < 3 || args.Count > 5) return FormulaResult.Error("#VALUE!");
-        if (args[0] is not RefArg baseRef) return FormulaResult.Error("#VALUE!");
+        // Accept either a RefArg (literal cell/range token captured by
+        // TryParseRefArg) OR a FormulaResult.Area whose underlying RangeData
+        // carries BaseRow/BaseCol — produced when a previous OFFSET / INDIRECT
+        // returned an Area, or when a defined-name body inlined to such a call.
+        // This lets nested OFFSET(OFFSET(...), ...) and three-level defined-name
+        // OFFSET chains resolve.
+        RefArg baseRef;
+        if (args[0] is RefArg ra) baseRef = ra;
+        else if (args[0] is FormulaResult fra && fra.IsRange &&
+                 fra.RangeValue is { BaseRow: > 0, BaseCol: > 0 } rd)
+            baseRef = new RefArg(null, rd.BaseCol, rd.BaseRow, rd.Cols, rd.Rows);
+        else return FormulaResult.Error("#VALUE!");
 
         // Bug 1: propagate any error in row/col/height/width before consuming.
         for (int i = 1; i < args.Count; i++)
