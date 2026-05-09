@@ -35,7 +35,19 @@ internal record FormulaResult
     public static FormulaResult Array(double[] v) => new() { ArrayValue = v };
     public static FormulaResult Area(RangeData v) => new() { RangeValue = v };
 
-    public double AsNumber() => IsRange ? (FirstCell()?.AsNumber() ?? 0) : NumericValue ?? (BoolValue == true ? 1 : 0);
+    // Excel coerces numeric-looking text in arithmetic / scalar contexts:
+    // ="1"*"4186"*0.03 → 125.58. Cells flagged t="str" (e.g. set under
+    // numberformat="@") flow in here as IsString — without TryParse they'd
+    // silently become 0 and pollute cachedValue. SUM/AVERAGE go through
+    // RangeData.ToDoubleArray which gates on IsNumeric and is unaffected.
+    public double AsNumber()
+    {
+        if (IsRange) return FirstCell()?.AsNumber() ?? 0;
+        if (NumericValue.HasValue) return NumericValue.Value;
+        if (BoolValue.HasValue) return BoolValue.Value ? 1 : 0;
+        if (IsString && double.TryParse(StringValue, NumberStyles.Any, CultureInfo.InvariantCulture, out var s)) return s;
+        return 0;
+    }
     public string AsString() => IsRange ? (FirstCell()?.AsString() ?? "") :
         StringValue ?? NumericValue?.ToString(CultureInfo.InvariantCulture)
         ?? (BoolValue.HasValue ? (BoolValue.Value ? "TRUE" : "FALSE") : ErrorValue ?? "");
