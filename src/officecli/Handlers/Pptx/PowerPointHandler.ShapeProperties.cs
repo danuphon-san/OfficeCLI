@@ -1448,7 +1448,7 @@ public partial class PowerPointHandler
                         tcPr.Append(newCellFill);
                     break;
                 }
-                case "align" or "alignment":
+                case "align" or "alignment" or "halign":
                 {
                     foreach (var para in cell.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
                     {
@@ -1507,13 +1507,30 @@ public partial class PowerPointHandler
                         if (span > remaining)
                             throw new ArgumentException($"Invalid colspan: {span} exceeds remaining columns ({remaining}) from this cell.");
                     }
-                    cell.GridSpan = new DocumentFormat.OpenXml.Int32Value(span);
-                    if (span > 1 && cell.Parent is Drawing.TableRow gsRow)
+                    if (span > 1)
                     {
-                        var gsCells = gsRow.Elements<Drawing.TableCell>().ToList();
-                        var gsIdx = gsCells.IndexOf(cell);
-                        for (int mi = gsIdx + 1; mi < gsIdx + span && mi < gsCells.Count; mi++)
-                            gsCells[mi].HorizontalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                        cell.GridSpan = new DocumentFormat.OpenXml.Int32Value(span);
+                        if (cell.Parent is Drawing.TableRow gsRow)
+                        {
+                            var gsCells = gsRow.Elements<Drawing.TableCell>().ToList();
+                            var gsIdx = gsCells.IndexOf(cell);
+                            for (int mi = gsIdx + 1; mi < gsIdx + span && mi < gsCells.Count; mi++)
+                                gsCells[mi].HorizontalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                        }
+                    }
+                    else
+                    {
+                        // colspan=1 → un-merge: drop any prior gridSpan attribute (omitted = 1)
+                        // and clear hMerge on the cells previously covered by this anchor.
+                        var prevSpan = cell.GridSpan?.Value ?? 1;
+                        cell.GridSpan = null;
+                        if (prevSpan > 1 && cell.Parent is Drawing.TableRow gsRow1)
+                        {
+                            var gsCells1 = gsRow1.Elements<Drawing.TableCell>().ToList();
+                            var gsIdx1 = gsCells1.IndexOf(cell);
+                            for (int mi = gsIdx1 + 1; mi < gsIdx1 + prevSpan && mi < gsCells1.Count; mi++)
+                                gsCells1[mi].HorizontalMerge = null;
+                        }
                     }
                     break;
                 }
