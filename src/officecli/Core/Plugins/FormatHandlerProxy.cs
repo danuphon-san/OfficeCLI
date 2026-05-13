@@ -170,6 +170,56 @@ internal sealed class FormatHandlerProxy : IDocumentHandler
         return (relId, partPath);
     }
 
+    // ----- Format-specific view extensions ------------------------------
+    //
+    // These are NOT on IDocumentHandler — they're entry points used by main's
+    // CommandBuilder.View when a built-in handler (Word/Excel/PPT) declines.
+    // `view html` and `view forms` historically downcast to a concrete handler;
+    // now `else if (handler is FormatHandlerProxy proxy) ...` provides the
+    // plugin-side fallback. Each method maps onto the corresponding `view`
+    // command with a mode key the plugin chooses how to render.
+
+    /// <summary>
+    /// Request HTML preview from the plugin (`view mode=html`). Returns null
+    /// if the plugin replies with <c>unsupported_command</c> — caller may then
+    /// raise its own "unsupported_type" CliException.
+    /// </summary>
+    public string? ViewAsHtml(int? page = null)
+    {
+        try
+        {
+            var args = new JsonObject { ["mode"] = "html" };
+            if (page.HasValue) args["page"] = page.Value;
+            var result = _session.Send("command", "view", args);
+            return result?.GetValue<string>();
+        }
+        catch (CliException ex) when (ex.Code == "unsupported_command")
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Request forms JSON from the plugin (`view mode=forms-json`). Returns
+    /// null if the plugin replies with <c>unsupported_command</c>.
+    /// </summary>
+    public JsonNode? ViewAsFormsJson(bool auto = true)
+    {
+        try
+        {
+            var args = new JsonObject
+            {
+                ["mode"] = "forms-json",
+                ["auto"] = auto,
+            };
+            return _session.Send("command", "view", args);
+        }
+        catch (CliException ex) when (ex.Code == "unsupported_command")
+        {
+            return null;
+        }
+    }
+
     public bool TryExtractBinary(string path, string destPath, out string? contentType, out long byteCount)
     {
         contentType = null;

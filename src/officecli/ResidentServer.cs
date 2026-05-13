@@ -927,6 +927,8 @@ public class ResidentServer : IDisposable
                 html = excelHandler.ViewAsHtml();
             else if (_handler is OfficeCli.Handlers.WordHandler wordHandler)
                 html = wordHandler.ViewAsHtml(pageFilter);
+            else if (_handler is OfficeCli.Core.Plugins.FormatHandlerProxy proxy)
+                html = proxy.ViewAsHtml(int.TryParse(pageFilter, out var pp) ? pp : (int?)null);
 
             if (html != null)
             {
@@ -1118,6 +1120,14 @@ public class ResidentServer : IDisposable
             {
                 if (_handler is OfficeCli.Handlers.WordHandler wordFormsHandler)
                     Console.WriteLine(wordFormsHandler.ViewAsFormsJson().ToJsonString(OutputFormatter.PublicJsonOptions));
+                else if (_handler is OfficeCli.Core.Plugins.FormatHandlerProxy formsProxy)
+                {
+                    var formsJson = formsProxy.ViewAsFormsJson();
+                    if (formsJson is null)
+                        Console.Error.WriteLine($"Forms view is not supported by the format-handler plugin.");
+                    else
+                        Console.WriteLine(formsJson.ToJsonString(OutputFormatter.PublicJsonOptions));
+                }
                 else
                     Console.Error.WriteLine("Forms view is only supported for .docx files.");
             }
@@ -1135,9 +1145,14 @@ public class ResidentServer : IDisposable
                     ? $"Pages: {pageCountValue}\n" + _handler.ViewAsStats()
                     : _handler.ViewAsStats(),
                 "issues" or "i" => OutputFormatter.FormatIssues(_handler.ViewAsIssues(issueType, limit), format),
-                "forms" or "f" => _handler is OfficeCli.Handlers.WordHandler wfh
-                    ? wfh.ViewAsForms()
-                    : "Forms view is only supported for .docx files.",
+                "forms" or "f" => _handler switch
+                {
+                    OfficeCli.Handlers.WordHandler wfh => wfh.ViewAsForms(),
+                    OfficeCli.Core.Plugins.FormatHandlerProxy fp
+                        => fp.ViewAsFormsJson()?.ToJsonString(OutputFormatter.PublicJsonOptions)
+                           ?? "Forms view is not supported by the format-handler plugin.",
+                    _ => "Forms view is only supported for .docx files."
+                },
                 _ => $"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, svg, screenshot, forms"
             };
             Console.WriteLine(output);
