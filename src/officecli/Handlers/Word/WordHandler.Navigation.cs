@@ -2631,6 +2631,16 @@ public partial class WordHandler
                     // Some producers emit <w:tblW w:type="auto"/> without w:w.
                     node.Format["width"] = "auto";
                 }
+                else
+                {
+                    // Internal-only marker: source had no <w:tblW> element at
+                    // all. EmitTable reads this to tell AddTable to skip the
+                    // default-tblW stamp; without it, replay grows
+                    // a <w:tblW w:w="<sum-of-gridCol>" w:type="dxa"/> that
+                    // the source never had, and the next dump surfaces a
+                    // phantom `width=…` key.
+                    node.Format["_noTblW"] = true;
+                }
                 // Alignment
                 if (tp.TableJustification?.Val?.Value != null)
                     node.Format["align"] = tp.TableJustification.Val.InnerText;

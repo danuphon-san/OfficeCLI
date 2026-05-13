@@ -1931,9 +1931,19 @@ public static class BatchEmitter
         // had (test.docx tbl[1]). Signal AddTable to leave tblGrid empty.
         if (actualGridCols == 0)
             tableProps["gridCols"] = "0";
-        // Drop the internal-only marker from emitted props (BatchItem.Props
-        // never carries it; only Navigation→EmitTable consumes it).
+        // Source had no <w:tblW> — surface a `skipTblW=true` user-facing
+        // flag (mirrors `gridCols=0`). AddTable's default-tblW stamp
+        // path defers to this when set, so replay won't grow a phantom
+        // <w:tblW>. Skip when source had any explicit width (auto / dxa /
+        // pct) — those round-trip through the existing `width=` key.
+        bool sourceHadNoTblW = tableNode.Format.TryGetValue("_noTblW", out var noTblW)
+            && noTblW is bool b && b;
+        if (sourceHadNoTblW && !tableProps.ContainsKey("width"))
+            tableProps["skipTblW"] = "true";
+        // Drop the internal-only markers from emitted props (BatchItem.Props
+        // never carries them; only Navigation→EmitTable consumes them).
         tableProps.Remove("_gridCols");
+        tableProps.Remove("_noTblW");
         // BUG-R2-P1-5: AddTable seeds all 6 default borders and overlays user
         // props on top, so a partial border spec (e.g. only border.top +
         // border.bottom for a banner-line table) replays as 6 single-borders.
