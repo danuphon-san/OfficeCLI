@@ -1731,6 +1731,16 @@ public static class BatchEmitter
                 var instr = run.Format.TryGetValue("instruction", out var iv)
                     ? iv?.ToString() ?? "" : "";
                 var fieldProps = BuildFieldAddProps(instr, run.Text ?? "");
+                // Pass through the no-separator marker so AddField writes the
+                // begin+instr+end shape instead of stamping a default cached
+                // placeholder. CollapseFieldChains set this when source had
+                // no <w:fldChar w:fldCharType="separate"/>.
+                if (fieldProps != null
+                    && run.Format.TryGetValue("_noFieldSeparator", out var nfs)
+                    && nfs is bool nfsB && nfsB)
+                {
+                    fieldProps["noSeparator"] = "true";
+                }
                 // BUG-DUMP18-02: w:fldSimple / fldChar-chain field inside
                 // w:hyperlink should replay INSIDE the hyperlink. Mirrors the
                 // equation-emit logic above (BUG-DUMP15-04) but gated on the
@@ -2364,6 +2374,7 @@ public static class BatchEmitter
             // Walk forward to find instruction text and end marker.
             string instruction = "";
             string display = "";
+            bool sawSeparate = false;
             int end = -1;
             for (int j = i + 1; j < children.Count; j++)
             {
@@ -2376,11 +2387,16 @@ public static class BatchEmitter
                         instruction += k.Text;
                 }
                 else if (k.Type == "fieldChar"
-                    && k.Format.TryGetValue("fieldCharType", out var ft)
-                    && string.Equals(ft?.ToString(), "end", StringComparison.OrdinalIgnoreCase))
+                    && k.Format.TryGetValue("fieldCharType", out var ft))
                 {
-                    end = j;
-                    break;
+                    var ftStr = ft?.ToString();
+                    if (string.Equals(ftStr, "separate", StringComparison.OrdinalIgnoreCase))
+                        sawSeparate = true;
+                    else if (string.Equals(ftStr, "end", StringComparison.OrdinalIgnoreCase))
+                    {
+                        end = j;
+                        break;
+                    }
                 }
                 else if (k.Type == "run" || k.Type == "r")
                 {
@@ -2406,6 +2422,15 @@ public static class BatchEmitter
                     ["instruction"] = instruction.Trim()
                 }
             };
+            // Source field has no <w:fldChar w:fldCharType="separate"/> — it's
+            // the begin+instr+end shape (Word recomputes the result on open).
+            // Flag this so EmitField on the field branch can pass `text=""`
+            // explicitly to AddField, which short-circuits AddField's default
+            // placeholder ("1" for PAGE etc.) and emits the same separator-
+            // less shape. Without this flag, the second dump surfaces a
+            // phantom `text="1"` key that the source never had.
+            if (!sawSeparate)
+                synth.Format["_noFieldSeparator"] = true;
             // BUG-DUMP18-02: propagate hyperlink-scope hint from the begin
             // run so the field-emit branch can target the hyperlink parent
             // on replay.
