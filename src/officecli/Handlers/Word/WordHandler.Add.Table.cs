@@ -898,6 +898,27 @@ public partial class WordHandler
                 tcPr.GridSpan = new GridSpan { Val = span };
             }
         }
+        // v6.4: horizontal merge on Add (CONSISTENCY(add-set-symmetry)).
+        // Mirrors WordHandler.Set.Element.cs "hmerge" case but writes the
+        // raw <w:hMerge/> attribute rather than gridSpan: dump replay from
+        // doc2 already emits per-cell `hMerge=continue` for every
+        // continuation cell, so we must preserve them as their own
+        // <w:tc> nodes (gridSpan-collapsed continuations are unrepresented
+        // in the source .doc and would corrupt subsequent vMerge anchors).
+        // Set's gridSpan redirect is a UX optimisation for human callers;
+        // for round-trip fidelity we want the legacy hMerge form.
+        if (properties.TryGetValue("hMerge", out var hMergeAddVal)
+            || properties.TryGetValue("hmerge", out hMergeAddVal))
+        {
+            if (!string.IsNullOrEmpty(hMergeAddVal))
+            {
+                var tcPr = newCell.GetFirstChild<TableCellProperties>()
+                    ?? newCell.PrependChild(new TableCellProperties());
+                tcPr.HorizontalMerge = hMergeAddVal.ToLowerInvariant() == "restart"
+                    ? new HorizontalMerge { Val = MergedCellValues.Restart }
+                    : new HorizontalMerge();
+            }
+        }
         // CONSISTENCY(add-set-symmetry): cell-level w:tcMar (padding) was
         // Set-only; Add silently rejected it via UnusedKeys. Mirror Set's
         // padding / padding.{top,bottom,left,right} cases so doc2 round-
