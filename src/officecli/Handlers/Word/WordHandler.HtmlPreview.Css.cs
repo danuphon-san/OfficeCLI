@@ -538,7 +538,11 @@ public partial class WordHandler
                 else if (rule == "exact" || rule == "atLeast")
                 {
                     var linePt = Units.TwipsToPt(lv);
-                    parts.Add($"line-height:{linePt:0.##}pt");
+                    // OOXML §17.3.1.33 atLeast: floor only. When the
+                    // paragraph's natural single-line height exceeds the
+                    // floor, the natural value applies.
+                    var emitPt = rule == "atLeast" ? ResolveAtLeastPt(linePt, para) : linePt;
+                    parts.Add($"line-height:{emitPt:0.##}pt");
                     // #7b0001: when lineRule=exact pins the line box below
                     // ~120% of the paragraph's font size, Word clips
                     // over-tall glyphs. Emit overflow:hidden so tall glyphs
@@ -1141,7 +1145,14 @@ public partial class WordHandler
                             parts.Add($"line-height:{ratio * (val / 240.0):0.####}");
                         }
                         else if (rule == "exact" || rule == "atLeast")
-                            parts.Add($"line-height:{Units.TwipsToPt(lv):0.##}pt");
+                        {
+                            // §17.3.1.33 atLeast acts as a floor; use the
+                            // paragraph natural single-line height when it
+                            // exceeds the floor.
+                            var linePt = Units.TwipsToPt(lv);
+                            var emitPt = rule == "atLeast" ? ResolveAtLeastPt(linePt, para) : linePt;
+                            parts.Add($"line-height:{emitPt:0.##}pt");
+                        }
                     }
                 }
 
@@ -1207,7 +1218,13 @@ public partial class WordHandler
                         parts.Add($"line-height:{ratio * (val / 240.0):0.####}");
                     }
                     else if (rule == "exact" || rule == "atLeast")
-                        parts.Add($"line-height:{Units.TwipsToPt(lv):0.##}pt");
+                    {
+                        // §17.3.1.33 atLeast: floor only; substitute natural
+                        // line-height when the paragraph's content exceeds it.
+                        var linePt = Units.TwipsToPt(lv);
+                        var emitPt = rule == "atLeast" ? ResolveAtLeastPt(linePt, para) : linePt;
+                        parts.Add($"line-height:{emitPt:0.##}pt");
+                    }
                 }
             }
             var ind = defPPr.Indentation;
@@ -1225,6 +1242,18 @@ public partial class WordHandler
         }
 
         return string.Join(";", parts);
+    }
+
+    /// <summary>Apply OOXML §17.3.1.33 atLeast semantics: the value is a
+    /// floor, not a fixed line-height. When the paragraph's natural
+    /// single-line height (font ratio × principal size) exceeds the
+    /// floor, the natural value is used instead.</summary>
+    private double ResolveAtLeastPt(double floorPt, Paragraph para)
+    {
+        var paraFont = ResolveParaFontForLineHeight(para);
+        var ratio = FontMetricsReader.GetRatio(paraFont);
+        var paraSizePt = ResolveParaPrincipalSizePt(para) ?? 11.0;
+        return Math.Max(floorPt, ratio * paraSizePt);
     }
 
     /// <summary>Read the paragraph's principal font size (in pt), the same
@@ -1288,8 +1317,16 @@ public partial class WordHandler
                 if ((rule == "auto" || rule == null)
                     && int.TryParse(lineVal, out var lvNum) && lvNum > 0)
                     return $"line-height:{ratio * (lvNum / 240.0):0.####}";
-                if (rule == "exact" || rule == "atLeast")
+                if (rule == "exact")
                     return $"line-height:{Units.TwipsToPt(lineVal):0.##}pt";
+                if (rule == "atLeast")
+                {
+                    // §17.3.1.33 atLeast: floor; this run's natural single
+                    // line height (ratio × runSize) substitutes when greater.
+                    var floorPt = Units.TwipsToPt(lineVal);
+                    var runNaturalPt = ratio * runSizePt!.Value;
+                    return $"line-height:{Math.Max(floorPt, runNaturalPt):0.##}pt";
+                }
             }
             return $"line-height:{ratio:0.####}";
         }
