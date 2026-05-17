@@ -1052,7 +1052,12 @@ public partial class PowerPointHandler
             else node.Format["autoFit"] = "none";
         }
 
-        // Text alignment (from first paragraph)
+        // Text alignment (from first paragraph). Only surface when explicitly
+        // present in the source XML; the previous else-branch hard-coded
+        // align=left whenever pPr/algn was absent, which baked an explicit
+        // value into every round-trip and broke inheritance from the layout/
+        // master defRPr cascade. Callers that need the effective alignment
+        // can read Format["effective.align"] (cascade-resolved separately).
         var firstPara = shape.TextBody?.Elements<Drawing.Paragraph>().FirstOrDefault();
         if (firstPara?.ParagraphProperties?.Alignment?.HasValue == true)
         {
@@ -1065,10 +1070,6 @@ public partial class PowerPointHandler
                 "just" => "justify",
                 _ => alInner
             };
-        }
-        else if (shape.TextBody != null)
-        {
-            node.Format["align"] = "left";
         }
 
         // Paragraph spacing and indent (from first paragraph)
