@@ -1944,7 +1944,16 @@ internal static partial class ChartHelper
                     foreach (var barChart in plotArea2.Elements<C.BarChart>())
                     {
                         barChart.RemoveAllChildren<C.SeriesLines>();
-                        if (show) barChart.AppendChild(new C.SeriesLines());
+                        if (show)
+                        {
+                            // CT_BarChart schema: ..., gapWidth?, overlap?, serLines?, axId+.
+                            // serLines appended after axId is silently dropped by PowerPoint
+                            // and flagged by the OOXML validator. Insert before first axId.
+                            var sl = new C.SeriesLines();
+                            var axIdAnchor = barChart.GetFirstChild<C.AxisId>();
+                            if (axIdAnchor != null) barChart.InsertBefore(sl, axIdAnchor);
+                            else barChart.AppendChild(sl);
+                        }
                     }
                     break;
                 }
