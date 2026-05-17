@@ -206,8 +206,42 @@ public partial class PowerPointHandler : IDocumentHandler
         }
         else if (partPath == "/notesMaster")
         {
-            rootElement = presentationPart.NotesMasterPart?.NotesMaster
-                ?? throw new ArgumentException("No notes master part");
+            // CONSISTENCY(grow-on-rawset): blank pptx files have no
+            // NotesMasterPart, but PptxBatchEmitter emits a raw-set /notesMaster
+            // on any deck that has one. Create the part on demand so dump-replay
+            // can stamp the source notes master back in (mirrors GrowSlideLayoutParts
+            // in the slideLayout branch above).
+            var nmPart = presentationPart.NotesMasterPart;
+            if (nmPart == null)
+            {
+                nmPart = presentationPart.AddNewPart<NotesMasterPart>();
+                // Seed a minimal placeholder so the raw-set "replace" action has
+                // a NotesMaster root element to swap out; raw-replace builds the
+                // real content from the supplied XML on the next line.
+                nmPart.NotesMaster = new NotesMaster(
+                    new CommonSlideData(new ShapeTree(
+                        new NonVisualGroupShapeProperties(
+                            new NonVisualDrawingProperties { Id = 1, Name = "" },
+                            new NonVisualGroupShapeDrawingProperties(),
+                            new ApplicationNonVisualDrawingProperties()),
+                        new GroupShapeProperties(new DocumentFormat.OpenXml.Drawing.TransformGroup()))),
+                    new ColorMap
+                    {
+                        Background1 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Light1,
+                        Text1 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Dark1,
+                        Background2 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Light2,
+                        Text2 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Dark2,
+                        Accent1 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Accent1,
+                        Accent2 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Accent2,
+                        Accent3 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Accent3,
+                        Accent4 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Accent4,
+                        Accent5 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Accent5,
+                        Accent6 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Accent6,
+                        Hyperlink = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Hyperlink,
+                        FollowedHyperlink = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.FollowedHyperlink,
+                    });
+            }
+            rootElement = nmPart.NotesMaster!;
         }
         else
         {
