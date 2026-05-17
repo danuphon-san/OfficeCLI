@@ -37,6 +37,12 @@ public static partial class PptxBatchEmitter
         // node, not slide-level — they roll up into a single root `set /`
         // bag in PR2 (or are already set on the blank-doc baseline).
         "defaultFont",
+        // Slide `layoutType` is a derived Get-side descriptor (resolved from
+        // the slide's layout relationship — "title", "twoContent", …). Replay
+        // drives layout selection via `layout=<name>`; emitting layoutType
+        // additionally would surface as UNSUPPORTED on AddSlide and confuse
+        // users into thinking the slide lost something.
+        "layoutType",
     };
 
     private static Dictionary<string, string> FilterEmittableProps(Dictionary<string, object?> raw)
