@@ -163,8 +163,24 @@ public partial class PowerPointHandler : IDocumentHandler
         {
             var idx = int.Parse(masterMatch.Groups[1].Value);
             var masters = presentationPart.SlideMasterParts.ToList();
-            if (idx < 1 || idx > masters.Count)
+            if (idx < 1)
                 throw new ArgumentException($"SlideMaster {idx} not found (total: {masters.Count})");
+            if (idx > masters.Count)
+            {
+                // CONSISTENCY(grow-on-rawset): mirrors the slideLayout branch.
+                // Source decks with multiple slideMasters (template kits, decks
+                // assembled from several themes) emit raw-set on /slideMaster[2..N];
+                // blank target only stamped /slideMaster[1], so the replay used to
+                // fail every additional master AND every layout owned by those
+                // missing masters. Auto-grow to idx so the raw-set replace has a
+                // root element to swap out; the replace then carries in the real
+                // sldLayoutIdLst, which GrowSlideLayoutParts consults when the
+                // subsequent /slideLayout[K] raw-sets land.
+                GrowSlideMasterParts(idx);
+                masters = presentationPart.SlideMasterParts.ToList();
+                if (idx > masters.Count)
+                    throw new ArgumentException($"SlideMaster {idx} not found (total: {masters.Count})");
+            }
             rootElement = masters[idx - 1].SlideMaster
                 ?? throw new InvalidOperationException("Corrupt file: slide master data missing");
         }
@@ -326,6 +342,81 @@ public partial class PowerPointHandler : IDocumentHandler
         }
         // targetGlobalIdx is beyond every master's declared range; caller will
         // raise the canonical "not found" error after we return.
+    }
+
+    // CONSISTENCY(grow-on-rawset): mirror of GrowSlideLayoutParts for the
+    // SlideMasterPart side. Multi-master source decks (template kits, decks
+    // assembled from multiple themes) emit raw-set on /slideMaster[2..N], but
+    // BlankDocCreator only stamps one master. Create enough placeholder
+    // SlideMasterParts (each with a minimal SlideMaster root plus its own
+    // SlideLayoutIdList stub) and register them in the presentation's
+    // sldMasterIdLst so the raw-set replace has a root element to swap, and
+    // so subsequent /slideLayout[K] raw-sets can find their owning master via
+    // GrowSlideLayoutParts.
+    private void GrowSlideMasterParts(int targetIdx)
+    {
+        var presentationPart = _doc.PresentationPart
+            ?? throw new InvalidOperationException("No presentation part");
+        var presentation = presentationPart.Presentation
+            ?? throw new InvalidOperationException("No presentation");
+        var sldMasterIdLst = presentation.SlideMasterIdList
+            ?? throw new InvalidOperationException("Presentation has no SlideMasterIdList");
+
+        var existing = presentationPart.SlideMasterParts.Count();
+        if (targetIdx <= existing) return;
+
+        // Pick a SlideMasterId base that won't collide with the existing IDs.
+        var existingIds = sldMasterIdLst.Elements<SlideMasterId>()
+            .Select(e => e.Id?.Value ?? 0u)
+            .ToHashSet();
+        uint nextId = 2147483648u;
+        while (existingIds.Contains(nextId)) nextId++;
+
+        for (int i = existing; i < targetIdx; i++)
+        {
+            var newPart = presentationPart.AddNewPart<SlideMasterPart>();
+            var rId = presentationPart.GetIdOfPart(newPart);
+            // Minimal SlideMaster root with an empty SlideLayoutIdList so
+            // GrowSlideLayoutParts sees the right declared count once the
+            // imminent raw-set replace overwrites this stub with the real
+            // master XML (which carries the source's actual sldLayoutIdLst).
+            newPart.SlideMaster = new SlideMaster(
+                new CommonSlideData(new ShapeTree(
+                    new NonVisualGroupShapeProperties(
+                        new NonVisualDrawingProperties { Id = 1, Name = "" },
+                        new NonVisualGroupShapeDrawingProperties(),
+                        new ApplicationNonVisualDrawingProperties()),
+                    new GroupShapeProperties(new DocumentFormat.OpenXml.Drawing.TransformGroup()))),
+                new ColorMap
+                {
+                    Background1 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Light1,
+                    Text1 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Dark1,
+                    Background2 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Light2,
+                    Text2 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Dark2,
+                    Accent1 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Accent1,
+                    Accent2 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Accent2,
+                    Accent3 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Accent3,
+                    Accent4 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Accent4,
+                    Accent5 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Accent5,
+                    Accent6 = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Accent6,
+                    Hyperlink = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Hyperlink,
+                    FollowedHyperlink = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.FollowedHyperlink,
+                },
+                new SlideLayoutIdList()
+            );
+            newPart.SlideMaster.Save();
+
+            // Every SlideMasterPart must reference a ThemePart. The replay's
+            // raw-set replaces only the master XML, not the package
+            // relationships — without a theme link here the package fails
+            // validation. Share the presentation's primary theme; a richer
+            // multi-theme deck can later raw-set its own theme parts.
+            if (presentationPart.ThemePart != null)
+                newPart.AddPart(presentationPart.ThemePart);
+
+            sldMasterIdLst.AppendChild(new SlideMasterId { Id = nextId++, RelationshipId = rId });
+        }
+        presentation.Save();
     }
 
     public (string RelId, string PartPath) AddPart(string parentPartPath, string partType, Dictionary<string, string>? properties = null)
