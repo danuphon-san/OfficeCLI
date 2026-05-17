@@ -43,6 +43,14 @@ public static partial class PptxBatchEmitter
         // additionally would surface as UNSUPPORTED on AddSlide and confuse
         // users into thinking the slide lost something.
         "layoutType",
+        // Speaker notes text is surfaced on the slide Format bag by
+        // NodeBuilder, but AddSlide doesn't accept a `notes=` prop —
+        // notes are replayed by EmitNotes as a separate add-paragraph
+        // sequence under /slide[N]/notes. Without this filter, every
+        // emitted slide carries a `notes=...` prop that AddSlide reports
+        // as UNSUPPORTED, flipping the per-item success to false and
+        // (per pre-R6 contract) the batch-level success too.
+        "notes",
     };
 
     private static Dictionary<string, string> FilterEmittableProps(Dictionary<string, object?> raw)
