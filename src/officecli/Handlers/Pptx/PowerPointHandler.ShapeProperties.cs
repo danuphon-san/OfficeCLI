@@ -1521,6 +1521,7 @@ public partial class PowerPointHandler
                 }
                 case "fill":
                 case "background":
+                case "gradient":
                 {
                     // CONSISTENCY(fill-gradient-shorthand): accept linear
                     // ("C1-C2[-angle]"), radial ("radial:C1-C2[-focus]"),
@@ -1529,6 +1530,9 @@ public partial class PowerPointHandler
                     // slide-background contract via the shared
                     // NormalizeGradientValue / IsGradientColorString /
                     // BuildGradientFill helpers in Fill.cs.
+                    // `gradient=` is the canonical key shape-level uses
+                    // (shape Set dispatches to ApplyGradientFill); mirror
+                    // it on cells so dump/replay and direct callers work.
                     // Build new fill element BEFORE removing old one (atomic: no data loss on invalid color)
                     var normalizedCellFill = NormalizeGradientValue(value);
                     OpenXmlElement newCellFill;
