@@ -81,7 +81,15 @@ public static partial class PptxBatchEmitter
         for (int slideNum = 1; slideNum <= slideCount; slideNum++)
         {
             var slidePath = $"/slide[{slideNum}]";
+            // CONSISTENCY(slide-ordinal-stub): every iteration MUST contribute
+            // exactly one `add slide` so subsequent set paths /slide[N+1]/…
+            // resolve to the same N+1 slot on replay. Pre-R5 we just
+            // `continue`d on validation failure, emitting zero items for the
+            // skipped slide — every later set drifted by one slot and
+            // dump → batch on a deck with one bad slide could orphan
+            // hundreds of items.
             DocumentNode slideNode;
+            int preCount = items.Count;
             try { slideNode = ppt.Get(slidePath); }
             catch (Exception ex) when (ex.Message.Contains("does not allow", StringComparison.Ordinal)
                                     || ex.Message.Contains("not allowed", StringComparison.Ordinal))
@@ -90,6 +98,7 @@ public static partial class PptxBatchEmitter
                     Element: "slide.ooxml_validation",
                     SlidePath: slidePath,
                     Reason: ex.Message));
+                items.Add(new BatchItem { Command = "add", Parent = "/", Type = "slide" });
                 continue;
             }
             try
@@ -103,6 +112,11 @@ public static partial class PptxBatchEmitter
                     Element: "slide.ooxml_validation",
                     SlidePath: slidePath,
                     Reason: ex.Message));
+                // Roll back partial emits from the failing slide and replace
+                // with a single blank-slide stub to keep ordinals aligned.
+                if (items.Count > preCount)
+                    items.RemoveRange(preCount, items.Count - preCount);
+                items.Add(new BatchItem { Command = "add", Parent = "/", Type = "slide" });
             }
         }
 
