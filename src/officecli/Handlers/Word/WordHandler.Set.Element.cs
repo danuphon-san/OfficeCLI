@@ -969,6 +969,15 @@ public partial class WordHandler
             }
             else switch (k)
             {
+                case "tabs" or "tabstops":
+                {
+                    // `tabs=POS:ALIGN[:LEADER],...` shorthand. Replaces the
+                    // entire <w:tabs> strip — see ApplyTabsShorthand in
+                    // Helpers.cs for the syntax. CONSISTENCY(add-set-symmetry).
+                    var paraPpr = para.ParagraphProperties ?? para.PrependChild(new ParagraphProperties());
+                    ApplyTabsShorthand(paraPpr, value);
+                    break;
+                }
                 case "formula":
                 {
                     // Replace paragraph content with OMML equation in-place

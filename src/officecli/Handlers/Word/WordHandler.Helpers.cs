@@ -226,6 +226,102 @@ public partial class WordHandler
         "wave", "wavyHeavy", "wavyDouble", "words", "none"
     };
 
+    /// <summary>
+    /// Apply a <c>tabs=POS:ALIGN[:LEADER],POS:ALIGN[:LEADER]...</c>
+    /// shorthand to a paragraph properties container (paragraph
+    /// <c>w:pPr</c> or style <c>w:pPr</c> alike). Each segment becomes a
+    /// <c>w:tab</c> child of the container's <c>w:tabs</c> element. Existing
+    /// <c>w:tabs</c> is replaced wholesale so a new shorthand defines the
+    /// definitive tab strip — partial-merge would surprise callers who
+    /// expect "set tabs=…" to mean "this is the tab strip now".
+    ///
+    /// <para>Supported forms (case-insensitive):</para>
+    /// <list type="bullet">
+    ///   <item><c>9360:right</c></item>
+    ///   <item><c>9360:right:dot</c></item>
+    ///   <item><c>2880:center,5760:decimal,9360:right:dot</c></item>
+    ///   <item><c>5cm:left</c> / <c>2in:right</c> (unit suffix on pos)</item>
+    /// </list>
+    ///
+    /// <para>
+    /// <c>ALIGN</c>: left, center, right, decimal, bar, clear, num,
+    /// start, end. <c>LEADER</c>: none, dot, heavy, hyphen, middleDot,
+    /// underscore.
+    /// </para>
+    /// </summary>
+    internal static void ApplyTabsShorthand(OpenXmlCompositeElement pPr, string tabsStr)
+    {
+        if (string.IsNullOrWhiteSpace(tabsStr))
+        {
+            // Empty value clears any existing tab strip — useful for
+            // overriding inherited tabs from basedOn.
+            pPr.RemoveAllChildren<Tabs>();
+            return;
+        }
+
+        var newTabs = new Tabs();
+        foreach (var rawSeg in tabsStr.Split(','))
+        {
+            var seg = rawSeg.Trim();
+            if (seg.Length == 0) continue;
+            var parts = seg.Split(':');
+            if (parts.Length < 1 || string.IsNullOrWhiteSpace(parts[0]))
+                throw new ArgumentException(
+                    $"Invalid tabs segment '{seg}'. Expected POS[:ALIGN[:LEADER]] (e.g. 9360:right or 5cm:right:dot).");
+
+            // pos: allow negative twips for hanging-tab positions, accept
+            // bare twips OR unit suffix (pt/cm/in). Same parser as `add
+            // /body/p[N] --type tab --prop pos=…`.
+            int posTwips;
+            try { posTwips = ParseSignedTwips(parts[0]); }
+            catch (Exception ex)
+            {
+                throw new ArgumentException(
+                    $"Invalid tab pos '{parts[0]}' in tabs segment '{seg}': {ex.Message}");
+            }
+
+            var tabStop = new TabStop { Position = posTwips };
+
+            if (parts.Length >= 2 && !string.IsNullOrWhiteSpace(parts[1]))
+            {
+                var alignNorm = parts[1].Trim().ToLowerInvariant();
+                var knownTabVals = new[] { "left", "center", "right", "decimal", "bar", "clear", "num", "start", "end" };
+                if (!knownTabVals.Contains(alignNorm))
+                    throw new ArgumentException(
+                        $"Invalid tab align '{parts[1]}' in tabs segment '{seg}'. Valid: {string.Join(", ", knownTabVals)}.");
+                tabStop.Val = new EnumValue<TabStopValues>(new TabStopValues(alignNorm));
+            }
+            else
+            {
+                tabStop.Val = TabStopValues.Left;
+            }
+
+            if (parts.Length >= 3 && !string.IsNullOrWhiteSpace(parts[2]))
+            {
+                var leaderNorm = parts[2].Trim().ToLowerInvariant();
+                tabStop.Leader = leaderNorm switch
+                {
+                    "none"       => TabStopLeaderCharValues.None,
+                    "dot"        => TabStopLeaderCharValues.Dot,
+                    "heavy"      => TabStopLeaderCharValues.Heavy,
+                    "hyphen"     => TabStopLeaderCharValues.Hyphen,
+                    "middledot"  => TabStopLeaderCharValues.MiddleDot,
+                    "underscore" => TabStopLeaderCharValues.Underscore,
+                    _ => throw new ArgumentException(
+                        $"Invalid tab leader '{parts[2]}' in tabs segment '{seg}'. Valid: none, dot, heavy, hyphen, middleDot, underscore."),
+                };
+            }
+
+            newTabs.Append(tabStop);
+        }
+
+        // Replace any existing tabs strip with the new one. Schema places
+        // <w:tabs> early in pPr; PrependChild keeps schema order without
+        // having to compute the exact slot.
+        pPr.RemoveAllChildren<Tabs>();
+        pPr.PrependChild(newTabs);
+    }
+
     private static JustificationValues ParseJustification(string value) =>
         value.ToLowerInvariant() switch
         {

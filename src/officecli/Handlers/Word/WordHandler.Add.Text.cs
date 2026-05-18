@@ -294,6 +294,10 @@ public partial class WordHandler
             var numPr = pProps.NumberingProperties ?? (pProps.NumberingProperties = new NumberingProperties());
             numPr.NumberingLevelReference = new NumberingLevelReference { Val = ilvlVal };
         }
+        if (properties.TryGetValue("tabs", out var pTabsVal) || properties.TryGetValue("tabstops", out pTabsVal))
+        {
+            ApplyTabsShorthand(pProps, pTabsVal);
+        }
         if (properties.TryGetValue("shd", out var pShdVal) || properties.TryGetValue("shading", out pShdVal))
         {
             var shdParts = pShdVal.Split(';');

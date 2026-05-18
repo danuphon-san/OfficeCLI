@@ -27,9 +27,8 @@ internal static class StyleUnsupportedHints
         // shading.* / underline.color now flow through TypedAttributeFallback
         // (via the shading→shd and underline→u aliases) on /styles, paragraph,
         // run, and cell paths — entries removed once verified to write
-        // schema-valid <w:shd>/<w:u> XML.
-
-        ["tabs"] = "tabs on styles are not supported",
+        // schema-valid <w:shd>/<w:u> XML. `tabs` removed once the curated
+        // POS:ALIGN[:LEADER] parser landed.
     };
 
     /// <summary>

@@ -1621,6 +1621,16 @@ public partial class WordHandler
                 // AddStyle's numPr support — paragraphs inheriting this style
                 // (via pStyle) will pick up numbering through ResolveNumPrFromStyle
                 // without needing their own numPr.
+                case "tabs" or "tabstops":
+                {
+                    // `tabs=POS:ALIGN[:LEADER],...` shorthand on style pPr.
+                    // Mirrors paragraph Set and AddStyle behaviour. See
+                    // ApplyTabsShorthand in Helpers.cs for syntax.
+                    // CONSISTENCY(add-set-symmetry).
+                    var pPrTabs = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
+                    ApplyTabsShorthand(pPrTabs, value);
+                    break;
+                }
                 case "numId" or "numid":
                 {
                     var pPrN = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);

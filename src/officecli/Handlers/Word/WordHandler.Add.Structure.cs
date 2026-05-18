@@ -730,6 +730,11 @@ public partial class WordHandler
                 }
             }
         }
+        if (properties.TryGetValue("tabs", out var sTabsVal) || properties.TryGetValue("tabstops", out sTabsVal))
+        {
+            ApplyTabsShorthand(stylePPr, sTabsVal);
+            hasPPr = true;
+        }
         if (hasPPr) newStyle.AppendChild(stylePPr);
 
         // Style run properties
@@ -875,6 +880,7 @@ public partial class WordHandler
             "direction", "dir", "bidi",
             "font.ascii", "font.hAnsi", "font.eastAsia", "font.cs",
             "numId", "numid", "ilvl", "numLevel", "numlevel",
+            "tabs", "tabstops",
         };
         foreach (var (key, value) in properties)
         {
