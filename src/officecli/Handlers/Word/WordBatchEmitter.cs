@@ -386,6 +386,34 @@ public static partial class WordBatchEmitter
                 case "sdt":
                     EmitSdt(word, child.Path, items);
                     break;
+                case "bookmark":
+                    // Standalone body-level <w:bookmarkStart> (e.g. an anchor
+                    // added with `add /body --type bookmark`). Inline bookmarks
+                    // inside paragraphs are handled by EmitParagraph; without
+                    // this case, body-level bookmark anchors were silently
+                    // dropped on dump.
+                    {
+                        var bmFull = word.Get(child.Path);
+                        var bmProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        if (bmFull.Format.TryGetValue("name", out var nm)
+                            && nm != null && !string.IsNullOrEmpty(nm.ToString()))
+                            bmProps["name"] = nm.ToString()!;
+                        else
+                            break; // BookmarkStart with no name is unusable
+                        items.Add(new BatchItem
+                        {
+                            Command = "add",
+                            Parent = "/body",
+                            Type = "bookmark",
+                            Props = bmProps
+                        });
+                    }
+                    break;
+                case "bookmarkEnd":
+                    // Paired with the body-level bookmarkStart emit above. The
+                    // matching `add bookmark` re-creates start+end together so
+                    // the standalone end node needs no emit.
+                    break;
                 case "equation":
                     // BUG-DUMP13-03: a bare <m:oMathPara> direct child of
                     // <w:body> (not wrapped in a w:p) surfaces in
