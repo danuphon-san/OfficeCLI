@@ -35,7 +35,7 @@ examples/
     │       (basic, styled, merged, borders, rows-cols, financial)
     └── transitions/                   # Slide transition showcases
         └── transitions-<topic>.{md,sh,pptx}
-            (basic, directional, shapes, bands, dynamic, random, timing, morph)
+            (basic, directional, shapes, bands, dynamic, modern, random, timing, morph)
 ```
 
 Each example follows the same trio: `<name>.md` (walkthrough), `<name>.sh`/`.py` (build script), `<name>.<ext>` (pre-generated output).
@@ -83,6 +83,7 @@ bash transitions/transitions-directional.sh  # push/wipe/cover/uncover × direct
 bash transitions/transitions-shapes.sh       # circle/diamond/wedge/wheel/zoom
 bash transitions/transitions-bands.sh        # blinds/strips/split/checker
 bash transitions/transitions-dynamic.sh      # 2010+ Exciting gallery (vortex/flip/...)
+bash transitions/transitions-modern.sh       # 2013+ Exciting gallery (pageCurl/airplane/origami/...)
 bash transitions/transitions-random.sh       # newsflash / random
 bash transitions/transitions-timing.sh       # speed, duration, advanceTime, advanceClick
 bash transitions/transitions-morph.sh        # 2016+ Morph tweening
@@ -109,7 +110,7 @@ bash transitions/transitions-morph.sh        # 2016+ Morph tweening
 - Video and 3D model embedding
 - Native chart examples (column, bar, line, pie, doughnut, area, scatter, bubble, radar, stock, combo, waterfall, 3D, advanced)
 - Tables — basic, built-in styles, merged cells, borders, row/column ops, real-world financial deck
-- Slide transitions — all 47 schema tokens covered across 8 trios: basic, directional, shape, band, dynamic 3D, random, timing, and Morph
+- Slide transitions — all 59 schema tokens covered across 9 trios: basic, directional, shape, band, dynamic 3D (p14), modern (p15 — Page Curl, Airplane, Origami, …), random, timing, and Morph
 
 ---
 
