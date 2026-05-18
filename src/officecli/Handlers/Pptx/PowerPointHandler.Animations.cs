@@ -90,6 +90,21 @@ public partial class PowerPointHandler
         string? durationMs = null;
         var dirTokens = new List<string>();
 
+        // Closed set of direction tokens recognized by the per-type Parse*Dir
+        // helpers below. Anything outside this set is fuzz garbage — reject up
+        // front rather than letting "fade-xyz" silently drop "xyz" into
+        // dirTokens (which fade then ignores entirely, producing an envelope
+        // success message for a request the user didn't make).
+        var knownDirTokens = new System.Collections.Generic.HashSet<string>(
+            System.StringComparer.OrdinalIgnoreCase)
+        {
+            "l", "left", "r", "right", "u", "up", "d", "down",
+            "lu", "leftup", "upleft", "ru", "rightup", "upright",
+            "ld", "leftdown", "downleft", "rd", "rightdown", "downright",
+            "in", "out",
+            "h", "horiz", "horizontal", "v", "vert", "vertical",
+            "byobject", "bypage", "byword", "byletter",
+        };
         foreach (var part in parts.Skip(1))
         {
             var p = part.ToLowerInvariant();
@@ -101,8 +116,11 @@ public partial class PowerPointHandler
                 speed = TransitionSpeedValues.Fast;
             else if (p is "medium" or "med")
                 speed = TransitionSpeedValues.Medium;
-            else
+            else if (knownDirTokens.Contains(p))
                 dirTokens.Add(p);
+            else
+                throw new ArgumentException(
+                    $"Invalid transition modifier: '{part}' in '{value}'. Expected a direction (left/right/up/down/in/out/horizontal/vertical/...), a speed (slow/medium/fast), or an integer duration in ms.");
         }
         // Re-join direction tokens with '-' so multi-token forms like
         // "split-vertical-in" preserve both orientation and in/out for
