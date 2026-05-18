@@ -483,8 +483,15 @@ public partial class PowerPointHandler
                         // erroring out (we'd lose the shape entirely otherwise).
                         if (presetName.Equals("custom", StringComparison.OrdinalIgnoreCase))
                             presetName = "rect";
+                        // Validate the preset name so an unknown geometry
+                        // surfaces unsupported_property instead of silently
+                        // degrading to rect. Mirrors the Set path
+                        // (ShapeProperties.cs uses TryParsePresetShape for
+                        // the same reason).
+                        if (!TryParsePresetShape(presetName, out var presetGeom))
+                            throw new ArgumentException($"Unknown shape geometry: '{presetName}'");
                         newShape.ShapeProperties.AppendChild(
-                            new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = ParsePresetShape(presetName) }
+                            new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = presetGeom }
                         );
                     }
                 }
