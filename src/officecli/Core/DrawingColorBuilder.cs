@@ -62,7 +62,7 @@ internal static class DrawingColorBuilder
     // recognised set above, so a stray suffix is the caller's bug, not ours.
     private static readonly HashSet<string> KnownTransforms = new(StringComparer.OrdinalIgnoreCase)
     {
-        "lumMod", "lumOff", "shade", "tint", "satMod", "satOff", "hueMod", "hueOff"
+        "lumMod", "lumOff", "shade", "tint", "satMod", "satOff", "hueMod", "hueOff", "alpha"
     };
 
     private static List<(string Name, int Val)> ParseColorTransformSuffix(string chain)
@@ -90,6 +90,7 @@ internal static class DrawingColorBuilder
                 "hueoff" => "hueOff",
                 "shade" => "shade",
                 "tint" => "tint",
+                "alpha" => "alpha",
                 _ => name
             };
             result.Add((canonical, pct));

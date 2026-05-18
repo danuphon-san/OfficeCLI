@@ -80,12 +80,19 @@ public partial class PowerPointHandler
 
     internal static string AppendColorTransforms(string baseColor, OpenXmlElement colorEl)
     {
+        // a:srgbClr encodes alpha into the trailing AA byte of FormatHexWithAlpha
+        // (RRGGBBAA), so the alpha child is already represented in the base hex.
+        // a:schemeClr has no hex form, so its alpha child has nowhere else to
+        // live and must be emitted as a "+alphaN" transform suffix to survive
+        // round-trip — without this, accent1@alpha50000 came back as bare
+        // "accent1" and re-applying the value lost the transparency.
+        bool isRgb = colorEl is Drawing.RgbColorModelHex;
         var sb = new System.Text.StringBuilder(baseColor);
         foreach (var child in colorEl.Elements())
         {
             var ln = child.LocalName;
             if (Array.IndexOf(ColorTransformLocalNames, ln) < 0) continue;
-            if (ln == "alpha") continue; // alpha already encoded into RRGGBBAA hex form
+            if (ln == "alpha" && isRgb) continue; // alpha already encoded into RRGGBBAA hex form
             var v = child.GetAttribute("val", "").Value;
             if (string.IsNullOrEmpty(v)) continue;
             // Convert OOXML ST_PositivePercentage (0..100000) → human percent.
