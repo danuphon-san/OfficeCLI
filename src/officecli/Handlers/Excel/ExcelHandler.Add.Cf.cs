@@ -487,6 +487,14 @@ public partial class ExcelHandler
             ?? properties.GetValueOrDefault("formula2")
             ?? properties.GetValueOrDefault("maxvalue");
 
+        if ((opVal == ConditionalFormattingOperatorValues.Between
+             || opVal == ConditionalFormattingOperatorValues.NotBetween)
+            && secondary == null)
+        {
+            throw new ArgumentException(
+                $"cellIs operator '{opStr}' requires 'value2' property (e.g. value=10 value2=50).");
+        }
+
         // Build DifferentialFormat (dxf)
         var cisDxf = new DifferentialFormat();
         if (properties.TryGetValue("font.color", out var cisFontColor))
