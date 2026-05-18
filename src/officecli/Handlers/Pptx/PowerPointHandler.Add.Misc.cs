@@ -786,6 +786,12 @@ public partial class PowerPointHandler
                 // dur attribute) and matches user intuition.
                 var duration = properties.GetValueOrDefault("duration")
                     ?? properties.GetValueOrDefault("dur", "500");
+                // OOXML @dur is ST_PositiveUniversalMeasure (>= 0). Reject
+                // leading-minus values up front; otherwise they would round-
+                // trip into the composite animation token as "--200", whose
+                // split('-') silently drops the sign and the duration field.
+                if (!string.IsNullOrEmpty(duration) && duration.TrimStart().StartsWith('-'))
+                    throw new ArgumentException($"Invalid animation duration: '{duration}' (must be >= 0).");
                 var trigger = properties.GetValueOrDefault("trigger", "onclick");
 
                 // Map trigger property to animation format

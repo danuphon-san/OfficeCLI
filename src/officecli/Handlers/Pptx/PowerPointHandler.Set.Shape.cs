@@ -782,6 +782,14 @@ public partial class PowerPointHandler
         var duration = properties.TryGetValue("duration", out var dv) ? dv
             : properties.TryGetValue("dur", out var dv2) ? dv2
             : (existing.Format.TryGetValue("duration", out var ed) ? ed?.ToString() ?? "500" : "500");
+        // OOXML @dur is ST_PositiveUniversalMeasure (>= 0). Bare negatives
+        // would round-trip into the composite "effect-class-DURATION-trigger"
+        // string as "--200", whose split('-') silently drops the minus sign
+        // and the duration token, leaving the animation at its existing
+        // duration with a misleading "unrecognized segments" warning. Reject
+        // up front, mirroring SetAdvanceTime's >= 0 guard.
+        if (!string.IsNullOrEmpty(duration) && duration.TrimStart().StartsWith('-'))
+            throw new ArgumentException($"Invalid animation duration: '{duration}' (must be >= 0).");
         var trigger = Get("trigger", "onclick");
         var triggerPart = trigger.ToLowerInvariant() switch
         {
