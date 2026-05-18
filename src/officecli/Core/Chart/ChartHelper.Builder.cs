@@ -514,6 +514,11 @@ internal static partial class ChartHelper
         "plotarea.border", "plotborder", "chartarea.border", "chartborder",
         "gapwidth", "gap", "overlap",
         "axisline", "axis.line", "cataxisline", "valaxisline",
+        // R24 — dotted subkeys mirroring Reader emit.
+        "valaxisline.color", "valaxisline.width", "valaxisline.dash",
+        "cataxisline.color", "cataxisline.width", "cataxisline.dash",
+        "plotarea.border.color", "plotarea.border.width", "plotarea.border.dash",
+        "chartarea.border.color", "chartarea.border.width", "chartarea.border.dash",
         "explosion", "explode", "invertifneg", "invertifnegative",
         "errbars", "errorbars", "series.shadow", "seriesshadow",
         "series.outline", "seriesoutline",

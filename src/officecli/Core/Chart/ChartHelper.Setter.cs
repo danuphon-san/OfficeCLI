@@ -2135,6 +2135,48 @@ internal static partial class ChartHelper
                     break;
                 }
 
+                // R24 — dotted subkeys mirroring Reader's emit (valAxisLine.color,
+                // catAxisLine.width, plotArea.border.dash, chartArea.border.color,
+                // …). The existing compound forms above replace the whole outline;
+                // these mutate a single attribute and keep siblings intact, so
+                // dump→replay can round-trip an OOXML outline that was authored
+                // attribute-by-attribute.
+                case "valaxisline.color" or "valaxisline.width" or "valaxisline.dash":
+                {
+                    var ax = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>();
+                    if (ax == null) { unsupported.Add(key); break; }
+                    if (!MutateAxisLineAttr(ax, key.Substring("valaxisline.".Length), value))
+                        unsupported.Add(key);
+                    break;
+                }
+                case "cataxisline.color" or "cataxisline.width" or "cataxisline.dash":
+                {
+                    var ax = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.CategoryAxis>();
+                    if (ax == null) { unsupported.Add(key); break; }
+                    if (!MutateAxisLineAttr(ax, key.Substring("cataxisline.".Length), value))
+                        unsupported.Add(key);
+                    break;
+                }
+                case "plotarea.border.color" or "plotarea.border.width" or "plotarea.border.dash":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var spPr = plotArea2.GetFirstChild<C.ShapeProperties>();
+                    if (spPr == null) { spPr = new C.ShapeProperties(); plotArea2.AppendChild(spPr); }
+                    if (!MutateOutlineAttr(spPr, key.Substring("plotarea.border.".Length), value))
+                        unsupported.Add(key);
+                    break;
+                }
+                case "chartarea.border.color" or "chartarea.border.width" or "chartarea.border.dash":
+                {
+                    var cSpPr = chartSpace!.GetFirstChild<C.ChartShapeProperties>()
+                        ?? (OpenXmlCompositeElement?)chartSpace.GetFirstChild<C.ShapeProperties>();
+                    if (cSpPr == null) { cSpPr = new C.ShapeProperties(); chartSpace.InsertAfter(cSpPr, chart); }
+                    if (!MutateOutlineAttr(cSpPr, key.Substring("chartarea.border.".Length), value))
+                        unsupported.Add(key);
+                    break;
+                }
+
                 // ==================== Advanced Features ====================
 
                 case "referenceline" or "refline" or "targetline":
@@ -2536,6 +2578,69 @@ internal static partial class ChartHelper
         var outline = GetOrCreateGridlineOutline(gridlines);
         outline.RemoveAllChildren<Drawing.PresetDash>();
         outline.AppendChild(new Drawing.PresetDash { Val = ParseDashStyle(dash) });
+    }
+
+    /// <summary>
+    /// Mutate one of color/width/dash on the <a:ln> child of an axis's spPr.
+    /// Preserves the other two attributes. Returns false if attr is unknown.
+    /// </summary>
+    private static bool MutateAxisLineAttr(OpenXmlCompositeElement axis, string attr, string value)
+    {
+        var spPr = axis.GetFirstChild<C.ChartShapeProperties>();
+        if (spPr == null)
+        {
+            spPr = new C.ChartShapeProperties();
+            var tlPos = axis.GetFirstChild<C.TickLabelPosition>();
+            if (tlPos != null) tlPos.InsertAfterSelf(spPr);
+            else axis.AppendChild(spPr);
+        }
+        return MutateOutlineAttr(spPr, attr, value);
+    }
+
+    /// <summary>
+    /// Mutate one of color/width/dash on the <a:ln> child of a spPr, preserving
+    /// the other two. Shared by axisLine.* / plotArea.border.* / chartArea.border.*.
+    /// </summary>
+    private static bool MutateOutlineAttr(OpenXmlCompositeElement spPr, string attr, string value)
+    {
+        var outline = spPr.GetFirstChild<Drawing.Outline>();
+        if (outline == null)
+        {
+            outline = new Drawing.Outline();
+            spPr.AppendChild(outline);
+        }
+        // Drop NoFill if present — we're populating a real attribute now.
+        outline.RemoveAllChildren<Drawing.NoFill>();
+
+        switch (attr.ToLowerInvariant())
+        {
+            case "color":
+            {
+                outline.RemoveAllChildren<Drawing.SolidFill>();
+                var fill = new Drawing.SolidFill();
+                fill.AppendChild(BuildChartColorElement(value));
+                var dashEl = outline.GetFirstChild<Drawing.PresetDash>();
+                if (dashEl != null) outline.InsertBefore(fill, dashEl);
+                else outline.PrependChild(fill);
+                return true;
+            }
+            case "width":
+            {
+                if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var widthPt))
+                    return false;
+                outline.Width = (int)(widthPt * 12700);
+                return true;
+            }
+            case "dash":
+            {
+                outline.RemoveAllChildren<Drawing.PresetDash>();
+                outline.AppendChild(new Drawing.PresetDash { Val = ParseDashStyle(value) });
+                return true;
+            }
+            default:
+                return false;
+        }
     }
 
     private static Drawing.PresetLineDashValues ParseDashStyle(string dash)
