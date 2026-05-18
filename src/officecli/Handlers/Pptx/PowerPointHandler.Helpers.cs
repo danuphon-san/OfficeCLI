@@ -2610,4 +2610,55 @@ public partial class PowerPointHandler
 
         return nodes;
     }
+
+    // CT_TextParagraphProperties child schema rank (OOXML DrawingML):
+    //   lnSpc, spcBef, spcAft, buClr*, buSzPct/Pts/Tx, buFontTx/buFont,
+    //   buNone/buAutoNum/buChar/buBlip, tabLst, defRPr, extLst
+    // PowerPoint silently drops out-of-order children. Any code that injects
+    // a child into <a:pPr> after the element may already contain higher-rank
+    // siblings (typical when the user calls Set repeatedly in reverse order)
+    // must route through InsertPPrChild so the schema position is honoured.
+    // CONSISTENCY(schema-order-pptx): mirrors the spPr fix pattern proven by
+    // PptxSpPrSchemaOrderTests / PptxSchemaOrderR51Tests.
+    private static readonly string[] PPrChildSchemaOrder =
+    {
+        "lnSpc", "spcBef", "spcAft",
+        "buClr", "buClrTx",
+        "buSzPct", "buSzPts", "buSzTx",
+        "buFont", "buFontTx",
+        "buNone", "buAutoNum", "buChar", "buBlip",
+        "tabLst", "defRPr", "extLst",
+    };
+
+    private static int PPrChildRank(OpenXmlElement el)
+    {
+        var idx = Array.IndexOf(PPrChildSchemaOrder, el.LocalName);
+        return idx < 0 ? int.MaxValue : idx;
+    }
+
+    /// <summary>
+    /// Insert <paramref name="child"/> into a <c>&lt;a:pPr&gt;</c> at the
+    /// schema-required position so the resulting XML validates regardless of
+    /// the order in which properties were set. Caller is responsible for
+    /// removing any pre-existing same-typed child first.
+    /// </summary>
+    internal static void InsertPPrChild(Drawing.ParagraphProperties pProps, OpenXmlElement child)
+    {
+        var newRank = PPrChildRank(child);
+        // Find the first existing child whose rank is strictly greater — the
+        // new element must precede it. Same idiom as spPr/PresetGeometry fix.
+        OpenXmlElement? insertBefore = null;
+        foreach (var existing in pProps.ChildElements)
+        {
+            if (PPrChildRank(existing) > newRank)
+            {
+                insertBefore = existing;
+                break;
+            }
+        }
+        if (insertBefore != null)
+            pProps.InsertBefore(child, insertBefore);
+        else
+            pProps.AppendChild(child);
+    }
 }

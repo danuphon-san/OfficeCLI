@@ -183,26 +183,27 @@ public partial class PowerPointHandler
                     var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                     pProps.RemoveAllChildren<Drawing.LineSpacing>();
                     var (lsVal2, lsIsPercent) = SpacingConverter.ParsePptLineSpacing(value);
-                    if (lsIsPercent)
-                        pProps.AppendChild(new Drawing.LineSpacing(
-                            new Drawing.SpacingPercent { Val = lsVal2 }));
-                    else
-                        pProps.AppendChild(new Drawing.LineSpacing(
-                            new Drawing.SpacingPoints { Val = lsVal2 }));
+                    var lnSpc = lsIsPercent
+                        ? new Drawing.LineSpacing(new Drawing.SpacingPercent { Val = lsVal2 })
+                        : new Drawing.LineSpacing(new Drawing.SpacingPoints { Val = lsVal2 });
+                    // CONSISTENCY(schema-order-pptx): pPr children must follow
+                    // CT_TextParagraphProperties order or PowerPoint silently
+                    // drops them. See PowerPointHandler.Helpers.cs.
+                    InsertPPrChild(pProps, lnSpc);
                     break;
                 }
                 case "spacebefore" or "space.before":
                 {
                     var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                     pProps.RemoveAllChildren<Drawing.SpaceBefore>();
-                    pProps.AppendChild(new Drawing.SpaceBefore(new Drawing.SpacingPoints { Val = SpacingConverter.ParsePptSpacing(value) }));
+                    InsertPPrChild(pProps, new Drawing.SpaceBefore(new Drawing.SpacingPoints { Val = SpacingConverter.ParsePptSpacing(value) }));
                     break;
                 }
                 case "spaceafter" or "space.after":
                 {
                     var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                     pProps.RemoveAllChildren<Drawing.SpaceAfter>();
-                    pProps.AppendChild(new Drawing.SpaceAfter(new Drawing.SpacingPoints { Val = SpacingConverter.ParsePptSpacing(value) }));
+                    InsertPPrChild(pProps, new Drawing.SpaceAfter(new Drawing.SpacingPoints { Val = SpacingConverter.ParsePptSpacing(value) }));
                     break;
                 }
                 case "link":
