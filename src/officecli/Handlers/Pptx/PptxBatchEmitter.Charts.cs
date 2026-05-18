@@ -107,6 +107,39 @@ public static partial class PptxBatchEmitter
         if (seriesParts.Count > 0)
             props["data"] = string.Join(";", seriesParts);
 
+        // Per-series style round-trip: NodeBuilder emits color/lineWidth/
+        // lineDash/marker/smooth on each series child Format, but the chart-
+        // level `add` step has no series sub-nodes to attach those to. The
+        // chart Setter accepts dotted per-series keys (series{N}.color,
+        // series{N}.lineWidth, ...) — re-flatten them here so a chart with
+        // an explicit series color (#C00000 darkred etc.) round-trips
+        // instead of falling back to the DefaultSeriesColors palette.
+        // Skipped for waterfall (handled via increase/decrease/totalColor
+        // chart-level props; emitting series1.color=transparent for "Base"
+        // would fight Builder's NoFill encoding).
+        var isWaterfall = props.TryGetValue("chartType", out var ctForSeries)
+            && ctForSeries.Equals("waterfall", StringComparison.OrdinalIgnoreCase);
+        if (!isWaterfall && fullChart.Children != null)
+        {
+            int seriesIdx = 0;
+            foreach (var s in fullChart.Children)
+            {
+                if (s.Type != "series") continue;
+                seriesIdx++;
+                foreach (var key in new[] { "color", "lineWidth", "lineDash",
+                    "marker", "markerSize", "smooth", "outlineColor",
+                    "transparency" })
+                {
+                    if (s.Format.TryGetValue(key, out var val) && val != null)
+                    {
+                        var sval = val.ToString();
+                        if (!string.IsNullOrEmpty(sval))
+                            props[$"series{seriesIdx}.{key}"] = sval;
+                    }
+                }
+            }
+        }
+
         items.Add(new BatchItem
         {
             Command = "add",
