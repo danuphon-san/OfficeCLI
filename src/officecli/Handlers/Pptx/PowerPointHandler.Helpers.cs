@@ -692,6 +692,14 @@ public partial class PowerPointHandler
     /// </summary>
     internal static void SetAdvanceTime(Slide slide, string value)
     {
+        // OOXML @advTm is ST_PositiveUniversalMeasure (>= 0). Bare integer
+        // milliseconds is the schema form; reject leading-minus or any
+        // negative-prefixed numeric so advanceTime=-1 no longer silently
+        // writes a malformed transition that PowerPoint either ignores or
+        // mis-renders. Mirrors the >= 0 guard on border.width / padding.
+        var trimmed = (value ?? "").Trim();
+        if (trimmed.StartsWith('-'))
+            throw new ArgumentException($"Invalid advanceTime: '{value}' (must be >= 0).");
         var acMorph = slide.ChildElements.FirstOrDefault(c =>
             c.LocalName == "AlternateContent" && c.InnerXml.Contains("morph"));
         if (acMorph != null)
