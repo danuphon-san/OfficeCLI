@@ -121,6 +121,16 @@ internal static partial class ChartHelper
         }
         if (titleText != null) node.Format["title"] = titleText;
 
+        // AutoTitleDeleted only round-trips when explicitly emitted in the
+        // OOXML — its absence is the default. Surface only the truthy form
+        // so dump→replay doesn't fight scatter charts, which Excel writes
+        // with <c:autoTitleDeleted val="1"/> to suppress the auto-generated
+        // single-series title. Without this emit, replayed scatter charts
+        // gained a synthetic title and PowerPoint flagged the file as
+        // corrupt (Error 422).
+        var autoTitleDeleted = chart.GetFirstChild<C.AutoTitleDeleted>()?.Val?.Value;
+        if (autoTitleDeleted == true) node.Format["autoTitleDeleted"] = "true";
+
         // Title formatting: font, size, color, bold from RunProperties
         if (titleEl != null)
         {
