@@ -439,7 +439,16 @@ internal static partial class ChartHelper
                             "midcat" or "midpoint" => C.CrossBetweenValues.MidpointCategory,
                             _ => C.CrossBetweenValues.Between
                         };
-                        axCb.AppendChild(new C.CrossBetween { Val = cbVal });
+                        // CT_ValAx schema: ..., crossAx, crosses?, crossesAt?,
+                        // crossBetween?, majorUnit?, minorUnit?, dispUnits?, extLst?.
+                        // AppendChild lands it after majorUnit which PowerPoint
+                        // rejects ("unexpected child element 'crossBetween'").
+                        var cb = new C.CrossBetween { Val = cbVal };
+                        var cbAnchor = axCb.GetFirstChild<C.CrossesAt>() as OpenXmlElement
+                            ?? axCb.GetFirstChild<C.Crosses>() as OpenXmlElement
+                            ?? axCb.GetFirstChild<C.CrossingAxis>() as OpenXmlElement;
+                        if (cbAnchor != null) cbAnchor.InsertAfterSelf(cb);
+                        else axCb.AppendChild(cb);
                     }
                     directlyHandled.Add(key);
                     break;

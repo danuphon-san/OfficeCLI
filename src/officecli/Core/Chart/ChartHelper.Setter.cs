@@ -1545,9 +1545,18 @@ internal static partial class ChartHelper
                         // rejects with "unexpected child element 'varyColors';
                         // expected: barDir".
                         var vc = new C.VaryColors { Val = varyVal };
+                        // Schema: <chartType> element prefix is one of:
+                        //   barChart: barDir, grouping, varyColors, ...
+                        //   lineChart/areaChart/etc: grouping, varyColors, ...
+                        //   radarChart: radarStyle, varyColors, ...
+                        //   scatterChart: scatterStyle, varyColors, ...
+                        //   pieChart/bubbleChart/doughnutChart: varyColors, ...
+                        // Anchor varyColors after whichever predecessor element is present.
                         var anchor = ct.GetFirstChild<C.Grouping>() as OpenXmlElement
                             ?? ct.GetFirstChild<C.BarGrouping>() as OpenXmlElement
-                            ?? ct.GetFirstChild<C.BarDirection>() as OpenXmlElement;
+                            ?? ct.GetFirstChild<C.BarDirection>() as OpenXmlElement
+                            ?? ct.GetFirstChild<C.RadarStyle>() as OpenXmlElement
+                            ?? ct.GetFirstChild<C.ScatterStyle>() as OpenXmlElement;
                         if (anchor != null) anchor.InsertAfterSelf(vc);
                         else ct.PrependChild(vc);
                     }
