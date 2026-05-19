@@ -152,6 +152,25 @@ public static partial class PptxBatchEmitter
     private const string DefaultSlideWidth = "33.87cm";
     private const string DefaultSlideHeight = "19.05cm";
 
+    // Presentation-level Format keys that TrySetPresentationSetting accepts
+    // on `set /`. The Get side surfaces these via PopulatePresentationSettings
+    // (Set.Presentation.cs); without this allowlist, only slideWidth/Height
+    // round-tripped — firstSlideNum, show.loop, print.*, compatMode, etc.
+    // were silently dropped on dump.
+    //
+    // Get emits `direction = rtl` for RTL presentations but the setter case
+    // key is `rtl`. We rewrite the key on emit so replay's TrySetPresentationSetting
+    // accepts it. Mirrors the `direction → rtl` alias that already lives in
+    // Set.cs path-pattern dispatch.
+    private static readonly HashSet<string> PresentationEmitKeys =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "firstSlideNum", "compatMode", "removePersonalInfo",
+            "print.what", "print.colorMode", "print.hiddenSlides",
+            "print.scaleToFitPaper", "print.frameSlides",
+            "show.loop", "show.narration", "show.animation", "show.useTimings",
+        };
+
     private static void EmitPresentationProps(PowerPointHandler ppt, List<BatchItem> items)
     {
         DocumentNode root;
@@ -164,6 +183,22 @@ public static partial class PptxBatchEmitter
         if (root.Format.TryGetValue("slideHeight", out var hObj) && hObj is string h
             && !string.Equals(h, DefaultSlideHeight, StringComparison.OrdinalIgnoreCase))
             props["slideHeight"] = h;
+
+        // Presentation attributes / print / show settings — only emit non-default
+        // values (Get omits keys that match the OOXML defaults).
+        foreach (var key in PresentationEmitKeys)
+        {
+            if (!root.Format.TryGetValue(key, out var v) || v == null) continue;
+            var s = v switch { bool b => b ? "true" : "false", _ => v.ToString() ?? "" };
+            if (s.Length == 0) continue;
+            props[key] = s;
+        }
+
+        // direction → rtl: Get emits `direction = rtl`, setter accepts `rtl`.
+        if (root.Format.TryGetValue("direction", out var dObj) && dObj is string ds
+            && ds.Equals("rtl", StringComparison.OrdinalIgnoreCase))
+            props["rtl"] = "true";
+
         if (props.Count == 0) return;
         items.Add(new BatchItem
         {
