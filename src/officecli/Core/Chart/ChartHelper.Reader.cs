@@ -609,7 +609,7 @@ internal static partial class ChartHelper
             var firstTl = firstTrendlineSer.GetFirstChild<C.Trendline>();
             var tlType = firstTl?.GetFirstChild<C.TrendlineType>()?.Val;
             if (tlType?.HasValue == true)
-                node.Format["trendline"] = FormatTrendlineSpec(firstTl!, tlType.InnerText);
+                node.Format["trendline"] = FormatTrendlineSpec(firstTl!, tlType.InnerText ?? "");
         }
 
         if (depth > 0)
@@ -709,7 +709,7 @@ internal static partial class ChartHelper
                 {
                     var tlType = trendline.GetFirstChild<C.TrendlineType>()?.Val;
                     if (tlType?.HasValue == true)
-                        seriesNode.Format["trendline"] = FormatTrendlineSpec(trendline, tlType.InnerText);
+                        seriesNode.Format["trendline"] = FormatTrendlineSpec(trendline, tlType.InnerText ?? "");
                     var dispRSqr = trendline.GetFirstChild<C.DisplayRSquaredValue>()?.Val;
                     if (dispRSqr?.HasValue == true && dispRSqr.Value) seriesNode.Format["trendline.dispRSqr"] = "true";
                     var dispEq = trendline.GetFirstChild<C.DisplayEquation>()?.Val;
