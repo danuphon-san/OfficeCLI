@@ -576,6 +576,12 @@ internal static partial class ChartHelper
                     if (effLst != null) spPr.InsertBefore(ln, effLst);
                     else spPr.AppendChild(ln);
                 }
+                // BuildScatterChart seeds marker-only series with <a:ln><a:noFill/></a:ln>
+                // to suppress connecting lines. A subsequent outlineColor / lineWidth
+                // / lineDash write must drop NoFill — otherwise <a:ln> ends up with
+                // both NoFill AND SolidFill, which is schema-invalid and trips
+                // PowerPoint "repair" (Error 422 on open).
+                ln.RemoveAllChildren<Drawing.NoFill>();
                 ln.RemoveAllChildren<Drawing.SolidFill>();
                 var newFill = new Drawing.SolidFill();
                 newFill.AppendChild(BuildChartColorElement(value));

@@ -2790,6 +2790,9 @@ internal static partial class ChartHelper
         var spPr = GetOrCreateSeriesShapeProperties(series);
         var outline = spPr.GetFirstChild<Drawing.Outline>();
         if (outline == null) { outline = new Drawing.Outline(); spPr.AppendChild(outline); }
+        // BuildScatterChart pre-seeds NoFill for marker-only series; we must
+        // drop it before assigning a real width — see outlineColor case.
+        outline.RemoveAllChildren<Drawing.NoFill>();
         outline.Width = widthEmu;
     }
 
@@ -2798,6 +2801,7 @@ internal static partial class ChartHelper
         var spPr = GetOrCreateSeriesShapeProperties(series);
         var outline = spPr.GetFirstChild<Drawing.Outline>();
         if (outline == null) { outline = new Drawing.Outline(); spPr.AppendChild(outline); }
+        outline.RemoveAllChildren<Drawing.NoFill>();
         outline.RemoveAllChildren<Drawing.PresetDash>();
         outline.AppendChild(new Drawing.PresetDash { Val = ParseDashStyle(dashStyle) });
     }
