@@ -906,7 +906,16 @@ internal static partial class ChartHelper
             if (grp == "percentStacked") return $"{prefix}_percentStacked";
             return prefix;
         }
-        if (plotArea.Elements<C.LineChart>().FirstOrDefault(lc => !IsRefOnly(lc)) != null) return "line";
+        if (plotArea.Elements<C.LineChart>().FirstOrDefault(lc => !IsRefOnly(lc)) is C.LineChart lineCh)
+        {
+            // Mirror bar/area: encode stacked / percentStacked into the
+            // chartType token so dump→replay rebuilds the right grouping
+            // (Builder reads chartType only — no separate `grouping` Set key).
+            var lineGrp = lineCh.GetFirstChild<C.Grouping>()?.Val?.InnerText;
+            if (lineGrp == "stacked") return "line_stacked";
+            if (lineGrp == "percentStacked") return "line_percentStacked";
+            return "line";
+        }
         if (plotArea.GetFirstChild<C.PieChart>() != null) return "pie";
         if (plotArea.GetFirstChild<C.OfPieChart>() is C.OfPieChart ofPie)
         {
