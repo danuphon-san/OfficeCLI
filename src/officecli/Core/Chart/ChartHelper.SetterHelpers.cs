@@ -72,12 +72,18 @@ internal static partial class ChartHelper
 
         var trendType = typeStr switch
         {
+            "linear" => C.TrendlineValues.Linear,
             "exp" or "exponential" => C.TrendlineValues.Exponential,
             "log" or "logarithmic" => C.TrendlineValues.Logarithmic,
             "poly" or "polynomial" => C.TrendlineValues.Polynomial,
             "power" => C.TrendlineValues.Power,
             "movingavg" or "moving" or "movingaverage" => C.TrendlineValues.MovingAverage,
-            _ => C.TrendlineValues.Linear
+            _ => throw new CliException(
+                $"Invalid trendline type '{parts[0]}'. " +
+                "Valid: linear, exp, log, poly, power, movingAvg. " +
+                "For per-series different trendlines use seriesN.trendline keys, " +
+                "not pipe-separated lists.")
+                { Code = "invalid_value" }
         };
         trendline.AppendChild(new C.TrendlineType { Val = trendType });
 
