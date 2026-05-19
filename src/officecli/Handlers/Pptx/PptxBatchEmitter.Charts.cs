@@ -219,6 +219,17 @@ public static partial class PptxBatchEmitter
             ["minorGridlines"] = "false",
         };
 
+    // For role=value, BuildChartSpace's Reader exposes the same axis values
+    // as chart-level shortcuts (axisTitle / axisMin / axisMax / majorUnit /
+    // axisNumFmt). EmitChart already routes those through the chart's `add`
+    // row. Re-emitting them as `set axis[@role=value] title=` / `min=` /
+    // ... runs the Setter twice — second pass nukes the title's run-styles
+    // (RemoveAllChildren<Title>+rebuild without preserving font/color/bold),
+    // and burns extra batch rows. Strip the duplicates from the role=value
+    // axis emit.
+    private static readonly HashSet<string> ValueAxisChartLevelKeys =
+        new(StringComparer.OrdinalIgnoreCase) { "title", "min", "max", "majorUnit", "format" };
+
     private static void EmitChartAxesIfDifferent(PowerPointHandler ppt,
         string readChartPath, string replayChartPath, List<BatchItem> items)
     {
@@ -233,10 +244,12 @@ public static partial class PptxBatchEmitter
             catch { continue; } // axis missing on this chart type — skip
 
             var setProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var isPrimaryValueAxis = role == "value";
             foreach (var (k, v) in axisNode.Format)
             {
                 if (v == null) continue;
                 if (AxisDefaultSkipKeys.Contains(k)) continue;
+                if (isPrimaryValueAxis && ValueAxisChartLevelKeys.Contains(k)) continue;
                 // Skip BuildAxisNode "always-emit" gridline booleans when
                 // false — AddChart leaves the default off, so emitting
                 // `majorGridlines=false` is a no-op that adds noise.
