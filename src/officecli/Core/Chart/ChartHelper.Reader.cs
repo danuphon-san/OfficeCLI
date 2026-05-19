@@ -480,6 +480,25 @@ internal static partial class ChartHelper
         var showMarker = lineChart?.GetFirstChild<C.ShowMarker>()?.Val;
         if (showMarker?.HasValue == true) node.Format["showMarker"] = showMarker.Value ? "true" : "false";
 
+        // Line-chart overlay elements: dropLines, hiLowLines, upDownBars.
+        // Serialize back into Setter-spec form so dump→replay round-trips
+        // visually (R31-F1: charts-line p7 lost the up/down bar overlay
+        // because Reader was silent on these CT_LineChart children).
+        if (lineChart != null)
+        {
+            var dropLinesEl = lineChart.GetFirstChild<C.DropLines>();
+            if (dropLinesEl != null)
+                node.Format["droplines"] = FormatLineOverlaySpec(dropLinesEl);
+
+            var hiLowLinesEl = lineChart.GetFirstChild<C.HighLowLines>();
+            if (hiLowLinesEl != null)
+                node.Format["hilowlines"] = FormatLineOverlaySpec(hiLowLinesEl);
+
+            var upDownBarsEl = lineChart.GetFirstChild<C.UpDownBars>();
+            if (upDownBarsEl != null)
+                node.Format["updownbars"] = FormatUpDownBarsSpec(upDownBarsEl);
+        }
+
         var scatterChart = plotArea.GetFirstChild<C.ScatterChart>();
         var scatterStyle = scatterChart?.GetFirstChild<C.ScatterStyle>()?.Val;
         if (scatterStyle?.HasValue == true) node.Format["scatterStyle"] = scatterStyle.InnerText;
@@ -1217,6 +1236,71 @@ internal static partial class ChartHelper
         if (linear?.Angle?.HasValue == true)
             spec += ":" + (linear.Angle.Value / 60000);
         return spec;
+    }
+
+    /// <summary>
+    /// Format a dropLines / hiLowLines element as a Setter-spec string.
+    /// Empty (no spPr.outline) emits "true"; presence-with-styling emits
+    /// "color[:widthPt[:dash]]". Mirrors BuildLineShapeProperties input.
+    /// </summary>
+    private static string FormatLineOverlaySpec(OpenXmlElement overlay)
+    {
+        var spPr = overlay.GetFirstChild<C.ChartShapeProperties>();
+        var outline = spPr?.GetFirstChild<Drawing.Outline>();
+        if (outline == null) return "true";
+        var color = ReadColorFromFill(outline.GetFirstChild<Drawing.SolidFill>());
+        if (color == null) return "true";
+        // Strip leading '#' for Setter-spec compatibility (BuildChartColorElement
+        // accepts both forms; dump output stays consistent with other Setter
+        // round-trip keys like updownbars which emit bare hex).
+        if (color.StartsWith('#')) color = color.Substring(1);
+        var parts = new List<string> { color };
+        if (outline.Width?.HasValue == true && outline.Width.Value > 0)
+        {
+            var widthPt = outline.Width.Value / 12700.0;
+            parts.Add(widthPt.ToString("G", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        var dash = outline.GetFirstChild<Drawing.PresetDash>()?.Val;
+        if (dash?.HasValue == true)
+        {
+            if (parts.Count == 1) parts.Add("0.5"); // default width slot
+            parts.Add(dash.InnerText);
+        }
+        return string.Join(":", parts);
+    }
+
+    /// <summary>
+    /// Format an upDownBars element as "gapWidth[:upColor[:downColor]]".
+    /// Mirrors the Setter spec accepted in ChartHelper.Setter.cs case
+    /// "updownbars". Empty fill on up/down bars => slot left blank.
+    /// </summary>
+    private static string FormatUpDownBarsSpec(C.UpDownBars udb)
+    {
+        var gapWidth = udb.GetFirstChild<C.GapWidth>()?.Val?.Value ?? 150;
+        string? upColor = null, downColor = null;
+        var upBars = udb.GetFirstChild<C.UpBars>();
+        if (upBars != null)
+        {
+            var fill = upBars.GetFirstChild<C.ChartShapeProperties>()
+                ?.GetFirstChild<Drawing.SolidFill>();
+            upColor = ReadColorFromFill(fill);
+            if (upColor != null && upColor.StartsWith('#')) upColor = upColor.Substring(1);
+        }
+        var downBars = udb.GetFirstChild<C.DownBars>();
+        if (downBars != null)
+        {
+            var fill = downBars.GetFirstChild<C.ChartShapeProperties>()
+                ?.GetFirstChild<Drawing.SolidFill>();
+            downColor = ReadColorFromFill(fill);
+            if (downColor != null && downColor.StartsWith('#')) downColor = downColor.Substring(1);
+        }
+        // Only emit trailing slots if non-null. Setter accepts the abbreviated
+        // forms ("150", "150:00AA00", "150:00AA00:FF0000").
+        if (downColor != null)
+            return $"{gapWidth}:{upColor ?? ""}:{downColor}";
+        if (upColor != null)
+            return $"{gapWidth}:{upColor}";
+        return gapWidth.ToString();
     }
 
     /// <summary>
