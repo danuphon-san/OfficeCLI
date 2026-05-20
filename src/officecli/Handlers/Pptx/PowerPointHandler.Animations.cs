@@ -1249,9 +1249,9 @@ public partial class PowerPointHandler
     /// <see cref="RemoveShapeAnimations"/>'s walk-up) and removes that par.
     /// Also removes the BuildList entry for the shape if no animations remain.
     /// </summary>
-    private void RemoveSingleShapeAnimation(SlidePart slidePart, Shape shape, int kIndex)
+    private void RemoveSingleShapeAnimation(SlidePart slidePart, OpenXmlElement target, int kIndex)
     {
-        var ctns = EnumerateShapeAnimationCTns(slidePart, shape);
+        var ctns = EnumerateShapeAnimationCTns(slidePart, target);
         if (kIndex < 1 || kIndex > ctns.Count)
             throw new ArgumentException($"Animation {kIndex} not found (total: {ctns.Count})");
 
@@ -1282,20 +1282,27 @@ public partial class PowerPointHandler
             clickGroupPar.Remove();
         }
 
-        // If no animations remain for this shape, drop its BuildList entry.
+        // If no animations remain for this target, drop its BuildList entry.
+        // Clean both BuildParagraph (shape targets) and BuildGraphics (chart
+        // targets) — one of them is always a no-op for a given spid, but
+        // keeping the path uniform avoids forking the cleanup by element kind.
         var slide = slidePart.Slide ?? throw new InvalidOperationException("Corrupt file");
-        var shapeId = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+        var shapeId = GetAnimationTargetSpId(target);
         if (shapeId.HasValue)
         {
-            var remaining = EnumerateShapeAnimationCTns(slidePart, shape);
+            var remaining = EnumerateShapeAnimationCTns(slidePart, target);
             if (remaining.Count == 0)
             {
                 var bldLst = slide.GetFirstChild<Timing>()?.BuildList;
                 if (bldLst != null)
                 {
+                    var spIdStr = shapeId.Value.ToString();
                     foreach (var bp in bldLst.Elements<BuildParagraph>()
-                        .Where(b => b.ShapeId?.Value == shapeId.Value.ToString()).ToList())
+                        .Where(b => b.ShapeId?.Value == spIdStr).ToList())
                         bp.Remove();
+                    foreach (var bg in bldLst.Elements<BuildGraphics>()
+                        .Where(b => b.ShapeId?.Value == spIdStr).ToList())
+                        bg.Remove();
                 }
             }
         }
@@ -1333,13 +1340,16 @@ public partial class PowerPointHandler
         foreach (var node in toRemove)
             node!.Remove();
 
-        // Remove from bldLst
+        // Remove from bldLst (both bldP for shapes and bldGraphic for charts).
         var bldLst = timing.BuildList;
         if (bldLst != null)
         {
             foreach (var bp in bldLst.Elements<BuildParagraph>()
-                .Where(b => b.ShapeId?.Value == shapeId.ToString()).ToList())
+                .Where(b => b.ShapeId?.Value == spIdStr).ToList())
                 bp.Remove();
+            foreach (var bg in bldLst.Elements<BuildGraphics>()
+                .Where(b => b.ShapeId?.Value == spIdStr).ToList())
+                bg.Remove();
         }
     }
 

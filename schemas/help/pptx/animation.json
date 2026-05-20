@@ -123,10 +123,10 @@
     "motionPath": { "type":"string", "add":false, "set":false, "get":true, "description":"motion-path SVG-like path string (animMotion @path) for path animations.", "readback":"OOXML animMotion path string", "enforcement":"report" },
     "chartBuild": {
       "type": "enum",
-      "description": "Chart-internal build animation (only valid when the parent path is /slide[N]/chart[M]). Controls how chart elements appear under the entrance effect: asWhole (default — entire chart as one), series (one series at a time), category (one category at a time), seriesEl (each data point per series), categoryEl (each data point per category). Aliases accepted on input: bySeries, byCategory, bySeriesEl, byCategoryEl. Writes <a:bldChart bld='...'/> inside <p:bldGraphic><p:bldSub>. To change chartBuild after creation, re-Add the animation on the chart — re-Add replaces the BuildGraphics entry. Set on /slide[N]/chart[M]/animation[K] is not yet routed.",
+      "description": "Chart-internal build animation (only valid when the parent path is /slide[N]/chart[M]). Controls how chart elements appear under the entrance effect: asWhole (default — entire chart as one), series (one series at a time), category (one category at a time), seriesEl (each data point per series), categoryEl (each data point per category). Aliases accepted on input: bySeries, byCategory, bySeriesEl, byCategoryEl. Writes <a:bldChart bld='...'/> inside <p:bldGraphic><p:bldSub>. chartBuild is chart-wide — setting it via any /slide[N]/chart[M]/animation[K] propagates to every animation on the chart.",
       "values": ["asWhole", "series", "category", "seriesEl", "categoryEl"],
       "aliases": ["bySeries", "byCategory", "bySeriesEl", "byCategoryEl"],
-      "add": true, "set": false, "get": true,
+      "add": true, "set": true, "get": true,
       "examples": [
         "--prop \"effect=fade;class=entrance;chartBuild=byCategory\"",
         "--prop \"effect=wipe;chartBuild=series;trigger=afterPrevious;duration=500\""

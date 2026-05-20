@@ -472,21 +472,57 @@ public partial class PowerPointHandler
             return Model3DToNode(m3dElements[mIdx - 1], sIdx, mIdx);
         }
 
-        // Try animation path: /slide[N]/shape[M]/animation[A]
-        var animPathMatch = Regex.Match(path, @"^/slide\[(\d+)\]/shape\[(\d+)\]/animation\[(\d+)\]$");
+        // Try animation path: /slide[N]/(shape|chart)[M]/animation[A]
+        // CONSISTENCY(animation-target): same enumeration model for shapes and
+        // chart graphicFrames — only the resolver differs.
+        var animPathMatch = Regex.Match(path, @"^/slide\[(\d+)\]/(shape|chart)\[(\d+)\]/animation\[(\d+)\]$");
         if (animPathMatch.Success)
         {
             var sIdx = int.Parse(animPathMatch.Groups[1].Value);
-            var shIdx = int.Parse(animPathMatch.Groups[2].Value);
-            var aIdx = int.Parse(animPathMatch.Groups[3].Value);
-            var (animSlidePart, animShape) = ResolveShape(sIdx, shIdx);
-            var animShapePathSeg = BuildElementPathSegment("shape", animShape, shIdx);
+            var animKind = animPathMatch.Groups[2].Value;
+            var elIdx = int.Parse(animPathMatch.Groups[3].Value);
+            var aIdx = int.Parse(animPathMatch.Groups[4].Value);
 
-            var effectCTns = EnumerateShapeAnimationCTns(animSlidePart, animShape);
+            SlidePart animSlidePart;
+            OpenXmlElement animTargetEl;
+            string animElPathSeg;
+            if (animKind == "chart")
+            {
+                var (sp, gf, _, _) = ResolveChart(sIdx, elIdx);
+                animSlidePart = sp;
+                animTargetEl = gf;
+                animElPathSeg = BuildElementPathSegment("chart", gf, elIdx);
+            }
+            else
+            {
+                var (sp, sh) = ResolveShape(sIdx, elIdx);
+                animSlidePart = sp;
+                animTargetEl = sh;
+                animElPathSeg = BuildElementPathSegment("shape", sh, elIdx);
+            }
+
+            var effectCTns = EnumerateShapeAnimationCTns(animSlidePart, animTargetEl);
             if (aIdx < 1 || aIdx > effectCTns.Count)
-                return new DocumentNode { Path = path, Type = "error", Text = $"animation[{aIdx}] not found (shape has {effectCTns.Count} animation(s))" };
-            var animNode = new DocumentNode { Path = $"/slide[{sIdx}]/{animShapePathSeg}/animation[{aIdx}]", Type = "animation" };
+                return new DocumentNode { Path = path, Type = "error", Text = $"animation[{aIdx}] not found ({animKind} has {effectCTns.Count} animation(s))" };
+            var animNode = new DocumentNode { Path = $"/slide[{sIdx}]/{animElPathSeg}/animation[{aIdx}]", Type = "animation" };
             PopulateAnimationNode(animNode, effectCTns[aIdx - 1]);
+            // chartBuild surfaces on the per-animation node too, mirroring the
+            // chart-parent Get readback. Pulled from the matching BuildGraphics
+            // by spid (one bldGraphic per chart spid in v1).
+            if (animKind == "chart")
+            {
+                var spIdStr = GetAnimationTargetSpId(animTargetEl)?.ToString();
+                if (spIdStr != null)
+                {
+                    var bldGraphic = GetSlide(animSlidePart).GetFirstChild<Timing>()?.BuildList?
+                        .Elements<BuildGraphics>().FirstOrDefault(b => b.ShapeId?.Value == spIdStr);
+                    if (bldGraphic != null)
+                    {
+                        var bldVal = bldGraphic.BuildSubElement?.BuildChart?.Build?.Value;
+                        animNode.Format["chartBuild"] = string.IsNullOrEmpty(bldVal) ? "asWhole" : bldVal;
+                    }
+                }
+            }
             return animNode;
         }
 
@@ -1575,6 +1611,38 @@ public partial class PowerPointHandler
                             Type = "animation"
                         };
                         PopulateAnimationNode(node, effectCTns[ai]);
+                        if (MatchesGenericAttributes(node, parsed.Attributes))
+                            results.Add(node);
+                    }
+                }
+
+                // CONSISTENCY(animation-target): chart graphicFrames are
+                // first-class animation targets — enumerate them under the
+                // same query so `query animation` returns chart animations too.
+                int animChartIdx = 0;
+                foreach (var animGf in animShapeTree.Elements<GraphicFrame>())
+                {
+                    if (!IsChartGraphicFrame(animGf)) continue;
+                    animChartIdx++;
+                    var effectCTns = EnumerateShapeAnimationCTns(slidePart, animGf);
+                    if (effectCTns.Count == 0) continue;
+                    var chartPathSeg = BuildElementPathSegment("chart", animGf, animChartIdx);
+                    var chartSpId = GetAnimationTargetSpId(animGf)?.ToString();
+                    var bldGraphic = chartSpId == null ? null
+                        : GetSlide(slidePart).GetFirstChild<Timing>()?.BuildList?
+                            .Elements<BuildGraphics>().FirstOrDefault(b => b.ShapeId?.Value == chartSpId);
+                    var chartBuildVal = bldGraphic == null ? null
+                        : (bldGraphic.BuildSubElement?.BuildChart?.Build?.Value
+                            ?? "asWhole");
+                    for (int ai = 0; ai < effectCTns.Count; ai++)
+                    {
+                        var node = new DocumentNode
+                        {
+                            Path = $"/slide[{animSlideNum}]/{chartPathSeg}/animation[{ai + 1}]",
+                            Type = "animation"
+                        };
+                        PopulateAnimationNode(node, effectCTns[ai]);
+                        if (chartBuildVal != null) node.Format["chartBuild"] = chartBuildVal;
                         if (MatchesGenericAttributes(node, parsed.Attributes))
                             results.Add(node);
                     }
