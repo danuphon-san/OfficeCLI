@@ -87,6 +87,22 @@ jobs:
           publish/${{ matrix.name }} close test_smoke.docx
           rm -f test_smoke.docx
 
+      - name: Smoke test - .NET 8-only runtime (linux-x64)
+        if: matrix.rid == 'linux-x64' && runner.os == 'Linux'
+        run: |
+          chmod +x publish/${{ matrix.name }}
+          mkdir -p smoke_net8
+          docker run --rm \
+            -v "$PWD/publish:/app:ro" \
+            -v "$PWD/smoke_net8:/work" \
+            -w /work \
+            mcr.microsoft.com/dotnet/runtime:8.0 \
+            bash -c "set -e; \
+              /app/${{ matrix.name }} create issue115.docx; \
+              /app/${{ matrix.name }} add issue115.docx /body --type paragraph --prop text='net8 smoke'; \
+              /app/${{ matrix.name }} close issue115.docx; \
+              /app/${{ matrix.name }} view issue115.docx text --json"
+
       - name: Smoke test - install
         if: >-
           (matrix.rid == 'osx-arm64' && runner.arch == 'ARM64') ||
