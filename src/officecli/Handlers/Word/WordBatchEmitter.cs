@@ -124,7 +124,8 @@ public static partial class WordBatchEmitter
             }).ToList(),
             ChartCursor: new NoteCursor(),
             ParaIdToTargetIdx: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
-            DeferredBookmarks: new List<BatchItem>());
+            DeferredBookmarks: new List<BatchItem>(),
+            TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
 
         if (node.Type == "table")
             EmitTable(word, path, 1, items, ctx);
@@ -298,7 +299,14 @@ public static partial class WordBatchEmitter
         // and that sibling does not exist yet during the in-order walk.
         // EmitParagraph stashes the deferred `add bookmark` rows here;
         // EmitBody appends them once all paragraphs are emitted.
-        List<BatchItem> DeferredBookmarks);
+        List<BatchItem> DeferredBookmarks,
+        // BUG-DUMP-TXBX: per-host textbox counter. Keyed by the host path
+        // ("/body", "/body/tbl[1]/tr[1]/tc[1]", "/header[N]", "/footer[N]").
+        // TryEmitPictureRun bumps this when it identifies a textbox-bearing
+        // Drawing and uses the post-bump value as N for /<host>/textbox[N].
+        // Matches the CountTextboxesInHost selector on the Add side so dump
+        // and Add-side indexing stay in lockstep.
+        Dictionary<string, int> TextboxCounters);
 
     private static void EmitBody(WordHandler word, List<BatchItem> items,
                                  Dictionary<string, int>? paraIdToTargetIdx = null)
@@ -344,7 +352,8 @@ public static partial class WordBatchEmitter
             ChartSpecs: chartSpecs,
             ChartCursor: new NoteCursor(),
             ParaIdToTargetIdx: paraIdToTargetIdx,
-            DeferredBookmarks: new List<BatchItem>());
+            DeferredBookmarks: new List<BatchItem>(),
+            TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
 
         int pIndex = 0, tblIndex = 0;
         foreach (var child in bodyNode.Children)

@@ -676,7 +676,35 @@ public static partial class WordBatchEmitter
         // Try the image path first; if no embedded image part the run is a
         // chart anchor — pull the next pre-resolved ChartSpec and emit a
         // typed `add chart` row.
-        if (run.Type != "picture") return false;
+        // Drawings wrapped in <mc:AlternateContent>/<mc:Choice> surface as a
+        // plain "run" node (Run.GetFirstChild<Drawing>() returns null because
+        // the Drawing lives inside the AlternateContent wrapper), so we also
+        // accept "run" / "r" when the raw XML carries an obvious textbox
+        // marker. Non-drawing runs without those markers short-circuit out
+        // of the textbox/picture path immediately.
+        if (run.Type != "picture")
+        {
+            if (run.Type != "run" && run.Type != "r") return false;
+            var probeXml = word.GetElementXml(run.Path);
+            if (string.IsNullOrEmpty(probeXml)) return false;
+            if (!IsTextboxDrawing(probeXml)) return false;
+            if (TryEmitTextbox(word, run, probeXml, parentPath, items, ctx))
+                return true;
+            // AlternateContent-wrapped non-textbox shapes (rare) fall back to
+            // a raw-set append, mirroring the original drawing-fallback path.
+            if (parentPath == "/body" && !probeXml.Contains("r:embed") && !probeXml.Contains("r:id"))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = "/document",
+                    Xpath = $"/w:document/w:body/w:p[{targetIndex}]",
+                    Action = "append",
+                    Xml = probeXml
+                });
+            }
+            return true;
+        }
         var binary = word.GetImageBinary(run.Path);
         if (binary.HasValue)
         {
@@ -717,13 +745,18 @@ public static partial class WordBatchEmitter
             return true;
         }
         // Drawing without image part and not a chart — most likely a wps
-        // shape. No typed Add path exists yet, but the XML is self-contained
-        // (no rId/embed back-references) so round-trip via raw-set append is
-        // safe. Targets the already-created paragraph by xpath positional
-        // index. Caveats: drawings with embedded image references would also
-        // land here and silently lose their image part — acceptable v0.5
-        // lossy mode.
+        // shape. BUG-DUMP-TXBX: textbox-bearing drawings get a typed
+        // `add textbox` row plus recursive inner-paragraph/run emits so
+        // round-trip preserves structure (raw-set fallback was emitting
+        // BOTH the full <w:drawing> XML AND flattening the textbox's
+        // inner runs back onto the host paragraph). Non-textbox shapes
+        // still fall through to the raw-set append.
         var rawXml = word.GetElementXml(run.Path);
+        if (!string.IsNullOrEmpty(rawXml) && IsTextboxDrawing(rawXml))
+        {
+            if (TryEmitTextbox(word, run, rawXml, parentPath, items, ctx))
+                return true;
+        }
         if (!string.IsNullOrEmpty(rawXml) &&
             parentPath == "/body" &&
             !rawXml.Contains("r:embed") && !rawXml.Contains("r:id"))
@@ -738,6 +771,148 @@ public static partial class WordBatchEmitter
             });
         }
         return true;
+    }
+
+    private static bool IsTextboxDrawing(string rawXml)
+    {
+        // Mirrors WordHandler.CountTextboxesInHost / Navigation's textbox
+        // selector — a textbox is a wps:wsp with txBox=1 cNvSpPr or a
+        // wps:txbx child carrying w:txbxContent.
+        return rawXml.Contains("txBox=\"1\"")
+            || rawXml.Contains("<wps:txbx")
+            || rawXml.Contains("txbxContent");
+    }
+
+    /// <summary>
+    /// BUG-DUMP-TXBX: emit a typed <c>add textbox</c> row for the host of
+    /// the current drawing run, followed by recursive inner-paragraph/run
+    /// emits under <c>/&lt;host&gt;/textbox[N]</c>. Geometry props
+    /// (width/height/wrap/anchor.x/anchor.y/fill) are extracted from the
+    /// raw drawing XML so the rebuilt textbox keeps its layout.
+    /// </summary>
+    private static bool TryEmitTextbox(WordHandler word, DocumentNode run, string rawXml,
+                                       string parentPath, List<BatchItem> items, BodyEmitContext? ctx)
+    {
+        if (ctx == null) return false;
+
+        // Only emit a typed `add textbox` for hosts AddTextbox itself
+        // supports: /body, /body/tbl[..]/tc[N], /header[N], /footer[N].
+        // Other parents fall through to the raw-set append.
+        string hostPath = parentPath;
+        if (!IsTextboxHostPath(hostPath)) return false;
+
+        // Allocate next 1-based textbox index for this host.
+        int n = ctx.TextboxCounters.TryGetValue(hostPath, out var prev) ? prev + 1 : 1;
+        ctx.TextboxCounters[hostPath] = n;
+        string textboxPath = hostPath == "/" ? "/textbox[" + n + "]" : $"{hostPath}/textbox[{n}]";
+
+        // Extract geometry / wrap / fill / anchor from the drawing XML so the
+        // rebuilt textbox keeps its layout. Conservative best-effort — any
+        // attribute we can't parse falls back to AddTextbox's defaults.
+        var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(rawXml);
+            System.Xml.Linq.XNamespace wp = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
+            System.Xml.Linq.XNamespace a = "http://schemas.openxmlformats.org/drawingml/2006/main";
+
+            var anchor = doc.Descendants(wp + "anchor").FirstOrDefault()
+                      ?? (System.Xml.Linq.XElement?)doc.Descendants(wp + "inline").FirstOrDefault();
+            var extent = doc.Descendants(wp + "extent").FirstOrDefault();
+            if (extent != null)
+            {
+                var cx = extent.Attribute("cx")?.Value;
+                var cy = extent.Attribute("cy")?.Value;
+                if (!string.IsNullOrEmpty(cx)) props["width"] = cx + "emu";
+                if (!string.IsNullOrEmpty(cy)) props["height"] = cy + "emu";
+            }
+            if (anchor != null)
+            {
+                var posH = anchor.Element(wp + "positionH")?.Element(wp + "posOffset")?.Value;
+                var posV = anchor.Element(wp + "positionV")?.Element(wp + "posOffset")?.Value;
+                if (!string.IsNullOrEmpty(posH)) props["anchor.x"] = posH + "emu";
+                if (!string.IsNullOrEmpty(posV)) props["anchor.y"] = posV + "emu";
+                // wrap token
+                if (anchor.Element(wp + "wrapSquare") != null) props["wrap"] = "square";
+                else if (anchor.Element(wp + "wrapTight") != null) props["wrap"] = "tight";
+                else if (anchor.Element(wp + "wrapTopAndBottom") != null) props["wrap"] = "topAndBottom";
+                else if (anchor.Element(wp + "wrapNone") != null) props["wrap"] = "none";
+            }
+            // Fill: solidFill > srgbClr inside wps:spPr.
+            var spPr = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "spPr");
+            var solidFill = spPr?.Element(a + "solidFill");
+            var srgbClr = solidFill?.Element(a + "srgbClr")?.Attribute("val")?.Value;
+            if (!string.IsNullOrEmpty(srgbClr)) props["fill"] = srgbClr;
+            // docPr name → alt
+            var docPr = doc.Descendants(wp + "docPr").FirstOrDefault();
+            var altName = docPr?.Attribute("name")?.Value;
+            if (!string.IsNullOrEmpty(altName) && altName != "Text Box") props["alt"] = altName;
+        }
+        catch
+        {
+            // Parsing failures: still emit the `add textbox` row with whatever
+            // we managed to extract; defaults cover the rest.
+        }
+
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = hostPath,
+            Type = "textbox",
+            Props = props.Count > 0 ? props : null
+        });
+
+        // Recurse over inner content. Get on /<host>/textbox[N] returns the
+        // <w:txbxContent>; its children are the inner <w:p>. AddTextbox auto-
+        // seeds one empty <w:p>, so the first source paragraph uses set-on-
+        // existing (autoPresent: true) and the rest emit as fresh adds.
+        try
+        {
+            var txbxNode = word.Get(textboxPath);
+            var children = txbxNode.Children ?? new List<DocumentNode>();
+            int innerPIdx = 0;
+            bool firstParaSeen = false;
+            foreach (var child in children)
+            {
+                if (child.Type == "paragraph" || child.Type == "p")
+                {
+                    innerPIdx++;
+                    // The generic fallback fabricates child paths from the
+                    // OOXML LocalName ("/body/txbxContent[N]/p[M]") which the
+                    // Navigation layer can't re-resolve — the user-facing
+                    // path segment is "textbox", not "txbxContent". Use the
+                    // canonical /body/textbox[N]/p[M] form instead.
+                    var sourceParaPath = $"{textboxPath}/p[{innerPIdx}]";
+                    EmitParagraph(word, sourceParaPath, textboxPath, innerPIdx, items,
+                                  autoPresent: !firstParaSeen, ctx);
+                    firstParaSeen = true;
+                }
+            }
+        }
+        catch
+        {
+            // If the inner walk fails for any reason, the typed `add textbox`
+            // still landed — round-trip recreates an empty textbox with the
+            // right geometry, which beats the previous double-emit.
+        }
+        return true;
+    }
+
+    private static bool IsTextboxHostPath(string parentPath)
+    {
+        // Matches ResolveDrawingHost: /body, /body/tbl[..]/tr[..]/tc[N],
+        // /header[N], /footer[N]. Reject anything else so non-supported
+        // hosts fall through to the raw-set append.
+        if (string.Equals(parentPath, "/body", StringComparison.Ordinal)) return true;
+        if (parentPath.StartsWith("/header[", StringComparison.Ordinal)
+            && parentPath.EndsWith("]", StringComparison.Ordinal)
+            && !parentPath.Substring(8).Contains('/')) return true;
+        if (parentPath.StartsWith("/footer[", StringComparison.Ordinal)
+            && parentPath.EndsWith("]", StringComparison.Ordinal)
+            && !parentPath.Substring(8).Contains('/')) return true;
+        if (parentPath.Contains("/tc[", StringComparison.Ordinal)
+            && parentPath.EndsWith("]", StringComparison.Ordinal)) return true;
+        return false;
     }
 
     private static bool TryEmitNoteRefRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx)

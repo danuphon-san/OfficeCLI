@@ -673,6 +673,33 @@ public partial class WordHandler
             // filter the inner display run was emitted as a plain run and
             // the field instruction was silently dropped on dump round-trip.
             .Where(r => r.Ancestors<SimpleField>().FirstOrDefault() == null)
+            // BUG-DUMP-TXBX: skip runs whose nearest TextBoxContent ancestor
+            // sits BELOW the current paragraph (i.e. the run lives inside a
+            // textbox that is a descendant of `para`). Those runs are
+            // surfaced separately under /<host>/textbox[N]/p[M]/r[K] via the
+            // textbox navigation branch and the WordBatchEmitter typed
+            // `add textbox` recursion. We must NOT skip runs whose para is
+            // itself inside TextBoxContent (the inner paragraphs of a
+            // textbox) — for those, no TextBoxContent sits between the run
+            // and `para`, so they pass through and emit normally.
+            .Where(r =>
+            {
+                // Drop the run iff its nearest TextBoxContent ancestor is a
+                // DESCENDANT of `para` (a textbox lives under this para and
+                // this run sits inside it). Keep when no TextBoxContent
+                // exists, or when the TextBoxContent ancestor sits at-or-
+                // above `para` (meaning `para` itself is the textbox-inner
+                // paragraph — emitting its runs is the desired behavior).
+                var tbc = r.Ancestors<TextBoxContent>().FirstOrDefault();
+                if (tbc == null) return true;
+                // tbc is a descendant of `para`? walk tbc's ancestors and
+                // check whether `para` is among them.
+                foreach (var anc in tbc.Ancestors())
+                {
+                    if (ReferenceEquals(anc, para)) return false;
+                }
+                return true;
+            })
             .ToList();
     }
 
