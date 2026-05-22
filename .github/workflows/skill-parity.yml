@@ -2,11 +2,15 @@ name: Skill parity
 
 # Root SKILL.md is the file the public URL serves
 # (https://d.officecli.ai/SKILL.md, raw GitHub URL) and is what
-# `curl ... | bash` consumers fetch. skills/officecli/SKILL.md is the
-# spec-conforming copy that `gh skill install` and `npx skills add`
-# discover. The two must stay byte-identical — the binary embeds the
-# `skills/officecli/` copy and ships it to agents, so any drift between
-# the two would mean the URL and the installer serve different content.
+# `curl ... | bash` consumers fetch. skills/officecli/SKILL.md is a
+# symlink to it — the spec-conforming location that `gh skill install`
+# and `npx skills add` discover, and what the binary embeds.
+#
+# On macOS / Linux the symlink resolves transparently and this diff
+# always passes. The check exists for the Windows case: git on Windows
+# without core.symlinks=true checks out symlinks as plain text files
+# containing the link target path (e.g. literal "../../SKILL.md"), so
+# diff catches that corruption before it ships in a release build.
 
 on:
   push:
