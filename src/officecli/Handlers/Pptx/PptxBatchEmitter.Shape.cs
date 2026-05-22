@@ -169,7 +169,16 @@ public static partial class PptxBatchEmitter
         // user text — skip the body walk for equations entirely.
         if (isEquation) return;
 
-        EmitTextBody(ppt, fullShape, replayPath, items, ctx: ctx);
+        // CONSISTENCY(shape-empty-seed): since commit c574db7a, CreateTextShape
+        // emits `<a:p/>` (no <a:r>) for the empty-text path — the same shape
+        // PowerPoint writes for a fresh empty text body. The emitted shape `add`
+        // op above never carries `text=` (text always replays via per-paragraph /
+        // per-run ops), so AddShape/AddTextbox always seeds paragraph[1] with
+        // zero runs. EmitTextBody must therefore tell EmitParagraph the seeded
+        // first paragraph has no run — otherwise the multi-run path emits
+        // `set run[1]` against a run that doesn't exist on replay, breaking
+        // round-trip for any shape whose first paragraph has >1 run.
+        EmitTextBody(ppt, fullShape, replayPath, items, seededFirstParaHasRun: false, ctx: ctx);
     }
 
     private static void EmitPlaceholder(PowerPointHandler ppt, DocumentNode phNode, string parentSlidePath,
