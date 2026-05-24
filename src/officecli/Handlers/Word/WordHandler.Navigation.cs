@@ -652,6 +652,48 @@ public partial class WordHandler
             $"Malformed path segment '{part}'. Predicate must be a positive integer, 'last()', or '[@attr=value]'.");
     }
 
+    // PERF: cache the flattened+filtered body paragraph/table lists per Body
+    // instance. /body/p[N] and /body/tbl[N] are resolved by index; without
+    // the cache, dumping a 14k-paragraph doc made 14k Get calls × 14k walks
+    // → O(n²). Invalidation is by-count: any body mutation that adds or
+    // removes a top-level child bumps body.ChildElements.Count and the
+    // cache is rebuilt on next access. Property-only Set calls do not
+    // change the count and don't invalidate (correct — they don't change
+    // which paragraph sits at index N).
+    private readonly Dictionary<OpenXmlElement, (int count, List<OpenXmlElement> paras, List<OpenXmlElement> tables)>
+        _bodyChildIndexCache = new();
+
+    private List<OpenXmlElement> GetBodyParagraphIndex(Body body) => GetBodyChildIndex(body).paras;
+    private List<OpenXmlElement> GetBodyTableIndex(Body body) => GetBodyChildIndex(body).tables;
+
+    private (List<OpenXmlElement> paras, List<OpenXmlElement> tables) GetBodyChildIndex(Body body)
+    {
+        var currentCount = body.ChildElements.Count;
+        if (_bodyChildIndexCache.TryGetValue(body, out var entry) && entry.count == currentCount)
+            return (entry.paras, entry.tables);
+
+        var flat = new List<OpenXmlElement>(body.ChildElements.Count);
+        void Collect(OpenXmlElement el)
+        {
+            foreach (var c in el.ChildElements)
+            {
+                if (c is CustomXmlBlock cx) Collect(cx);
+                else flat.Add(c);
+            }
+        }
+        Collect(body);
+
+        var paras = new List<OpenXmlElement>();
+        var tables = new List<OpenXmlElement>();
+        foreach (var e in flat)
+        {
+            if (e is Paragraph p && !IsOMathParaWrapperParagraph(p)) paras.Add(p);
+            else if (e is Table t) tables.Add(t);
+        }
+        _bodyChildIndexCache[body] = (currentCount, paras, tables);
+        return (paras, tables);
+    }
+
     private OpenXmlElement? NavigateToElement(List<PathSegment> segments)
         => NavigateToElement(segments, out _, out _);
 
@@ -912,21 +954,14 @@ public partial class WordHandler
                 // logic in WalkBodyChild for `get /body`; without this, path
                 // resolution diverged from listing and `get /body/p[1]` threw
                 // "Path not found" on customXml-wrapped paragraphs.
-                var flat = new List<OpenXmlElement>();
-                void CollectBodyChildren(OpenXmlElement el)
-                {
-                    foreach (var c in el.ChildElements)
-                    {
-                        if (c is CustomXmlBlock cx) CollectBodyChildren(cx);
-                        else flat.Add(c);
-                    }
-                }
-                CollectBodyChildren(body2);
+                // PERF: cache the filtered lists per Body instance + child count.
+                // Without the cache, dumping a doc with N body paragraphs costs
+                // O(N²) because the dump emitter calls Get("/body/p[K]") for
+                // every K in 1..N, and each call re-walked body.ChildElements.
+                // Real-world 14k-paragraph doc: 5+ minutes → seconds.
                 children = seg.Name.ToLowerInvariant() == "p"
-                    ? flat.OfType<Paragraph>()
-                        .Where(p => !IsOMathParaWrapperParagraph(p))
-                        .Cast<OpenXmlElement>()
-                    : flat.OfType<Table>().Cast<OpenXmlElement>();
+                    ? GetBodyParagraphIndex(body2)
+                    : GetBodyTableIndex(body2);
             }
             else if (current is Body body3 && seg.Name == "oMathPara")
             {
