@@ -628,6 +628,13 @@ internal static partial class ChartHelper
         "shadow", "outline",
         "outlinecolor", "outlinewidth", "outlinedash",
         "alpha", "transparency",
+        // R38: per-series labelFont subkeys — Setter dispatches via
+        // HandleSeriesDottedProperty (default arm `labelfont` / `labelfont.*`).
+        // Without deferral, AddChart's build-time parse drops them and
+        // dump→replay loses series-scoped data label fonts.
+        "labelfont",
+        "labelfont.color", "labelfont.size", "labelfont.bold",
+        "labelfont.name", "labelfont.font",
     };
 
     // ==================== Chart Type Builders ====================

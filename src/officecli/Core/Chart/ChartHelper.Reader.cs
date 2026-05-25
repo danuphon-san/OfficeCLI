@@ -936,6 +936,33 @@ internal static partial class ChartHelper
                 // Explosion (pie)
                 var explosion = serEl?.GetFirstChild<C.Explosion>()?.Val?.Value;
                 if (explosion != null && explosion > 0) seriesNode.Format["explosion"] = explosion;
+                // Per-series labelFont readback. Mirrors the chart-level
+                // labelFont readback above (line ~662) but scoped to this
+                // series' own <c:dLbls> — Setter ApplySeriesLabelFont writes
+                // here via series{N}.labelFont*=, and without per-series
+                // readback dump→replay loses the spec.
+                var serDLbls = serEl?.GetFirstChild<C.DataLabels>();
+                var serDlDefRp = serDLbls?.GetFirstChild<C.TextProperties>()
+                    ?.GetFirstChild<Drawing.Paragraph>()
+                    ?.GetFirstChild<Drawing.ParagraphProperties>()
+                    ?.GetFirstChild<Drawing.DefaultRunProperties>();
+                if (serDlDefRp != null)
+                {
+                    if (serDlDefRp.FontSize?.HasValue == true)
+                        seriesNode.Format["labelFont.size"] = $"{serDlDefRp.FontSize.Value / 100}pt";
+                    if (serDlDefRp.Bold?.HasValue == true && serDlDefRp.Bold.Value)
+                        seriesNode.Format["labelFont.bold"] = "true";
+                    var serDlLabelFill = serDlDefRp.GetFirstChild<Drawing.SolidFill>();
+                    if (serDlLabelFill != null)
+                    {
+                        var serDlLabelColor = ReadColorFromFill(serDlLabelFill);
+                        if (serDlLabelColor != null)
+                            seriesNode.Format["labelFont.color"] = serDlLabelColor;
+                    }
+                    var serDlLatin = serDlDefRp.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value;
+                    if (!string.IsNullOrEmpty(serDlLatin))
+                        seriesNode.Format["labelFont.name"] = serDlLatin;
+                }
                 // Data point colors
                 if (serEl != null)
                 {

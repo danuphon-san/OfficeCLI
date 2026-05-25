@@ -142,7 +142,15 @@ public static partial class PptxBatchEmitter
                     "marker", "markerSize", "smooth", "outlineColor",
                     "outlineWidth", "outlineDash", "transparency", "gradient",
                     "trendline", "trendline.dispRSqr", "trendline.dispEq",
-                    "errbars" })
+                    "errbars",
+                    // R38: per-series labelFont dotted sub-keys — Reader now
+                    // emits these on each series node, so the per-series
+                    // flatten must promote them to series{N}.labelFont.* on
+                    // the chart add row. Without it dump→replay loses the
+                    // series-scoped label font (chart-level fan-out is the
+                    // only path that round-trips today).
+                    "labelFont.color", "labelFont.size", "labelFont.bold",
+                    "labelFont.name" })
                 {
                     if (s.Format.TryGetValue(key, out var val) && val != null)
                     {
