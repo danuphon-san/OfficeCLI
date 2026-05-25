@@ -232,14 +232,14 @@ public static class BlankDocCreator
         // Two paths: full (default) emits Word-aligned baseline (Calibri 11pt
         // + Normal style + theme1.xml — matches the de-facto baseline, which
         // is what Word actually writes); minimal emits raw OOXML (TNR, no sz,
-        // no Normal, no theme — matches POI's `new XWPFDocument()`). The
+        // no Normal, no theme). The
         // minimal path is the prior officecli behavior; the full path was
         // added so docs created by officecli render identically in Word /
         // / cli preview without relying on each renderer's
         // Normal.dotm fallback heuristics.
         //
-        // Resolve locale-specific defaults from LocaleFontRegistry (POI/LO
-        // pattern). Without a locale, only Latin slots are populated so the
+        // Resolve locale-specific defaults from LocaleFontRegistry.
+        // Without a locale, only Latin slots are populated so the
         // host application's UI-locale defaults fill EastAsia / CS as needed.
         var (locLatin, locEa, locCs) = OfficeCli.Core.LocaleFontRegistry.Resolve(locale);
 

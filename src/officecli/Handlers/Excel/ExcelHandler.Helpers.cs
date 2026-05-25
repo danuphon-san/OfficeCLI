@@ -1334,7 +1334,7 @@ public partial class ExcelHandler
         }
 
         // Apply number format to numeric cells (dates, percentages, etc.)
-        // Mirrors POI DataFormatter: raw double + format code → display string
+        // raw double + format code → display string
         if (cell.DataType == null && double.TryParse(value,
                 System.Globalization.NumberStyles.Any,
                 System.Globalization.CultureInfo.InvariantCulture, out var numVal))
@@ -1390,7 +1390,7 @@ public partial class ExcelHandler
             children.Add(rowNode);
         }
 
-        // Add chart children from DrawingsPart (following Apache POI pattern)
+        // Add chart children from DrawingsPart
         if (worksheetPart?.DrawingsPart != null)
         {
             var chartParts = worksheetPart.DrawingsPart.ChartParts.ToList();
@@ -1717,7 +1717,7 @@ public partial class ExcelHandler
                         }
                     }
 
-                    // Alignment + wrap readback (like POI XSSFCellStyle.getWrapText)
+                    // Alignment + wrap readback
                     var alignment = xf.Alignment;
                     if (alignment != null)
                     {

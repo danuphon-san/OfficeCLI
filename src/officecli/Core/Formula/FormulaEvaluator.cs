@@ -220,8 +220,7 @@ internal partial class FormulaEvaluator
     /// Single-source report wrapper used by `view text` sentinel, `view issues`
     /// (formula_not_evaluated), and `get` (Format["evaluated"]). Routes all
     /// three signals through one decision so they cannot drift apart as the
-    /// evaluator's coverage grows. Inspired by POI BaseFormulaEvaluator and
-    /// ScFormulaCell.MaybeInterpret single-entry pattern.
+    /// evaluator's coverage grows.
     /// </summary>
     internal EvalReport EvaluateForReport(string formula)
     {
@@ -430,8 +429,7 @@ internal partial class FormulaEvaluator
                 //      (e.g. `StageTable` → `Data!A2:B7`).
                 //   2. Formula body (OFFSET(...), INDIRECT(...), arithmetic) —
                 //      inline the body's tokens here so the parent expression
-                //      evaluates them in place, matching POI's
-                //      `evaluateNameFormula` recursion.
+                //      evaluates them in place.
                 var definedNames = GetDefinedNames();
                 if (definedNames.TryGetValue(stripped, out var defRef))
                 {
@@ -539,8 +537,7 @@ internal partial class FormulaEvaluator
             if (left.IsError) return left; if (right.IsError) return right;
             // Element-wise comparison when either side is array/range — needed
             // by the SUMPRODUCT((A1:A3>0)*1) conditional-count idiom. Returns
-            // 0/1 doubles (not Bool) so downstream `*1` stays in numeric domain
-            // matching POI's TwoOperandNumericOperation+ArrayFunction policy.
+            // 0/1 doubles (not Bool) so downstream `*1` stays in numeric domain.
             if (HasArrayShape(left) || HasArrayShape(right))
             {
                 left = ApplyComparison(left, right, op);
@@ -665,8 +662,7 @@ internal partial class FormulaEvaluator
     // Rows are separated by ';', columns by ',' — per ECMA-376 §18.17.7.282.
     // Each cell is a number / "string" / TRUE / FALSE. Produces a RangeData
     // wrapped as Area so ApplyBinaryOp and aggregate functions handle it
-    // identically to a real range. BaseRow/BaseCol stay 0 (not a workbook
-    // reference) — see POI CacheAreaEval-vs-AreaEval distinction.
+    // identically to a real range. BaseRow/BaseCol stay 0 (not a workbook reference).
     private static FormulaResult ParseArrayConstant(string body)
     {
         var rows = body.Split(';');

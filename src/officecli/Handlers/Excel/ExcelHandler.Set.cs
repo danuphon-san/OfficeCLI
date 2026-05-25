@@ -1143,7 +1143,7 @@ public partial class ExcelHandler
                 }
                 case "autofilter":
                 {
-                    // Set or remove AutoFilter (like POI's XSSFSheet.setAutoFilter)
+                    // Set or remove AutoFilter
                     var existingAf = ws.GetFirstChild<AutoFilter>();
                     var trimmed = (value ?? "").Trim();
                     var lower = trimmed.ToLowerInvariant();

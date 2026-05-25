@@ -960,10 +960,10 @@ public partial class WordHandler
     /// Wrap a single Run in a w:del marker, converting any inner w:t to w:delText.
     /// Mirrors the ins/del wrapping done in WordHandler.Add.Text.cs.
     /// </summary>
-    private void WrapRunAsDeleted(Run run, string author, DateTime date, string? explicitId)
+    private DeletedRun? WrapRunAsDeleted(Run run, string author, DateTime date, string? explicitId)
     {
         var parentEl = run.Parent;
-        if (parentEl == null) return;
+        if (parentEl == null) return null;
 
         var wrapper = new DeletedRun
         {
@@ -979,6 +979,7 @@ public partial class WordHandler
         }
         parentEl.ReplaceChild(wrapper, run);
         wrapper.AppendChild(run);
+        return wrapper;
     }
 
     /// <summary>Wrap a single Run in a w:ins marker (no text conversion —
@@ -987,10 +988,10 @@ public partial class WordHandler
     /// --prop revision.type=ins` produces an InsertedRun wrapper instead
     /// of silently degrading to an rPrChange (which would tag the run as
     /// a *format* change rather than an *insertion*).</summary>
-    private void WrapRunAsInserted(Run run, string author, DateTime date, string? explicitId)
+    private InsertedRun? WrapRunAsInserted(Run run, string author, DateTime date, string? explicitId)
     {
         var parentEl = run.Parent;
-        if (parentEl == null) return;
+        if (parentEl == null) return null;
         var wrapper = new InsertedRun
         {
             Author = author,
@@ -999,6 +1000,7 @@ public partial class WordHandler
         };
         parentEl.ReplaceChild(wrapper, run);
         wrapper.AppendChild(run);
+        return wrapper;
     }
 
     /// <summary>Wrap a single Run in a w:moveFrom marker. Per

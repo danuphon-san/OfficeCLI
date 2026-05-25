@@ -557,7 +557,7 @@ public partial class PowerPointHandler
                     ApplyPatternFill(newShape.ShapeProperties!, patternVal);
                 }
 
-                // Opacity (alpha on fill) — like POI XSLFColor uses <a:alpha val="N"/>
+                // Opacity (alpha on fill) — uses <a:alpha val="N"/>
                 // Must come after gradient so it can apply to gradient stops too.
                 // Alpha must attach to a color element inside a fill carrier; if
                 // the caller gave 'opacity' without any fill/gradient/pattern,

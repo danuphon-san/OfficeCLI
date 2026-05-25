@@ -332,7 +332,7 @@ internal static class GenericXmlQuery
             // Normalize boolean inputs to OOXML canonical "1"/"0" for typed
             // ST_OnOff elements (w:kinsoku, w:snapToGrid, w:wordWrap,
             // w:autoSpaceDE, w:bidi, etc.). The SDK parses "true"/"false"
-            // correctly and Word/LibreOffice render either way, but strict
+            // correctly and Word renders either way, but strict
             // schema validators expect "1"/"0" and most reference docs emit
             // that canonical form. Detect by probing if the typed element's
             // Val property is OnOffValue / TrueFalseValue / similar.

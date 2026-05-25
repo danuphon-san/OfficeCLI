@@ -247,6 +247,66 @@ officecli add "$DOCX" /body \
     --prop revision.date=2026-05-25T10:45:00Z \
     --prop revision.id=9001
 
+# ==========================================================================
+# Section 7 — Find + Replace combined with revision tracking.
+#   Mirrors Word's Find&Replace dialog with Track Changes ON: every match is
+#   wrapped in the marker shape inferred from the props you pass alongside.
+#   The handler auto-allocates a fresh revision.id per marker (one w:del per
+#   matched run + one w:ins for the replacement, or one w:rPrChange per match,
+#   etc.), so `--prop revision.id=…` is rejected on find — would collide.
+# ==========================================================================
+echo "  -> Section 7: find + revision (Word-style Find&Replace with Track Changes)"
+officecli add "$DOCX" /body --type paragraph --prop text="7. Find + Replace + Revision" --prop style=Heading2
+
+# Helper: add a paragraph and echo the path the handler assigned (e.g.
+# /body/p[@paraId=00100012]) so subsequent `set --prop find=…` calls don't
+# need to hand-count positional indices. The handler-assigned paraId path
+# is stable across content shifts in the body, unlike /body/p[N] which
+# drifts every time the section count above changes.
+add_para_capture() {
+    officecli add "$DOCX" /body --type paragraph --prop text="$1" 2>&1 \
+        | grep -oE '/body/p\[@paraId=[A-F0-9]+\]' | tail -1
+}
+
+# 7a. find + replace + revision — del(old) + ins(new) pair, both attributed to
+#     the author. After accept, the text becomes "The cat jumped." For the
+#     shipped artifact we leave the markers in place so they show in Word.
+P7A=$(add_para_capture "7a. The fox jumped over the lazy dog. (run find+replace to track 'fox'→'cat')")
+officecli set "$DOCX" "$P7A" \
+    --prop find=fox \
+    --prop replace=cat \
+    --prop revision.author=Iris \
+    --prop revision.date=2026-05-25T10:50:00Z
+
+# 7b. find + format + revision — one w:rPrChange per matched run. The matched
+#     text keeps its content; each match becomes a tracked format change.
+P7B=$(add_para_capture "7b. Color red apples and the red barn. (tracked bold on every 'red')")
+officecli set "$DOCX" "$P7B" \
+    --prop find=red \
+    --prop bold=true \
+    --prop revision.author=Jack \
+    --prop revision.date=2026-05-25T10:51:00Z
+
+# 7c. find + replace + format + revision — the inserted run inherits the
+#     original rPr from the matched text AND has the new format layered on.
+P7C=$(add_para_capture "7c. Replace bar with FOO. (tracked replace 'bar'→bold-green 'BAZ')")
+officecli set "$DOCX" "$P7C" \
+    --prop find=bar \
+    --prop replace=BAZ \
+    --prop bold=true \
+    --prop font.color=00B050 \
+    --prop revision.author=Kelly \
+    --prop revision.date=2026-05-25T10:52:00Z
+
+# 7d. find + regex + revision — multiple matches each get their own marker.
+P7D=$(add_para_capture "7d. Prices: \$100, \$250, \$999 (regex \\\$\\d+ → tracked bold)")
+officecli set "$DOCX" "$P7D" \
+    --prop 'find=\$\d+' \
+    --prop regex=true \
+    --prop bold=true \
+    --prop revision.author=Liam \
+    --prop revision.date=2026-05-25T10:53:00Z
+
 officecli close "$DOCX"
 
 # ==========================================================================

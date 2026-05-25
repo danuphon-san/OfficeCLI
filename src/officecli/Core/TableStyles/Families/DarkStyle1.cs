@@ -26,8 +26,8 @@ public static class DarkStyle1
                       : new FillSpec(accentRef, Tint: amount);
 
         // Tint values match PowerPoint's empirical rendering (half-strength
-        // of LibreOffice's predefined-table-styles.cxx reference). Shade
-        // (accent-set variants) follow the same halving for consistency.
+        // of the spec reference). Shade (accent-set variants) follow the same
+        // halving for consistency.
         return new TableStyleDefinition
         {
             WholeTbl = new TableStyleRegion

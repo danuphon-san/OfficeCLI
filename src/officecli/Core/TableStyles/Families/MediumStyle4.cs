@@ -17,8 +17,8 @@ public static class MediumStyle4
         var darkLine = new BorderEdge("dk1");
 
         // Tint values match PowerPoint's empirical rendering (half-strength
-        // of LibreOffice's predefined-table-styles.cxx reference). Verified
-        // by OfficeShot pixel sampling on the bare/dk1 variant.
+        // of the spec reference). Verified by OfficeShot pixel sampling on
+        // the bare/dk1 variant.
         return new TableStyleDefinition
         {
             WholeTbl = new TableStyleRegion

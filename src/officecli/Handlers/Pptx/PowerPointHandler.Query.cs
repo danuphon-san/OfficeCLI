@@ -592,7 +592,7 @@ public partial class PowerPointHandler
                 if (cellFillColor != null) cellNode.Format["fill"] = cellFillColor;
             }
 
-            // Cell borders — following POI's getBorderWidth/getBorderColor pattern
+            // Cell borders
             if (tcPr != null)
                 ReadTableCellBorders(tcPr, cellNode);
 

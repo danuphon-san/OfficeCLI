@@ -363,8 +363,7 @@ internal partial class FormulaEvaluator
         // when present so ROW(OFFSET(A1,2,0)) reports 3 (not the cell value's row).
         // For *computed* arrays (BaseRow=0 — array constants like {1,2,3} or
         // arithmetic results like A1:A3*2) there is no workbook origin. Return
-        // #REF! rather than silently null, mirroring POI's CacheAreaEval-vs-
-        // AreaEval distinction: a transient array has no row/column identity.
+        // #REF! rather than silently null: a transient array has no row/column identity.
         if (AsRangeData(args[0]) is { } rd)
         {
             if (rd.BaseRow > 0) return FR(isRow ? rd.BaseRow : rd.BaseCol);

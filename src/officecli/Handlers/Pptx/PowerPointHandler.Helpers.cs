@@ -824,7 +824,7 @@ public partial class PowerPointHandler
         ParseHelpers.ParseFontSize(value);
 
     /// <summary>
-    /// Read table cell border properties following POI's getBorderWidth/getBorderColor pattern.
+    /// Read table cell border properties.
     /// Maps a:lnL/lnR/lnT/lnB → border.left, border.right, border.top, border.bottom in Format.
     /// </summary>
     private static void ReadTableCellBorders(Drawing.TableCellProperties tcPr, DocumentNode node)
@@ -858,7 +858,7 @@ public partial class PowerPointHandler
     private static void ReadBorderLine(OpenXmlCompositeElement? lineProps, string prefix, DocumentNode node)
     {
         if (lineProps == null) return;
-        // POI: if NoFill is set, the border is invisible — skip
+        // If NoFill is set, the border is invisible — skip
         if (lineProps.GetFirstChild<Drawing.NoFill>() != null) return;
 
         // Color (only when a SolidFill is present; gradient/picture borders
@@ -872,7 +872,7 @@ public partial class PowerPointHandler
             if (color != null) node.Format[$"{prefix}.color"] = color;
         }
 
-        // Width from "w" attribute (EMU) — POI: Units.toPoints(ln.getW())
+        // Width from "w" attribute (EMU)
         var wAttr = lineProps.GetAttributes().FirstOrDefault(a => a.LocalName == "w");
         bool hasWidth = !string.IsNullOrEmpty(wAttr.Value) && long.TryParse(wAttr.Value, out var wEmu) && wEmu > 0;
         if (hasWidth)
@@ -881,7 +881,7 @@ public partial class PowerPointHandler
             node.Format[$"{prefix}.width"] = FormatEmu(wEmuOut);
         }
 
-        // Dash style from PresetDash — POI: ln.getPrstDash().getVal()
+        // Dash style from PresetDash
         var dash = lineProps.GetFirstChild<Drawing.PresetDash>();
         bool hasDash = dash?.Val?.HasValue == true;
         if (hasDash)

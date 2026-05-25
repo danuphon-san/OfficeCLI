@@ -11,8 +11,8 @@ namespace OfficeCli.Core;
 /// We deliberately keep this small (one line per locale family) rather than
 /// trying to model every Office localization. When no locale is supplied,
 /// returning all-empty values lets the host application substitute its own
-/// UI-locale defaults — that's the POI-aligned behaviour BlankDocCreator
-/// already had after we removed the "宋体" hardcode.
+/// UI-locale defaults — the behaviour BlankDocCreator already had after
+/// we removed the "宋体" hardcode.
 ///
 /// Font names are chosen for cross-platform availability (typefaces commonly
 /// shipped on Windows and macOS, plus Apple Sans equivalents).

@@ -26,8 +26,8 @@ public static class DarkStyle2
         return new TableStyleDefinition
         {
             // Tint values match PowerPoint's empirical rendering on the
-            // bare/dk1 variant (half-strength of the spec/LibreOffice
-            // reference). Verified by OfficeShot pixel sampling.
+            // bare/dk1 variant (half-strength of the spec reference).
+            // Verified by OfficeShot pixel sampling.
             WholeTbl = new TableStyleRegion
             {
                 Fill = new FillSpec(accentRef, Tint: 10000),

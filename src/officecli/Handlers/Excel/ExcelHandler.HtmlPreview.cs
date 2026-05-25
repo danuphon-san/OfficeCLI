@@ -244,7 +244,7 @@ public partial class ExcelHandler
 
         // Read default dimensions from sheetFormatPr
         var sheetFmtPr = ws.GetFirstChild<SheetFormatProperties>();
-        // Excel column width → pixels: chars * 7.0017 (POI's DEFAULT_CHARACTER_WIDTH for Calibri 11)
+        // Excel column width → pixels: chars * 7.0017 (DEFAULT_CHARACTER_WIDTH for Calibri 11)
         // pt = px * 0.75
         var defaultColWidthPt = sheetFmtPr?.DefaultColumnWidth?.Value != null
             ? sheetFmtPr.DefaultColumnWidth.Value * 7.0017 * 0.75 : 8.43 * 7.0017 * 0.75;
@@ -745,7 +745,7 @@ public partial class ExcelHandler
             var min = (int)(col.Min?.Value ?? 1u);
             var max = (int)(col.Max?.Value ?? (uint)min);
             // Hidden columns get width 0
-            // Excel column width → pixels: chars * 7.0017; pt = px * 0.75 (POI XSSFSheet.getColumnWidthInPixels)
+            // Excel column width → pixels: chars * 7.0017; pt = px * 0.75
             var widthPt = col.Hidden?.Value == true ? 0 : (col.Width.Value == 0 ? 0 : col.Width.Value * 7.0017 * 0.75);
             for (int c = min; c <= max; c++)
                 result[c] = widthPt;

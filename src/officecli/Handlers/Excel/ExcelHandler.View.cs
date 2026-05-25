@@ -162,8 +162,8 @@ public partial class ExcelHandler
             // Pivot tables are stored as pivotTableDefinition XML; their rendered cells
             // are NOT materialized into sheetData (Excel/Calc re-render from pivotCacheRecords
             // at display time). Without this hint, a pivot-only sheet looks like "0 rows × 0 cols"
-            // and users think it's empty. Surface the pivot count explicitly — same strategy POI
-            // takes via XSSFSheet.getPivotTables(). See also: query pivottable.
+            // and users think it's empty. Surface the pivot count explicitly.
+            // See also: query pivottable.
             int pivotCount = worksheetPart.PivotTableParts.Count();
             var pivotInfo = pivotCount > 0 ? $", {pivotCount} pivot table(s)" : "";
 
@@ -476,8 +476,7 @@ public partial class ExcelHandler
         // sides parse as finite doubles, compare with a relative tolerance of
         // 1e-9 — well below Excel's own ~15-digit display precision, but loose
         // enough to absorb IEEE round-trip jitter that Excel itself emits when
-        // re-saving the same calculation. POI uses a similar threshold for
-        // cell-value comparisons. Non-numeric strings fall back to byte-equal.
+        // re-saving the same calculation. Non-numeric strings fall back to byte-equal.
         static bool CachedComputedAgree(string cached, string computed)
         {
             if (string.Equals(cached, computed, StringComparison.Ordinal))

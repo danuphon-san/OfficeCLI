@@ -22,8 +22,7 @@ internal static class OfficeCliMetadata
     // so the version is visible everywhere Application is surfaced (Windows
     // Word's Advanced Properties → Statistics, audit tools, file inspectors).
     // We deliberately omit ap:AppVersion: its OOXML "X.YYYY" format would
-    // require lossy mangling of semver, no major Office UI surfaces it, and
-    // POI also skips it.
+    // require lossy mangling of semver, and no major Office UI surfaces it.
     private static readonly string _appName = $"{ProductName}/{ResolveVersion()}";
 
     /// <summary>String written to <c>ap:Application</c>, e.g. "OfficeCLI/1.0.58".</summary>
@@ -61,7 +60,7 @@ internal static class OfficeCliMetadata
     /// path delegates to <c>System.IO.Packaging.Package.PackageProperties</c>,
     /// which on .NET stores props in a non-canonical
     /// <c>/package/services/metadata/core-properties/&lt;guid&gt;.psmdcp</c> blob
-    /// instead of the standard <c>/docProps/core.xml</c> Office and POI write.
+    /// instead of the standard <c>/docProps/core.xml</c> Office writes.
     ///
     /// Read-modify-write semantics: every existing element (with its
     /// attributes) is preserved verbatim — including non-standard fields

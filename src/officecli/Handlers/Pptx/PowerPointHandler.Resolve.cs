@@ -406,12 +406,12 @@ public partial class PowerPointHandler
         return null;
     }
 
-    // ==================== Cleanup (POI-style reference counting) ====================
+    // ==================== Cleanup (reference counting) ====================
 
     /// <summary>
     /// Remove a Picture element with proper cleanup of relationships and media parts.
-    /// Follows Apache POI's pattern: reference-count blipIds, only delete parts when
-    /// no other shapes reference the same media.
+    /// Reference-counts blipIds — only deletes parts when no other shapes reference
+    /// the same media.
     /// </summary>
     private static void RemovePictureWithCleanup(SlidePart slidePart, ShapeTree shapeTree, Picture pic)
     {

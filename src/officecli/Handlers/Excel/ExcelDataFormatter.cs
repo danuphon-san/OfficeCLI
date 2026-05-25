@@ -9,7 +9,7 @@ namespace OfficeCli.Handlers;
 
 /// <summary>
 /// Applies Excel number format codes to raw cell values, producing display strings.
-/// Mirrors Apache POI's DataFormatter — raw double + numFmtId + formatCode → display string.
+/// raw double + numFmtId + formatCode → display string.
 /// </summary>
 internal static class ExcelDataFormatter
 {

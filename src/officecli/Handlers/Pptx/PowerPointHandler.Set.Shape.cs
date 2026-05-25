@@ -657,7 +657,7 @@ public partial class PowerPointHandler
                     var solidFill = outline.GetFirstChild<Drawing.SolidFill>();
                     if (solidFill == null)
                     {
-                        // Auto-create a black line fill (matching Apache POI behavior)
+                        // Auto-create a black line fill.
                         // CT_LineProperties schema: fill → prstDash → ... → headEnd → tailEnd
                         solidFill = new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = "000000" });
                         var prstDashEl = outline.GetFirstChild<Drawing.PresetDash>();

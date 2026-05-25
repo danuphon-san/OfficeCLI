@@ -3411,7 +3411,7 @@ public partial class WordHandler
                 if (tcPrChange.Date?.Value is DateTime tcDate)
                     node.Format["tcPrChange.date"] = tcDate.ToString("o");
             }
-            // Borders (including diagonal — like POI CTTcBorders)
+            // Borders (including diagonal)
             var cb = tcPr.TableCellBorders;
             if (cb != null)
             {

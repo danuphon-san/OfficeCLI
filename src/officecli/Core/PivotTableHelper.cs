@@ -1204,7 +1204,7 @@ internal static partial class PivotTableHelper
             // 4b. Create PivotTableCacheRecordsPart and write one record per source row.
             // Without records, Excel rejects the file with "PivotTable report is invalid"
             // because saveData defaults to true. Writing real records also makes the file
-            // self-contained for non-refreshing consumers (POI, third-party parsers).
+            // self-contained for non-refreshing third-party parsers.
             var recordsPart = cachePart.AddNewPart<PivotTableCacheRecordsPart>();
             // Derived date-group fields (databaseField="0") must be excluded from
             // pivotCacheRecords — Excel computes them from the base field's
@@ -1376,8 +1376,8 @@ internal static partial class PivotTableHelper
         // every aggregated cell is a literal <c><v>200</v></c> element.
         //
         // Without this step the pivot opens as an empty drop-down skeleton — the
-        // structure is valid but there is nothing to display. POI / Open XML SDK
-        // suffer from exactly the same limitation; this is the lift that turns
+        // structure is valid but there is nothing to display. Open XML SDK
+        // suffers from exactly the same limitation; this is the lift that turns
         // officecli into a real pivot writer rather than a definition-only one.
         //
         // For unsupported configurations (multiple row/col fields, multiple data

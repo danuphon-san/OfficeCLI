@@ -649,7 +649,7 @@ public partial class PowerPointHandler
     }
 
     // RenderInheritedShapes — render the layout/master shapes that the slide
-    // doesn't override. Two rules borrowed from Apache POI:
+    // doesn't override. Two rules:
     //
     //   1. Layout/master placeholders never contribute TEXT — what's in their
     //      <p:txBody> is edit-prompt boilerplate ("Click to add title", "单击
@@ -664,10 +664,6 @@ public partial class PowerPointHandler
     //      shapes — that was the bug behind issue #79: a layout body
     //      placeholder authored without an explicit type leaked its prompt
     //      text onto the slide.
-    //
-    // Compare: POI's SlideShowExtractor.java:179-183 ("Ignoring boiler plate
-    // (placeholder) text on slide master") and XSLFShape.java:369-370 (the
-    // explicit `if (!ph.isSetType()) return INT_BODY;` default).
     private void RenderInheritedShapes(StringBuilder sb, ShapeTree? shapeTree, OpenXmlPart part,
         HashSet<string> skipIndices, Dictionary<string, string> themeColors)
     {

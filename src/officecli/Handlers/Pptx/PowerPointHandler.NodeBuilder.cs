@@ -1177,7 +1177,7 @@ public partial class PowerPointHandler
                     node.Format["margin"] = $"{FormatEmu(lIns ?? 91440)},{FormatEmu(tIns ?? 45720)},{FormatEmu(rIns ?? 91440)},{FormatEmu(bIns ?? 45720)}";
             }
 
-            // Vertical alignment — map XML enum to user-friendly name (like POI TextAlign)
+            // Vertical alignment — map XML enum to user-friendly name
             if (bodyPr.Anchor?.HasValue == true)
             {
                 var vaInner = bodyPr.Anchor.InnerText;

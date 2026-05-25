@@ -2211,13 +2211,24 @@ public partial class WordHandler
     /// <summary>
     /// Unified find operation on a paragraph: replace text and/or apply formatting.
     /// Returns the number of matches processed.
+    ///
+    /// When <paramref name="revisionProps"/> is non-null, every change becomes a
+    /// tracked revision:
+    ///   - text replace → matched runs wrapped in w:del, replacement run wrapped in w:ins
+    ///   - format-only  → each matched run gets a w:rPrChange snapshot of its prior rPr
+    /// Wrapping reuses <c>WrapRunAsDeleted</c> / <c>WrapRunAsInserted</c> + the same
+    /// rPrChange decorator used by <c>set /body/p[N]/r[M] --prop font.color=… --prop
+    /// revision.author=…</c> (see WordHandler.Set.Revision.cs), so the marker shape is
+    /// byte-equivalent to the non-find path. Each match gets fresh revision ids
+    /// (one for the w:del span, one for the w:ins) so accept/reject by id works.
     /// </summary>
-    private static int ProcessFindInParagraph(
+    private int ProcessFindInParagraph(
         Paragraph para,
         string pattern,
         bool isRegex,
         string? replace,
-        Dictionary<string, string>? formatProps)
+        Dictionary<string, string>? formatProps,
+        Dictionary<string, string>? revisionProps)
     {
         var runTexts = BuildRunTexts(para);
         if (runTexts.Count == 0) return 0;
@@ -2268,6 +2279,132 @@ public partial class WordHandler
         {
             var (matchStart, matchLen) = matches[i];
             var matchEnd = matchStart + matchLen;
+
+            // ---- find + revision: branch off BEFORE the legacy non-tracked
+            //      paths so a stray revisionProps can't silently degrade into
+            //      a destructive in-place edit. Layered:
+            //        replace != null  → w:del fragments + w:ins replacement
+            //        else             → w:rPrChange per matched run
+            //      Format props (if also present with replace) are applied to
+            //      the inserted run so the new text gets the requested look.
+            if (revisionProps != null && revisionProps.Count > 0)
+            {
+                // Resolve revision attribution defaults once per match.
+                string author = revisionProps.TryGetValue("revision.author", out var a) && !string.IsNullOrEmpty(a)
+                    ? a : "OfficeCLI";
+                DateTime date = DateTime.UtcNow;
+                if (revisionProps.TryGetValue("revision.date", out var dStr)
+                    && !string.IsNullOrEmpty(dStr)
+                    && DateTime.TryParse(dStr, out var parsedDate))
+                    date = parsedDate;
+
+                if (replace != null)
+                {
+                    string effectiveReplace = replace;
+                    if (isRegex && matchObjs != null && i < matchObjs.Count)
+                        effectiveReplace = matchObjs[i].Result(replace);
+
+                    // Cross-hyperlink replacement is still rejected — the wrapped
+                    // form would corrupt the URL/format-binding of the hyperlink
+                    // structure just as the unwrapped form did.
+                    {
+                        var affected = BuildRunTexts(para)
+                            .Where(rt => rt.End > matchStart && rt.Start < matchEnd)
+                            .Select(rt => rt.Run.Ancestors<Hyperlink>().FirstOrDefault())
+                            .Distinct()
+                            .ToList();
+                        if (affected.Count > 1)
+                            throw new ArgumentException(
+                                $"find/replace+revision cannot span a hyperlink boundary "
+                                + $"(match at offset {matchStart}, length {matchLen})");
+                    }
+
+                    // Split the runs so the matched span is a contiguous list of
+                    // sibling runs we can wrap individually.
+                    var targetRuns = SplitRunsAtRange(para, matchStart, matchEnd);
+                    if (targetRuns.Count == 0) continue;
+
+                    // Guard: matched runs must not already be inside a revision
+                    // wrapper — stacking ins/del muddies accept/reject semantics
+                    // (mirrors the BeginTrackChangeIfRequested guard for `set`).
+                    foreach (var run in targetRuns)
+                    {
+                        if (run.Ancestors<InsertedRun>().Any()
+                            || run.Ancestors<DeletedRun>().Any()
+                            || run.Ancestors<MoveFromRun>().Any()
+                            || run.Ancestors<MoveToRun>().Any())
+                            throw new InvalidOperationException(
+                                $"find/replace+revision: matched run at offset {matchStart} "
+                                + "is already inside a revision wrapper; accept/reject the "
+                                + "existing marker first");
+                    }
+
+                    // Template rPr for the inserted run: clone the first matched
+                    // run's rPr so the replacement inherits the original look
+                    // (font, size, color), then layer formatProps on top.
+                    RunProperties templateRPr;
+                    var firstRPr = targetRuns[0].GetFirstChild<RunProperties>();
+                    templateRPr = firstRPr != null
+                        ? (RunProperties)firstRPr.CloneNode(true)
+                        : new RunProperties();
+                    // Strip any prior rPrChange off the clone — it belongs to
+                    // the source run's history, not to the inserted run.
+                    foreach (var rprc in templateRPr.Elements<RunPropertiesChange>().ToList())
+                        rprc.Remove();
+                    if (formatProps != null)
+                    {
+                        foreach (var (key, value) in formatProps)
+                            ApplyRunFormatting(templateRPr, key, value);
+                    }
+
+                    // Wrap each matched run as w:del. WrapRunAsDeleted returns the
+                    // wrapper so we can locate the insertion point for the w:ins
+                    // (immediately after the last w:del wrapper).
+                    DeletedRun? lastDelWrapper = null;
+                    foreach (var run in targetRuns)
+                    {
+                        var w = WrapRunAsDeleted(run, author, date, null);
+                        if (w != null) lastDelWrapper = w;
+                    }
+
+                    // Insert replacement (skip if user passed --prop replace="" — a
+                    // deletion-only operation). The new w:ins sibling sits right
+                    // after the last w:del wrapper.
+                    if (!string.IsNullOrEmpty(effectiveReplace) && lastDelWrapper?.Parent != null)
+                    {
+                        var newRun = new Run(
+                            templateRPr,
+                            new Text(effectiveReplace) { Space = SpaceProcessingModeValues.Preserve });
+                        lastDelWrapper.Parent.InsertAfter(newRun, lastDelWrapper);
+                        WrapRunAsInserted(newRun, author, date, null);
+                    }
+                }
+                else
+                {
+                    // format-only + revision: per matched run, snapshot rPr →
+                    // apply format → append w:rPrChange. Reuses
+                    // BeginTrackChangeIfRequested so the snapshot shape is
+                    // byte-identical to the `set /body/p[N]/r[M] --prop … --prop
+                    // revision.author=…` path.
+                    if (formatProps == null || formatProps.Count == 0) continue;
+
+                    var targetRuns = SplitRunsAtRange(para, matchStart, matchEnd);
+                    foreach (var run in targetRuns)
+                    {
+                        // Each run uses its own freshly-generated id so accept/reject
+                        // by /revision[@id=N] addresses them individually.
+                        var combined = new Dictionary<string, string>(formatProps, StringComparer.OrdinalIgnoreCase);
+                        foreach (var (rk, rv) in revisionProps)
+                            combined[rk] = rv;
+                        var (stripped, wrap) = BeginTrackChangeIfRequested(run, combined);
+                        var rPr = EnsureRunProperties(run);
+                        foreach (var (key, value) in stripped)
+                            ApplyRunFormatting(rPr, key, value);
+                        wrap();
+                    }
+                }
+                continue;
+            }
 
             if (replace != null)
             {
@@ -2400,7 +2537,7 @@ public partial class WordHandler
         string findValue,
         string? replace,
         Dictionary<string, string> formatProps)
-        => ProcessFind(path, findValue, replace, formatProps, out _);
+        => ProcessFind(path, findValue, replace, formatProps, null, out _);
 
     /// <summary>
     /// Overload that surfaces the set of paragraphs whose text actually matched
@@ -2408,12 +2545,16 @@ public partial class WordHandler
     /// (e.g. <c>direction</c>) must filter by this set rather than re-resolving
     /// every paragraph under the path — otherwise <c>find=X --prop direction=rtl</c>
     /// silently rewrites every paragraph in the document. R8-fuzz-1 / R8-fuzz-2.
+    ///
+    /// <paramref name="revisionProps"/> threaded through to
+    /// <see cref="ProcessFindInParagraph"/>; null = legacy non-tracked mode.
     /// </summary>
     private int ProcessFind(
         string path,
         string findValue,
         string? replace,
         Dictionary<string, string> formatProps,
+        Dictionary<string, string>? revisionProps,
         out List<Paragraph> matchedParagraphs)
     {
         matchedParagraphs = new List<Paragraph>();
@@ -2426,7 +2567,13 @@ public partial class WordHandler
         int totalCount = 0;
         foreach (var para in paragraphs)
         {
-            var count = ProcessFindInParagraph(para, pattern, isRegex, replace, formatProps.Count > 0 ? formatProps : null);
+            var count = ProcessFindInParagraph(
+                para,
+                pattern,
+                isRegex,
+                replace,
+                formatProps.Count > 0 ? formatProps : null,
+                revisionProps);
             if (count > 0)
             {
                 para.TextId = GenerateParaId();

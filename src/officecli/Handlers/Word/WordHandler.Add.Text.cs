@@ -2034,8 +2034,6 @@ public partial class WordHandler
                 // Previously we converted t→delText inside moveFrom, which
                 // tripped Word's "found unreadable content" recovery on open
                 // (it re-wraps the orphan delText in a synthetic <w:del>).
-                // LibreOffice's docxattributeoutput.cxx:4108 skips the delText
-                // switch when bMoved is set — same rule.
                 parentEl.ReplaceChild(wrapper, newRun);
                 wrapper.AppendChild(newRun);
             }

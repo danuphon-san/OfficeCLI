@@ -246,7 +246,7 @@ internal static class ParseHelpers
             // CONSISTENCY(color-input-form): emit CSS #RRGGBBAA on output when
             // the value carries a hash prefix, mirroring the input form accepted
             // by NormalizeArgbColor / SanitizeColorForOoxml. The internal storage
-            // stays AARRGGBB (OOXML/POI convention).
+            // stays AARRGGBB (OOXML convention).
             return "#" + rawValue.Substring(2, 6).ToUpperInvariant() + rawValue[..2].ToUpperInvariant();
         }
         // Try resolving named colors (e.g. "silver" → "#C0C0C0")
@@ -576,7 +576,7 @@ internal static class ParseHelpers
 
     /// <summary>
     /// Sanitize a hex color for OOXML srgbClr val (must be exactly 6-char RGB).
-    /// If 8-char hex is given, interprets as AARRGGBB (POI convention: alpha first),
+    /// If 8-char hex is given, interprets as AARRGGBB (OOXML convention: alpha first),
     /// strips the leading alpha and returns it separately.
     /// Returns (rgb6, alphaPercent) where alphaPercent is 0-100000 scale or null if fully opaque.
     /// </summary>
@@ -600,7 +600,7 @@ internal static class ParseHelpers
 
         // CONSISTENCY(color-input-form): treat the leading '#' as a signal that
         // the input follows the CSS #RRGGBBAA convention (alpha last). Bare
-        // 8-hex (no '#') keeps the OOXML/POI AARRGGBB convention (alpha first).
+        // 8-hex (no '#') keeps the OOXML AARRGGBB convention (alpha first).
         // Without this distinction, "#FFFFFFAA" was being parsed as AARRGGBB,
         // silently dropping the trailing AA byte and storing rgb=FFFFAA — the
         // user's RGB and alpha were both corrupted.
@@ -618,7 +618,7 @@ internal static class ParseHelpers
             }
             else
             {
-                // OOXML/POI AARRGGBB — alpha is the leading pair
+                // OOXML AARRGGBB — alpha is the leading pair
                 alphaByte = Convert.ToByte(hex[..2], 16);
                 rgb = hex[2..];
             }

@@ -1464,7 +1464,6 @@ public partial class PowerPointHandler
     /// <summary>
     /// Clone an entire slide with all its content, relationships (images, charts, media),
     /// layout link, background, notes, and transitions.
-    /// Pattern follows POI's createSlide(layout) + importContent(srcSlide).
     /// </summary>
     private string CloneSlide(Match slideMatch, List<SlidePart> slideParts, int? index)
     {

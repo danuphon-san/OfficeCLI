@@ -30,6 +30,19 @@ public partial class WordHandler
         if (IsRevisionSelectorPath(path))
             return SetRevisionsBySelector(path, properties);
 
+        // Disambiguation guard: revision.action + find is rejected up-front.
+        // Without this, the IsRevisionActionRequest router below grabs the
+        // call and ignores the find=… key entirely, surfacing as "no revision
+        // markers found at <path>" — a confusing error. The right interpretation
+        // is "you tried to combine a creation context (find) with an action verb
+        // (revision.action) — pick one".
+        if (properties.ContainsKey("find") && properties.ContainsKey("revision.action"))
+            throw new ArgumentException(
+                "revision.action is reserved for the /revision selector (e.g. "
+                + "`set /revision --prop revision.action=accept`); it cannot be combined "
+                + "with find. To accept/reject changes produced by a find, run find first "
+                + "(emits ins/del/rPrChange/pPrChange) then use the selector dispatch.");
+
         // Native-path accept/reject: `set /body/p[N] --prop revision.action=accept`,
         // `set /body/p[N]/r[M] --prop revision.action=reject`, etc. — accept/reject
         // every revision marker structurally tied to that element. Routed
@@ -58,13 +71,24 @@ public partial class WordHandler
         if (properties.TryGetValue("find", out var findText))
         {
             var replace = properties.TryGetValue("replace", out var r) ? r : null;
-            // Separate run-level format properties from paragraph-level properties
+            // Separate run-level format properties from paragraph-level properties.
+            // revision.* creation keys go to a third bucket so each scope (run /
+            // paragraph) can be wrapped in the right *Change marker downstream.
             var formatProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var paraProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var revisionProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (key, value) in properties)
             {
                 var k = key.ToLowerInvariant();
                 if (k is "find" or "replace" or "scope" or "regex") continue;
+                // revision.* (creation) carries author/date/id/type for wrapping
+                // matched runs (w:ins/w:del) or capturing rPrChange/pPrChange.
+                // revision.action is for /revision selectors, never for find.
+                if (k.StartsWith("revision.", StringComparison.OrdinalIgnoreCase))
+                {
+                    revisionProps[key] = value;
+                    continue;
+                }
                 // Paragraph-level properties go to paraProps
                 if (k is "style" or "align" or "alignment" or "firstlineindent" or "leftindent" or "indentleft"
                     or "indent" or "rightindent" or "indentright" or "hangingindent" or "spacebefore"
@@ -80,8 +104,66 @@ public partial class WordHandler
                     formatProps[key] = value;
             }
 
+            // ---- find + revision validation ----
+            // revision.action is reserved for the /revision selector dispatch
+            // — combining it with find is ambiguous (action verb vs creation context).
+            if (revisionProps.ContainsKey("revision.action"))
+                throw new ArgumentException(
+                    "revision.action is reserved for the /revision selector (e.g. "
+                    + "`set /revision --prop revision.action=accept`); it cannot be combined "
+                    + "with find. To accept/reject changes produced by a find, run find first "
+                    + "(emits ins/del/rPrChange/pPrChange) then use the selector dispatch.");
+            // moveFrom/moveTo demand pairing via revision.id across two separate
+            // targets — find has no way to express that pairing, so reject up-front
+            // rather than silently producing one half of a broken pair.
+            if (revisionProps.TryGetValue("revision.type", out var rtype)
+                && (rtype.Equals("moveFrom", StringComparison.OrdinalIgnoreCase)
+                    || rtype.Equals("moveTo", StringComparison.OrdinalIgnoreCase)))
+                throw new ArgumentException(
+                    $"revision.type={rtype} cannot be combined with find: move pairs require "
+                    + "two explicitly-addressed runs sharing a revision.id. "
+                    + "Use `set /body/p[N]/r[M] --prop revision.type=moveFrom --prop revision.id=N` "
+                    + "and the matching moveTo on the destination run.");
+            // Reject revision.type=ins/del on find without an actual action:
+            // there's no destination text to mark as inserted (find matches
+            // existing text — wrapping it as ins would record a fake "added by"
+            // event) and del-without-replace is expressible via `--prop replace=""`.
+            if (rtype != null
+                && (rtype.Equals("ins", StringComparison.OrdinalIgnoreCase)
+                    || rtype.Equals("insertion", StringComparison.OrdinalIgnoreCase)
+                    || rtype.Equals("del", StringComparison.OrdinalIgnoreCase)
+                    || rtype.Equals("deletion", StringComparison.OrdinalIgnoreCase)))
+                throw new ArgumentException(
+                    $"revision.type={rtype} on find is ambiguous — the find path infers "
+                    + "ins/del from the operation: pass `--prop replace=NEW` to record a "
+                    + "del(old)+ins(new) pair, or `--prop replace=` to record a delete-only. "
+                    + "Drop revision.type from --prop and the wrap shape is inferred.");
+            // Explicit revision.id is rejected on find: a single find call can
+            // produce multiple markers (one w:del per matched-run fragment + one
+            // w:ins for the replacement; one w:rPrChange per matched run for
+            // format-only; one w:pPrChange per matched paragraph). A single
+            // shared id would collide and break accept/reject by-id. The handler
+            // auto-allocates from the shared paraId pool — each marker gets a
+            // distinct id, addressable via the @id= selector on the resulting
+            // /revision[@id=N] paths.
+            if (revisionProps.ContainsKey("revision.id"))
+                throw new ArgumentException(
+                    "revision.id cannot be combined with find — a find can produce "
+                    + "multiple markers per match and a shared id would collide. "
+                    + "Drop revision.id from --prop; the handler auto-allocates per marker. "
+                    + "If you need to address a specific marker afterwards, run `query revision` "
+                    + "to read the assigned ids.");
+
+            // Final gate: at least one of replace / format / para / revision-attribution
+            // must be present. Bare `find=x` with nothing to do is a usage error.
+            // Bare revision attribution (e.g. revision.author with no other prop) is
+            // also rejected — there's nothing for the wrap to attribute.
             if (replace == null && formatProps.Count == 0 && paraProps.Count == 0)
-                throw new ArgumentException("'find' requires either 'replace' and/or format properties (e.g. bold, highlight, color).");
+                throw new ArgumentException(
+                    "'find' requires either 'replace' and/or a format/paragraph property "
+                    + "(e.g. bold, highlight, color, align). When combined with revision.*, "
+                    + "the same rule applies — revision attribution needs a real action to "
+                    + "attribute.");
 
             // CONSISTENCY(find-regex): canonical site for the `regex=true` → `r"..."`
             // raw-string normalization. `mark` and the other handlers' Set paths all
@@ -92,17 +174,37 @@ public partial class WordHandler
                 findText = $"r\"{findText}\"";
 
             var effectivePath = (path is "" or "/") ? "/body" : path;
-            var matchCount = ProcessFind(effectivePath, findText, replace, formatProps.Count > 0 ? formatProps : new Dictionary<string, string>(), out var matchedParagraphs);
+            var matchCount = ProcessFind(
+                effectivePath,
+                findText,
+                replace,
+                formatProps.Count > 0 ? formatProps : new Dictionary<string, string>(),
+                revisionProps.Count > 0 ? revisionProps : null,
+                out var matchedParagraphs);
             LastFindMatchCount = matchCount;
 
             // Apply paragraph-level properties to ONLY the paragraphs whose text
             // actually matched the find pattern. R8-fuzz-1 / R8-fuzz-2: re-resolving
             // via ResolveParagraphsForFind here ignores the find filter and
             // mass-rewrites every paragraph under the path (data corruption).
+            //
+            // When revisionProps is present, capture pPrChange per matched
+            // paragraph by routing through BeginTrackChangeIfRequested (same
+            // entry point used by `set /body/p[N] --prop align=center --prop
+            // revision.author=X`), so find + paragraph-prop + revision matches
+            // the non-find behaviour exactly.
             if (paraProps.Count > 0)
             {
                 foreach (var para in matchedParagraphs)
                 {
+                    Action paragraphWrap = _trackChangeNoop;
+                    if (revisionProps.Count > 0)
+                    {
+                        var combined = new Dictionary<string, string>(paraProps, StringComparer.OrdinalIgnoreCase);
+                        foreach (var (rk, rv) in revisionProps) combined[rk] = rv;
+                        var (_, wrap) = BeginTrackChangeIfRequested(para, combined);
+                        paragraphWrap = wrap;
+                    }
                     var pProps = para.ParagraphProperties ?? para.PrependChild(new ParagraphProperties());
                     foreach (var (key, value) in paraProps)
                     {
@@ -115,6 +217,7 @@ public partial class WordHandler
                         if (k is "direction" or "dir" or "bidi")
                             ApplyDirectionCascade(para, ParseDirectionRtl(value));
                     }
+                    paragraphWrap();
                 }
             }
 

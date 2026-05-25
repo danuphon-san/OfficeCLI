@@ -29,9 +29,9 @@ public static class MediumStyle2
             // at 20% tint (lightened toward white); default text = dk1.
             // Tint values match PowerPoint's empirical rendering of the
             // bare/dk1 variant: wholeTbl ≈ #E7E7E7 (tint 10000), band1H ≈
-            // #CBCBCB (tint 20000). LibreOffice's predefined-table-styles.cxx
-            // documents these as tint 20000 / 40000 but PowerPoint's actual
-            // output is half-strength — verified by OfficeShot pixel sampling.
+            // #CBCBCB (tint 20000). The spec documents these as tint 20000 /
+            // 40000 but PowerPoint's actual output is half-strength — verified
+            // by OfficeShot pixel sampling.
             WholeTbl = new TableStyleRegion
             {
                 Top = grout, Bottom = grout, Left = grout, Right = grout,

@@ -2526,7 +2526,7 @@ public partial class WordHandler
            zeroed when it becomes :first-child of a new page-body. The
            ORIGINAL page-body (which holds the document's first paragraph)
            is intentionally not matched here, so its first-paragraph
-           spaceBefore renders the way Word / POI emit it. */
+           spaceBefore renders the way Word emits it. */
         .page-body-cont > :first-child {{ margin-top: 0 !important; }}
         .page-body > img + h1, .page-body > img + img + h1 {{ margin-top: 0 !important; }}
         .doc-header, .doc-footer {{ font-size: {dd.SizePt:0.##}pt; }}

@@ -123,9 +123,8 @@ internal static class EmuConverter
     }
 
     /// <summary>
-    /// Parse line width value into EMU (int). Bare numbers are treated as points (pt),
-    /// matching Apache POI's setLineWidth() behavior. Suffixed values (cm/in/pt/px) are
-    /// parsed normally via ParseEmu.
+    /// Parse line width value into EMU (int). Bare numbers are treated as points (pt).
+    /// Suffixed values (cm/in/pt/px) are parsed normally via ParseEmu.
     /// </summary>
     public static int ParseLineWidth(string value)
     {

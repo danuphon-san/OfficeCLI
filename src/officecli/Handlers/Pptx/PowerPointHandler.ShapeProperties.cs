@@ -560,7 +560,7 @@ public partial class PowerPointHandler
                     // Paragraph reading direction + textbox column direction.
                     // <a:pPr rtl="1"/> reverses character order inside each
                     // paragraph; <a:bodyPr rtlCol="1"/> reverses the column
-                    // flow of the text body itself. POI / PowerPoint's UI set
+                    // flow of the text body itself. PowerPoint's UI sets
                     // both when the user toggles "Right-to-left text direction"
                     // on a shape, so a single 'direction=rtl' here mirrors the
                     // same intent end-to-end.
@@ -904,7 +904,7 @@ public partial class PowerPointHandler
                     var solidFillLn = outline.GetFirstChild<Drawing.SolidFill>();
                     if (solidFillLn == null)
                     {
-                        // Auto-create a black line fill (matching Apache POI behavior)
+                        // Auto-create a black line fill
                         solidFillLn = new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = "000000" });
                         outline.PrependChild(solidFillLn);
                     }
@@ -981,7 +981,7 @@ public partial class PowerPointHandler
                     var solidFill = spPr.GetFirstChild<Drawing.SolidFill>();
                     if (solidFill == null)
                     {
-                        // Auto-create a white fill (matching Apache POI behavior)
+                        // Auto-create a white fill
                         spPr.RemoveAllChildren<Drawing.NoFill>();
                         solidFill = new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = "FFFFFF" });
                         InsertFillElement(spPr, solidFill);
@@ -1009,7 +1009,7 @@ public partial class PowerPointHandler
                 case "spacing" or "charspacing" or "letterspacing" or "spc":
                 {
                     // Character spacing in points (e.g. "2" = +2pt, "-1" = -1pt)
-                    // Stored as 1/100th of a point in OOXML (POI: setSpc((int)(100*spc)))
+                    // Stored as 1/100th of a point in OOXML
                     if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var spcDbl) || double.IsNaN(spcDbl) || double.IsInfinity(spcDbl))
                         throw new ArgumentException($"Invalid 'charspacing' value: '{value}'. Expected a finite number in points (e.g. 2, -1, 0.5).");
                     var spcVal = (int)(spcDbl * 100);
@@ -2171,7 +2171,7 @@ public partial class PowerPointHandler
                         }
                     }
 
-                    // Build line properties following POI's setBorderDefaults pattern
+                    // Build line properties
                     void ApplyBorderLine(OpenXmlCompositeElement lineProps)
                     {
                         if (isNone)
@@ -2183,9 +2183,9 @@ public partial class PowerPointHandler
                             lineProps.AppendChild(new Drawing.NoFill());
                             return;
                         }
-                        // Remove NoFill if present (POI: setBorderDefaults line 265)
+                        // Remove NoFill if present
                         lineProps.RemoveAllChildren<Drawing.NoFill>();
-                        // Set width (default 12700 EMU = 1pt like POI)
+                        // Set width (default 12700 EMU = 1pt)
                         if (borderWidth.HasValue)
                         {
                             var wAttr = lineProps.GetAttributes().FirstOrDefault(a => a.LocalName == "w");
@@ -2487,7 +2487,7 @@ public partial class PowerPointHandler
                     if (!File.Exists(value))
                         throw new FileNotFoundException($"Image file not found: {value}");
 
-                    // Image fill on table cell (like POI CTBlipFillProperties on CTTableCellProperties)
+                    // Image fill on table cell
                     var tcPr = cell.TableCellProperties ?? cell.GetFirstChild<Drawing.TableCellProperties>();
                     if (tcPr == null) { tcPr = new Drawing.TableCellProperties(); cell.Append(tcPr); }
                     tcPr.RemoveAllChildren<Drawing.SolidFill>();
