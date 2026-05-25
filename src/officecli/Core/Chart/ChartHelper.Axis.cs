@@ -615,6 +615,53 @@ internal static partial class ChartHelper
             {
                 if (axisTitle == null) { unsupported.Add(axKey); continue; }
                 var norm = axKey.Replace("title.", "").Replace("title", "");
+
+                // R42-B2: title.font accepts either a bare font name ("Arial")
+                // or a composite "size:color:fontname" spec ("14:4472C4:Arial").
+                // The legacy path stored the entire composite as the LatinFont
+                // typeface, producing an invalid font with literal text
+                // "14:4472C4:Arial". Detect a `:`-delimited composite and route
+                // through BuildDefaultRunPropertiesFromCompoundSpec — identical
+                // parsing as the axisfont knob — to fan out size/color/font.
+                if (norm == "font" && axVal.Contains(':'))
+                {
+                    var spec = BuildDefaultRunPropertiesFromCompoundSpec(axVal);
+                    foreach (var run in axisTitle.Descendants<Drawing.Run>())
+                    {
+                        var rPr = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
+                        // Font size: lift hundredths-of-a-point from the parsed defRp.
+                        if (spec.FontSize?.HasValue == true)
+                            rPr.FontSize = spec.FontSize.Value;
+                        // Color: replace any existing SolidFill with the parsed one.
+                        var fill = spec.GetFirstChild<Drawing.SolidFill>();
+                        if (fill != null)
+                        {
+                            rPr.RemoveAllChildren<Drawing.SolidFill>();
+                            DrawingEffectsHelper.InsertFillInRunProperties(rPr,
+                                (Drawing.SolidFill)fill.CloneNode(true));
+                        }
+                        // Typeface: replace LatinFont + EastAsianFont.
+                        var latin = spec.GetFirstChild<Drawing.LatinFont>();
+                        if (latin != null)
+                        {
+                            rPr.RemoveAllChildren<Drawing.LatinFont>();
+                            rPr.RemoveAllChildren<Drawing.EastAsianFont>();
+                            rPr.AppendChild((Drawing.LatinFont)latin.CloneNode(true));
+                            var ea = spec.GetFirstChild<Drawing.EastAsianFont>();
+                            if (ea != null)
+                                rPr.AppendChild((Drawing.EastAsianFont)ea.CloneNode(true));
+                        }
+                    }
+                    // Mirror onto defRPr for fallback rendering.
+                    var defRpComposite = axisTitle.Descendants<Drawing.DefaultRunProperties>().FirstOrDefault();
+                    if (defRpComposite != null)
+                    {
+                        if (spec.FontSize?.HasValue == true)
+                            defRpComposite.FontSize = spec.FontSize.Value;
+                    }
+                    continue;
+                }
+
                 foreach (var run in axisTitle.Descendants<Drawing.Run>())
                 {
                     var rPr = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
