@@ -1512,18 +1512,8 @@ public partial class PowerPointHandler
                     if (rawType == "image" && mediaType != "picture") continue;
                     var picNode = PictureToNode(pic, mediaSlideNum, picIdx, slidePart);
                     picNode.Format["mediaType"] = mediaType;
-                    // Add content type from image part
-                    var blipFill = pic.BlipFill;
-                    var blip = blipFill?.Blip;
-                    if (blip?.Embed?.Value != null)
-                    {
-                        var part = slidePart.GetPartById(blip.Embed.Value);
-                        if (part != null)
-                        {
-                            picNode.Format["contentType"] = part.ContentType;
-                            picNode.Format["fileSize"] = part.GetStream().Length;
-                        }
-                    }
+                    // CONSISTENCY(picture-relid): contentType/fileSize now
+                    // emitted inside PictureToNode so Get and Query agree.
                     results.Add(picNode);
                 }
             }

@@ -253,15 +253,6 @@
       "readback": "`/SheetName/A1[:Z9]` anchor path",
       "enforcement": "report"
     },
-    "relId": {
-      "type": "string",
-      "add": false,
-      "set": false,
-      "get": true,
-      "description": "relationship id of the embedded image part (rId-style token).",
-      "readback": "relationship id token",
-      "enforcement": "report"
-    },
     "mergeAnchor": {
       "type": "bool",
       "add": false,
