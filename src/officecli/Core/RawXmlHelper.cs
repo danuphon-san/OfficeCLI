@@ -122,11 +122,17 @@ internal static class RawXmlHelper
         var nodes = xDoc.XPathSelectElements(xpath, nsManager).ToList();
         if (nodes.Count == 0)
         {
-            Console.Error.WriteLine($"raw-set: XPath matched no elements: {xpath}");
-            Console.Error.WriteLine("Hint: auto-registered namespace prefixes: " +
+            // Throw rather than return 0 affected with a stderr nudge: the
+            // stderr line is trivially dropped by pipelines and batch
+            // envelopes, leaving callers with success:true on a no-op. A
+            // typo'd xpath then looks indistinguishable from a real
+            // mutation. Surface the failure where every consumer
+            // (standalone, batch, resident) already handles exceptions.
+            throw new ArgumentException(
+                $"raw-set: XPath matched no elements: {xpath}. " +
+                "Hint: auto-registered namespace prefixes: " +
                 string.Join(", ", CommonNamespaces.Keys.Order()) +
                 ". No xmlns declarations needed in --xml fragments.");
-            return (xDoc, 0);
         }
 
         int affected = 0;
