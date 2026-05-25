@@ -278,7 +278,14 @@ public partial class WordHandler
         var elementBackup = element.CloneNode(true);
         try
         {
-        return SetElement(element, properties);
+            // Phase 2 trackChange capture: snapshot rPr/pPr BEFORE SetElement
+            // mutates it, strip trackChange.* from the dict so downstream
+            // helpers don't see them, then append rPrChange/pPrChange AFTER
+            // the Set succeeds. See WordHandler.Set.TrackChange.cs.
+            var (effectiveProps, wrapTrackChange) = BeginTrackChangeIfRequested(element, properties);
+            var result = SetElement(element, effectiveProps);
+            wrapTrackChange();
+            return result;
         }
         catch
         {
