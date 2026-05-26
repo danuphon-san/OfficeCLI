@@ -788,6 +788,18 @@ public partial class PowerPointHandler
         var appNvPr = new ApplicationNonVisualDrawingProperties();
         var phElem = new PlaceholderShape { Type = phTypeVal };
         if (phIdx.HasValue) phElem.Index = phIdx.Value;
+        // Placeholder @sz (full|half|quarter) — a real OOXML attribute on
+        // <p:ph>. Without recognising it here, the value falls through to
+        // Set's font-size branch which throws ArgumentException on "half".
+        if ((properties.TryGetValue("size", out var phSizeStr)
+                || properties.TryGetValue("sz", out phSizeStr))
+            && phSizeStr is not null)
+        {
+            var phSizeKey = phSizeStr.Trim().ToLowerInvariant();
+            if (phSizeKey == "full") phElem.Size = PlaceholderSizeValues.Full;
+            else if (phSizeKey == "half") phElem.Size = PlaceholderSizeValues.Half;
+            else if (phSizeKey == "quarter") phElem.Size = PlaceholderSizeValues.Quarter;
+        }
         appNvPr.AppendChild(phElem);
         shape.NonVisualShapeProperties = new NonVisualShapeProperties(
             new NonVisualDrawingProperties { Id = phId, Name = phName },
@@ -913,6 +925,7 @@ public partial class PowerPointHandler
         {
             "phType", "phtype", "type",
             "phIndex", "phindex", "idx",
+            "size", "sz",
             "name", "id",
             "zorder", "z-order", "order",
             "text",
