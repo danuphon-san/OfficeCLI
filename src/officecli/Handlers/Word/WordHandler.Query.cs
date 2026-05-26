@@ -1091,15 +1091,24 @@ public partial class WordHandler
     /// owning section's <w:bidi/>).
     /// </summary>
     private SectionProperties? FindOwningSectionProperties(Paragraph para)
+        => FindOwningSectionProperties((OpenXmlElement)para);
+
+    /// <summary>
+    /// Generalised owning-section lookup — same algorithm as the Paragraph
+    /// overload but accepts any body-descendant element. Used by AddTable
+    /// to detect whether the insertion site sits in an RTL section and
+    /// auto-stamp <w:bidiVisual/> on the new tblPr accordingly.
+    /// </summary>
+    private SectionProperties? FindOwningSectionProperties(OpenXmlElement element)
     {
         var body = _doc.MainDocumentPart?.Document?.Body;
         if (body == null) return null;
 
-        // Walk top-level body paragraphs starting from para's top-level
-        // ancestor. Paragraphs nested inside tables/sdt still belong to
-        // whatever section their containing block belongs to, so the
-        // walk anchors on the Body-direct ancestor.
-        OpenXmlElement? bodyChild = para;
+        // Walk up to the body-direct ancestor. Tables and paragraphs
+        // nested inside other tables / sdt blocks still belong to whatever
+        // section their containing block belongs to, so the walk anchors
+        // on the Body-direct ancestor.
+        OpenXmlElement? bodyChild = element;
         while (bodyChild != null && bodyChild.Parent is not Body)
             bodyChild = bodyChild.Parent;
         if (bodyChild == null) return body.GetFirstChild<SectionProperties>();

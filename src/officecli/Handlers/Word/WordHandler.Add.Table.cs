@@ -102,7 +102,14 @@ public partial class WordHandler
                     throw new ArgumentException($"Invalid 'rows' value: '{rowsStr}'. Must be a positive integer (> 0).");
             }
             cols = 1;
-            if (properties.TryGetValue("cols", out var colsStr))
+            // Accept both `cols` (canonical) and `columns` (the natural
+            // English spelling AI agents reach for first). Without the
+            // alias, `--prop columns=4` was silently dropped and the table
+            // defaulted to 1 column — Add iterates `properties` via foreach
+            // which marks every key consumed in the tracker, so the typo
+            // didn't surface as an UNSUPPORTED warning either.
+            if (properties.TryGetValue("cols", out var colsStr)
+                || properties.TryGetValue("columns", out colsStr))
             {
                 cols = ParseHelpers.SafeParseInt(colsStr, "cols");
                 if (cols <= 0)
@@ -220,7 +227,11 @@ public partial class WordHandler
             };
         }
 
-        // Apply table-level properties from Add parameters
+        // Apply table-level properties from Add parameters.
+        // explicitDirection: did the user pass direction=ltr|rtl|bidi=...?
+        // If not, fall back to the surrounding section's bidi state below
+        // (CONSISTENCY(rtl-cascade) — same intent as the paragraph cascade).
+        bool explicitDirection = false;
         // Set of keys the switch below consumes. Used to mark a key as
         // accessed via ContainsKey only when a case actually matched, so
         // genuine typos still fall through to the tracker's UnusedKeys.
@@ -257,7 +268,7 @@ public partial class WordHandler
                         $"firstRow, lastRow, firstCol, lastCol, bandRow, bandCol, " +
                         $"noHBand, noVBand. Or use the bare hex form tblLook=04A0.");
             }
-            if (tkl is "rows" or "cols" or "colwidths" or "gridcols" or "skiptblw" || tkl.StartsWith("border")) continue;
+            if (tkl is "rows" or "cols" or "columns" or "colwidths" or "gridcols" or "skiptblw" || tkl.StartsWith("border")) continue;
             // ACCOUNTING(handler-as-truth): see AddStyle. ContainsKey only
             // when the switch will consume this key — otherwise typos would
             // leak past UnusedKeys detection.
@@ -452,6 +463,7 @@ public partial class WordHandler
                     tblProps.RemoveAllChildren<BiDiVisual>();
                     if (ParseDirectionRtl(tv))
                         InsertTblPrChildInOrder(tblProps, new BiDiVisual());
+                    explicitDirection = true;
                     break;
                 // BUG-R4-02/08: tblLook props at Add time. Mirrors the Set.Element.cs
                 // tblLook switch — accepts lowercase + camelCase aliases as input.
@@ -494,6 +506,20 @@ public partial class WordHandler
                         break;
                     }
             }
+        }
+
+        // Auto-RTL: when the user didn't pin direction explicitly and the
+        // surrounding section / doc-defaults are RTL (Arabic/Hebrew/… via
+        // --locale or the OS culture snapshot), stamp <w:bidiVisual/> so
+        // the table's column order matches the rest of the document.
+        // Without this, every `add table` in an RTL doc rendered with
+        // left-to-right column order — the agent had to remember to pass
+        // --prop direction=rtl on every table, inconsistent with how
+        // paragraphs inherit section bidi automatically.
+        if (!explicitDirection && IsTableContextRtl(parent))
+        {
+            tblProps.RemoveAllChildren<BiDiVisual>();
+            InsertTblPrChildInOrder(tblProps, new BiDiVisual());
         }
 
         for (int r = 0; r < rows; r++)

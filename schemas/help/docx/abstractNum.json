@@ -75,7 +75,7 @@
     },
     "format": {
       "type": "string",
-      "description": "numFmt for level 0 (and propagated to all 9 levels if no per-level override). Common values: decimal, decimalZero, upperRoman, lowerRoman, upperLetter, lowerLetter, ordinal, cardinalText, ordinalText, bullet, chineseCounting, chineseLegalSimplified, japaneseCounting, koreanCounting, hex. Top-level bare 'format' is shorthand for level0.format; setting it also defaults every other level to the same format instead of the decimal/lowerLetter/lowerRoman cycle.",
+      "description": "numFmt for level 0 (and propagated to all 9 levels if no per-level override). Common values: decimal, decimalZero, upperRoman, lowerRoman, upperLetter, lowerLetter, ordinal, cardinalText, ordinalText, bullet, chineseCounting, chineseLegalSimplified, japaneseCounting, koreanCounting, hex. Script-localized formats: arabicAlpha (أ ب ت ث), arabicAbjad (أ ب ج د), hebrew1, hebrew2, hindiNumbers, hindiVowels, hindiCounting, hindiConsonants, thaiCounting, thaiNumbers, thaiLetters. Top-level bare 'format' is shorthand for level0.format; setting it also defaults every other level to the same format instead of the decimal/lowerLetter/lowerRoman cycle.",
       "aliases": ["fmt", "numFmt"],
       "add": true,
       "set": false,
@@ -83,7 +83,8 @@
       "examples": [
         "--prop format=decimal",
         "--prop format=bullet",
-        "--prop format=chineseCounting"
+        "--prop format=chineseCounting",
+        "--prop format=arabicAlpha"
       ],
       "readback": "n/a (surfaces on /numbering/abstractNum[@id=N]/level[L])",
       "enforcement": "report"

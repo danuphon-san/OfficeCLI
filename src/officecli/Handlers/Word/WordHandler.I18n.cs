@@ -87,6 +87,26 @@ public partial class WordHandler
     }
 
     /// <summary>
+    /// True iff a new table inserted at <paramref name="parent"/> sits in
+    /// an RTL context — its enclosing section carries <w:bidi/> on sectPr,
+    /// or docDefaults/pPrDefault carries the same. Word does NOT propagate
+    /// section bidi to a table's <w:bidiVisual/> automatically (sectPr and
+    /// tblPr bidi are separate controls), so AddTable consults this to
+    /// decide whether to auto-stamp BiDiVisual on RTL-locale docs. Without
+    /// this, every `add table` in an Arabic doc would render with LTR
+    /// column order until the user remembered to pass --prop direction=rtl.
+    /// </summary>
+    private bool IsTableContextRtl(OpenXmlElement parent)
+    {
+        var owningSect = FindOwningSectionProperties(parent);
+        if (BidiOnOffOrDefaultTrue(owningSect?.GetFirstChild<BiDi>()) == true) return true;
+        var pPrDefault = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles?.DocDefaults
+            ?.ParagraphPropertiesDefault?.ParagraphPropertiesBaseStyle;
+        if (BidiOnOffOrDefaultTrue(pPrDefault?.GetFirstChild<BiDi>()) == true) return true;
+        return false;
+    }
+
+    /// <summary>
     /// True iff <paramref name="paragraph"/> would inherit RTL from any
     /// source above its direct pPr.bidi: the enclosing section's sectPr,
     /// the linked paragraph-style basedOn chain, docDefaults pPrDefault,

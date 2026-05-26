@@ -191,10 +191,16 @@ public static class BlankDocCreator
                     tfl.Val = locale;
                     break;
             }
-            // ThemeFontLanguages must precede characterSpacingControl per
-            // CT_Settings sequence — InsertBefore the existing first child.
-            var firstChild = settings.FirstChild;
-            if (firstChild != null) settings.InsertBefore(tfl, firstChild);
+            // CT_Settings sequence: characterSpacingControl (~pos 63),
+            // compat (~pos 78), themeFontLang (~pos 80). themeFontLang
+            // belongs AFTER compat, not at the front. Earlier revisions of
+            // this file put it before characterSpacingControl which made
+            // every RTL-locale doc fail OOXML validation with "unexpected
+            // child characterSpacingControl" — the validator was actually
+            // complaining about themeFontLang being out of order, but
+            // surfaced the next sibling as the offending element.
+            var compat = settings.GetFirstChild<Compatibility>();
+            if (compat != null) compat.InsertAfterSelf(tfl);
             else settings.AppendChild(tfl);
         }
         var settingsPart = mainPart.AddNewPart<DocumentFormat.OpenXml.Packaging.DocumentSettingsPart>();
