@@ -184,6 +184,24 @@ internal partial class FormulaEvaluator
     private readonly HashSet<string> _expandingNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly int _depth;
     private readonly string _sheetKey; // used to qualify cell refs for circular detection
+
+    // Same-sheet recursion guard. A long non-circular chain (B[N]=B[N-1]+A[N])
+    // recurses ResolveCellResult→EvaluateFormula once per link; deep enough it
+    // overflows the .NET stack, and since StackOverflowException is uncatchable
+    // it kills the whole process — a fatal DoS for the resident server. A fixed
+    // frame-count cap can't fully close this: complex nested formulas (e.g.
+    // IF(SUM(...),VLOOKUP(...),...)) burn many more frames per link and would
+    // overflow well below any simple-chain cap. So the PRIMARY guard is
+    // RuntimeHelpers.TryEnsureSufficientExecutionStack() (the standard .NET
+    // recursive-SOE defense), which adapts to the ACTUAL stack each formula
+    // consumes — simple deep chains keep evaluating (no regression), complex
+    // ones bail only when the stack is genuinely near the limit. MaxSameSheetDepth
+    // is a high backstop (1000) for the pathological case where the probe
+    // misjudges; it should rarely pre-empt a legitimate chain. _visiting handles
+    // circular refs separately. Over either limit → visible #NUM! (propagates up
+    // the arithmetic chain), never a silent 0 nor a crash.
+    private const int MaxSameSheetDepth = 1000;
+    private int _sameSheetDepth;
     private Dictionary<string, Cell>? _cellIndex;
     private Dictionary<string, string>? _definedNames;
 
@@ -844,15 +862,27 @@ internal partial class FormulaEvaluator
             var cell = FindCell(cellRef);
             if (cell == null) return FormulaResult.Blank();
 
-            // If cell has a formula, always evaluate it (cached values may be stale)
+            // If cell has a formula, always evaluate it (cached values may be stale).
+            // Guard recursive evaluation against an uncatchable StackOverflow that
+            // would kill the resident process (DoS).
             if (cell.CellFormula?.Text != null)
             {
+                // Primary: probe the real remaining stack (adapts to formula
+                // complexity, so complex nested formulas are covered too).
+                // Secondary: a high fixed backstop. Over either, surface a
+                // visible #NUM! that propagates up the chain (B[N-1]+A[N] returns
+                // the error) — never a silent 0 or an uncatchable crash.
+                if (_sameSheetDepth >= MaxSameSheetDepth
+                    || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
+                    return FormulaResult.Error("#NUM!");
+                _sameSheetDepth++;
                 try
                 {
                     var evaluated = EvaluateFormula(ModernFunctionQualifier.Unqualify(cell.CellFormula.Text));
                     if (evaluated != null) return evaluated;
                 }
                 catch { /* fall through to cached value */ }
+                finally { _sameSheetDepth--; }
             }
 
             // InlineString cells store their text in <is><t>…</t></is>, NOT in
