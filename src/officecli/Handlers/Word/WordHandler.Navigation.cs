@@ -1607,7 +1607,11 @@ public partial class WordHandler
                     var numIdVal = numProps.NumberingId.Val.Value;
                     node.Format["numId"] = numIdVal.ToString();
                     var ilvlVal = numProps.NumberingLevelReference?.Val?.Value ?? 0;
-                    node.Format["ilvl"] = ilvlVal.ToString();
+                    // R29-3: surface under the canonical key 'numLevel' (paragraph.json
+                    // declares numLevel canonical with ilvl as an input alias; Get
+                    // normalizes to the single canonical key). Style/abstractNum-level
+                    // contexts keep 'ilvl' as their own canonical key.
+                    node.Format["numLevel"] = ilvlVal.ToString();
                     // numId=0 is the OOXML "remove numbering" sentinel — the paragraph
                     // explicitly opts out of any inherited list style. Skip numFmt /
                     // listStyle / start lookup so Get does not falsely advertise a list.
@@ -1631,7 +1635,8 @@ public partial class WordHandler
                     {
                         var (inhId, inhLvl) = inherited.Value;
                         node.Format["numId"] = inhId.ToString();
-                        node.Format["ilvl"] = inhLvl.ToString();
+                        // R29-3: canonical key 'numLevel' (see direct-numPr branch above).
+                        node.Format["numLevel"] = inhLvl.ToString();
                         // BUG-DUMP26-01: flag style-inherited values so WordBatchEmitter
                         // can suppress them on `add p` — they're already covered by
                         // the paragraph's style and emitting them would semantically
