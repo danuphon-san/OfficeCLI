@@ -431,11 +431,11 @@
       ],
       "enforcement": "strict"
     },
-    "charspacing": {
+    "charSpacing": {
       "type": "length",
       "description": "run-level character spacing in points (bare number = pt, or 'Xpt'). Stored as twips. On Add only.",
       "aliases": [
-        "charSpacing",
+        "charspacing",
         "letterspacing",
         "letterSpacing"
       ],
@@ -443,7 +443,7 @@
       "set": false,
       "get": false,
       "examples": [
-        "--prop charspacing=2 --prop text=\"Hi\""
+        "--prop charSpacing=2 --prop text=\"Hi\""
       ],
       "enforcement": "strict"
     },
@@ -1007,10 +1007,16 @@
     },
     "tabs": {
       "type": "array",
-      "description": "tab stops array. Emitted only when present.",
+      "description": "tab stops array. Set accepts a comma-separated list of positions (twips, e.g. 720,1440); Get emits the stored tab stops when present.",
+      "aliases": [
+        "tabstops"
+      ],
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
+      "examples": [
+        "--prop tabs=720,1440"
+      ],
       "readback": "array of tab stop descriptors",
       "enforcement": "report"
     },
