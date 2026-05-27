@@ -392,8 +392,35 @@ public partial class PowerPointHandler
                     _ => null,
                 };
 
+                // CONSISTENCY(group-frame-types): include all frame-like elements
+                // (Shape, GroupShape, Picture, GraphicFrame, ConnectionShape) so
+                // existing groups, pictures, charts, and connectors can also be
+                // grouped together. Index space matches the shape-tree order
+                // PowerPoint uses for sibling lookups (B13).
+                //
+                // CONSISTENCY(group-numeric-skip-placeholder): exclude placeholder
+                // <p:sp> elements (those with a <p:ph> child) from the numeric
+                // index so `shapes=1,2` aligns with the non-placeholder shape[N]
+                // index space that Query/Get use. Users wanting to group a
+                // placeholder can still target it explicitly via the @id= /
+                // @name= / path forms below.
+                var allShapes = grpShapeTree.ChildElements
+                    .Where(c => c is Shape || c is GroupShape || c is Picture
+                        || c is GraphicFrame || c is ConnectionShape)
+                    .Where(c => !(c is Shape s
+                        && s.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+                            ?.GetFirstChild<PlaceholderShape>() != null))
+                    .ToList();
+
                 var shapeParts = shapesStr.Split(',');
-                var shapeIndices = new List<int>();
+                // R29-2: resolve every part directly to its OpenXmlElement. @id/@name
+                // path forms look up in grpFrameList (placeholders included, so an
+                // explicitly-named placeholder can still be grouped); bare-numeric
+                // and positional [M] forms index allShapes (placeholders excluded, the
+                // shape[N] space Query/Get use). Resolving to the element — instead of
+                // a position in one list re-looked-up in the other — keeps the two
+                // index spaces from colliding when a placeholder precedes the target.
+                var resolved = new List<OpenXmlElement>();
                 foreach (var sp in shapeParts)
                 {
                     var trimmed = sp.Trim();
@@ -407,8 +434,8 @@ public partial class PowerPointHandler
                         // round-tripped into `shapes=` were rejected even though
                         // the lookup index space supports them. The first element
                         // type is intentionally not validated against frame kind
-                        // — id/name/positional lookup is by-position within
-                        // grpFrameList regardless of which kind name the user used.
+                        // — id/name/positional lookup is by-position regardless of
+                        // which kind name the user used.
                         const string frameKind =
                             @"(?:shape|group|picture|pic|connector|connection|chart|table|graphicframe|graphicFrame|ole|object|embed|video|audio)";
 
@@ -419,10 +446,10 @@ public partial class PowerPointHandler
                         if (atIdMatch.Success)
                         {
                             var atId = uint.Parse(atIdMatch.Groups[1].Value);
-                            var idx = grpFrameList.FindIndex(e => FrameId(e) == atId);
-                            if (idx < 0)
+                            var el = grpFrameList.FirstOrDefault(e => FrameId(e) == atId);
+                            if (el == null)
                                 throw new ArgumentException($"Frame @id={atId} not found on this slide");
-                            shapeIndices.Add(idx + 1);
+                            resolved.Add(el);
                             continue;
                         }
                         // @name path: /slide[N]/<kind>[@name=Foo]
@@ -432,57 +459,39 @@ public partial class PowerPointHandler
                         if (atNameMatch.Success)
                         {
                             var atName = atNameMatch.Groups[1].Value;
-                            var idx = grpFrameList.FindIndex(e => FrameName(e) == atName);
-                            if (idx < 0)
+                            var el = grpFrameList.FirstOrDefault(e => FrameName(e) == atName);
+                            if (el == null)
                                 throw new ArgumentException($"Frame @name={atName} not found on this slide");
-                            shapeIndices.Add(idx + 1);
+                            resolved.Add(el);
                             continue;
                         }
-                        // Positional path: /slide[N]/<kind>[M]
+                        // Positional path: /slide[N]/<kind>[M] — indexes the
+                        // placeholder-excluded allShapes space (shape[N] form).
                         var pathMatch = Regex.Match(trimmed,
                             $@"/slide\[\d+\]/{frameKind}\[(\d+)\]",
                             RegexOptions.IgnoreCase);
                         if (!pathMatch.Success)
                             throw new ArgumentException($"Invalid frame path: '{trimmed}'. Expected /slide[N]/<kind>[M], /slide[N]/<kind>[@id=ID], or /slide[N]/<kind>[@name=Foo] where <kind> is shape/group/picture/connector/chart/table/etc.");
-                        shapeIndices.Add(int.Parse(pathMatch.Groups[1].Value));
+                        var pIdx = int.Parse(pathMatch.Groups[1].Value);
+                        if (pIdx < 1 || pIdx > allShapes.Count)
+                            throw new ArgumentException($"Shape {pIdx} not found (total: {allShapes.Count})");
+                        resolved.Add(allShapes[pIdx - 1]);
                     }
                     else if (int.TryParse(trimmed, out var idx))
                     {
-                        shapeIndices.Add(idx);
+                        if (idx < 1 || idx > allShapes.Count)
+                            throw new ArgumentException($"Shape {idx} not found (total: {allShapes.Count})");
+                        resolved.Add(allShapes[idx - 1]);
                     }
                     else
                     {
                         throw new ArgumentException($"Invalid 'shapes' value: '{trimmed}' is not a valid integer or DOM path. Expected comma-separated shape indices (e.g. shapes=1,2,3) or DOM paths (e.g. shapes=/slide[1]/shape[1],/slide[1]/shape[2]).");
                     }
                 }
-                // CONSISTENCY(group-frame-types): include all frame-like elements
-                // (Shape, GroupShape, Picture, GraphicFrame, ConnectionShape) so
-                // existing groups, pictures, charts, and connectors can also be
-                // grouped together. Index space matches the shape-tree order
-                // PowerPoint uses for sibling lookups (B13).
-                //
-                // CONSISTENCY(group-numeric-skip-placeholder): exclude placeholder
-                // <p:sp> elements (those with a <p:ph> child) from the numeric
-                // index so `shapes=1,2` aligns with the non-placeholder shape[N]
-                // index space that Query/Get use. Users wanting to group a
-                // placeholder can still target it explicitly via the @id= /
-                // @name= / path forms above.
-                var allShapes = grpShapeTree.ChildElements
-                    .Where(c => c is Shape || c is GroupShape || c is Picture
-                        || c is GraphicFrame || c is ConnectionShape)
-                    .Where(c => !(c is Shape s
-                        && s.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
-                            ?.GetFirstChild<PlaceholderShape>() != null))
-                    .ToList();
 
-                // Collect shapes to group (in reverse order to maintain indices during removal)
-                var toGroup = new List<OpenXmlElement>();
-                foreach (var si in shapeIndices.OrderBy(i => i))
-                {
-                    if (si < 1 || si > allShapes.Count)
-                        throw new ArgumentException($"Shape {si} not found (total: {allShapes.Count})");
-                    toGroup.Add(allShapes[si - 1]);
-                }
+                // Collect shapes to group in shape-tree order (stable regardless of
+                // the order parts were listed), de-duplicating repeated references.
+                var toGroup = grpFrameList.Where(e => resolved.Contains(e)).ToList();
 
                 // Calculate bounding box across heterogeneous frame elements.
                 long minX = long.MaxValue, minY = long.MaxValue, maxX = long.MinValue, maxY = long.MinValue;
@@ -700,6 +709,19 @@ public partial class PowerPointHandler
                 .FirstOrDefault(p => p?.Type?.Value == PlaceholderValues.Title
                     || p?.Type?.Value == PlaceholderValues.CenteredTitle)
             : null;
+        // R27-1: PowerPoint inherits placeholder geometry/typography by STRICT
+        // ph-type match. A slide <p:ph type="title"> does NOT inherit from a
+        // layout <p:ph type="ctrTitle"> (and vice versa) — the title then has no
+        // resolvable position, renders at (0,0) and overlaps the subtitle.
+        // The OR match above intentionally treats title/ctrTitle as one family
+        // for "does a title slot exist", but to actually inherit we must adopt
+        // the layout slot's exact type. Re-point phTypeVal to match the slot the
+        // title will bind to (e.g. ctrTitle on the "Title Slide" layout).
+        if (isTitleType && titleLayoutSlot?.Type?.Value is { } layoutTitleType
+            && layoutTitleType != phTypeVal)
+        {
+            phTypeVal = layoutTitleType;
+        }
         // Detect whether the caller explicitly provided an idx — distinguishes
         // "user passed no idx, want bare <p:ph type='subTitle'/>" from "user
         // didn't bother and we should pick one". Dump→batch replay relies on
@@ -806,16 +828,20 @@ public partial class PowerPointHandler
             new NonVisualShapeDrawingProperties(),
             appNvPr
         );
-        // Leave ShapeProperties empty when layout supplies geometry — but when
-        // the slide's layout has no matching <p:ph> slot (e.g. user added a
-        // body placeholder to a Blank-layout slide), PowerPoint
-        // renders NOTHING. Inject a sensible default rectangle so the shape is
-        // at least visible. Coordinates picked to roughly mirror the standard
-        // "Title and Content" layout slots (16:9 deck, EMU = 914400/inch).
+        // R27-1: write an EXPLICIT <a:xfrm> on every placeholder so its position
+        // is self-contained. Type-matching the layout slot is necessary but NOT
+        // sufficient — real PowerPoint does not always resolve geometry purely by
+        // inheritance on this Add path, so a slide placeholder with empty spPr can
+        // render at (0,0) and overlap a sibling (e.g. title over subtitle on the
+        // Title Slide layout — caught by officeshot in real Office). When the
+        // placeholder binds to a layout slot, copy that slot's resolved off/ext;
+        // otherwise fall back to the standard slot rectangle below.
         shape.ShapeProperties = new ShapeProperties();
-        if (!boundToLayout)
+        var resolvedLayoutGeom = boundToLayout
+            ? ResolveLayoutSlotGeometry(layoutPartCheck, phTypeVal, phIdx)
+            : null;
         {
-            (long x, long y, long cx, long cy) geom = phTypeVal switch
+            (long x, long y, long cx, long cy) geom = resolvedLayoutGeom ?? phTypeVal switch
             {
                 _ when phTypeVal == PlaceholderValues.Title
                     || phTypeVal == PlaceholderValues.CenteredTitle
@@ -947,6 +973,63 @@ public partial class PowerPointHandler
         return phPath;
     }
 
+    // R27-1: resolve the explicit off/ext geometry of the layout (or master)
+    // placeholder slot that a slide placeholder of (phType, phIdx) binds to, so
+    // AddPlaceholder can stamp it onto the slide shape directly instead of
+    // relying on inheritance (which real PowerPoint does not always honor on the
+    // Add path). Title-family slots match by type; everything else matches by
+    // type and, when the slide placeholder carries an idx, by idx too. If the
+    // layout slot has no xfrm of its own, fall back to the master's slot for the
+    // same type. Returns null when no slot or no resolvable xfrm is found — the
+    // caller then uses its default-rectangle table.
+    private static (long x, long y, long cx, long cy)? ResolveLayoutSlotGeometry(
+        SlideLayoutPart? layoutPart, PlaceholderValues phType, uint? phIdx)
+    {
+        if (layoutPart?.SlideLayout?.CommonSlideData?.ShapeTree == null) return null;
+
+        bool isTitle = phType == PlaceholderValues.Title
+            || phType == PlaceholderValues.CenteredTitle;
+
+        static (long, long, long, long)? XfrmOf(Shape? s)
+        {
+            var xfrm = s?.ShapeProperties?.Transform2D;
+            var off = xfrm?.Offset;
+            var ext = xfrm?.Extents;
+            if (off?.X is null || off.Y is null || ext?.Cx is null || ext.Cy is null)
+                return null;
+            return (off.X!.Value, off.Y!.Value, ext.Cx!.Value, ext.Cy!.Value);
+        }
+
+        Shape? MatchSlot(OpenXmlElement? tree)
+        {
+            return tree?.Elements<Shape>().FirstOrDefault(s =>
+            {
+                var ph = s.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+                    ?.GetFirstChild<PlaceholderShape>();
+                if (ph == null) return false;
+                var t = ph.Type?.Value;
+                if (isTitle)
+                    return t == PlaceholderValues.Title || t == PlaceholderValues.CenteredTitle;
+                if (t != phType) return false;
+                // For non-title, when the slide placeholder has an idx, prefer the
+                // slot with the same idx; otherwise any same-type slot.
+                if (phIdx.HasValue && ph.Index?.Value is { } slotIdx)
+                    return slotIdx == phIdx.Value;
+                return true;
+            });
+        }
+
+        // Layout slot first (its xfrm overrides the master's).
+        var layoutSlot = MatchSlot(layoutPart.SlideLayout.CommonSlideData.ShapeTree);
+        if (XfrmOf(layoutSlot) is { } lg) return lg;
+
+        // Fall back to the master slot of the same type.
+        var masterTree = layoutPart.SlideMasterPart?.SlideMaster?.CommonSlideData?.ShapeTree;
+        var masterSlot = MatchSlot(masterTree);
+        if (XfrmOf(masterSlot) is { } mg) return mg;
+
+        return null;
+    }
 
     private string AddAnimation(string parentPath, int? index, Dictionary<string, string> properties)
     {
