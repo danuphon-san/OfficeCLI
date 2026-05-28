@@ -1687,7 +1687,17 @@ public partial class ExcelHandler
                     // row-1 data and are spammy in pipelines. Future revisit: make
                     // sortHeader default=true project-wide as a breaking change,
                     // documented in release notes — do NOT add a per-call warning.
-                    bool sortHeader = properties.TryGetValue("sortheader", out var shv) && IsTruthy(shv);
+                    // CONSISTENCY(sort-header-autofilter): when an AutoFilter is set on the
+                    // sheet, row 1 is unambiguously the header (the filter's own header row),
+                    // so default sortHeader=true to keep it out of the reorder — sorting it
+                    // into the data silently destroys the dataset. Explicit sortHeader=false
+                    // still overrides. Without an AutoFilter we keep the documented
+                    // "caller states intent" default of false (no heuristic guessing).
+                    bool sortHeader;
+                    if (properties.TryGetValue("sortheader", out var shv))
+                        sortHeader = IsTruthy(shv);
+                    else
+                        sortHeader = ws.GetFirstChild<AutoFilter>() != null;
                     SortRangeRows(worksheet, 1, minRowIdx, maxCol, maxRowIdx, value, sortHeader);
                     DeleteCalcChainIfPresent();
                     break;
