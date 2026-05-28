@@ -89,7 +89,14 @@ public partial class ExcelHandler
         // single-quoted form `'[Book.xlsx]Sheet'!A1` (Excel's standard
         // quoting for sheet names with spaces) which previously slipped
         // through and produced a silently broken defined name.
-        if (System.Text.RegularExpressions.Regex.IsMatch(refVal, @"^\s*'?\["))
+        // CONSISTENCY(cross-workbook-vs-structured-ref): mirror Helpers.cs
+        // RejectCrossWorkbookFormula. Tight match against `[<digits>]` or
+        // `[<name>.xls(x|m|b)?]` so structured-ref namedrange values like
+        // `Table1[@Col]` or `Table1[Price]` aren't falsely rejected.
+        var refValProbe = refVal.TrimStart(' ', '\t').TrimStart('\'');
+        if (System.Text.RegularExpressions.Regex.IsMatch(refValProbe,
+                @"^\[(\d+|[^\]]*\.xls[xbm]?)\]",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase))
             throw new ArgumentException(
                 $"Cross-workbook references like '{refVal}' require an externalLinks part which officecli doesn't expose; use raw-set for this case");
 

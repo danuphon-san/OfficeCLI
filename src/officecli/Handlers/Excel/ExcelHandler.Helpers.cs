@@ -268,7 +268,19 @@ public partial class ExcelHandler
     {
         if (string.IsNullOrEmpty(formula)) return;
         var trimmed = formula.TrimStart('=', ' ', '\t');
-        if (System.Text.RegularExpressions.Regex.IsMatch(trimmed, @"^\["))
+        // CONSISTENCY(cross-workbook-vs-structured-ref): the older `^\[` guard
+        // also matched OOXML structured table references like `[@Price]` and
+        // `[Price]*[Qty]`, falsely rejecting valid Excel-365 formulas. Real
+        // cross-workbook refs have one of two shapes:
+        //   - numeric workbook index:  `[1]Sheet1!A1`        → `[<digits>]`
+        //   - filename + extension:    `[Other.xlsx]Sheet!A1` → `[<name>.xls(x|m|b)?]`
+        // Both forms are followed by a sheet reference (`Sheet!...`), but the
+        // bracket payload alone is enough to disambiguate from `[@Col]` /
+        // `[Col]` structured refs (which contain `@`, alphabetics without an
+        // extension, or `:`).
+        if (System.Text.RegularExpressions.Regex.IsMatch(trimmed,
+                @"^\[(\d+|[^\]]*\.xls[xbm]?)\]",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase))
             throw new ArgumentException(
                 $"Cross-workbook references like '{formula}' require an externalLinks part which officecli doesn't expose; use raw-set for this case");
     }
