@@ -245,13 +245,21 @@ public partial class WordHandler
         {
             var mainPart = _doc.MainDocumentPart
                 ?? throw new InvalidOperationException("MainDocumentPart not found");
-            var fnId = parts[0].Index ?? 1;
+            int? fnId = parts[0].Index;
+            if (fnId == null && parts[0].StringIndex != null
+                && parts[0].StringIndex.StartsWith("@footnoteId=", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(parts[0].StringIndex["@footnoteId=".Length..], out var fnIdv))
+            {
+                fnId = fnIdv;
+            }
+            if (fnId == null)
+                throw new ArgumentException($"Path not found: {path}");
             var fn = mainPart.FootnotesPart?.Footnotes?
-                .Elements<Footnote>().FirstOrDefault(f => f.Id?.Value == fnId)
+                .Elements<Footnote>().FirstOrDefault(f => f.Id?.Value == fnId.Value)
                 ?? throw new ArgumentException($"Path not found: {path}");
             // Remove footnote reference from body
             foreach (var fnRef in mainPart.Document!.Descendants<FootnoteReference>()
-                .Where(r => r.Id?.Value == fnId).ToList())
+                .Where(r => r.Id?.Value == fnId.Value).ToList())
                 fnRef.Parent?.Remove();
             fn.Remove();
             mainPart.FootnotesPart?.Footnotes?.Save();
@@ -262,13 +270,21 @@ public partial class WordHandler
         {
             var mainPart = _doc.MainDocumentPart
                 ?? throw new InvalidOperationException("MainDocumentPart not found");
-            var enId = parts[0].Index ?? 1;
+            int? enId = parts[0].Index;
+            if (enId == null && parts[0].StringIndex != null
+                && parts[0].StringIndex.StartsWith("@endnoteId=", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(parts[0].StringIndex["@endnoteId=".Length..], out var enIdv))
+            {
+                enId = enIdv;
+            }
+            if (enId == null)
+                throw new ArgumentException($"Path not found: {path}");
             var en = mainPart.EndnotesPart?.Endnotes?
-                .Elements<Endnote>().FirstOrDefault(e => e.Id?.Value == enId)
+                .Elements<Endnote>().FirstOrDefault(e => e.Id?.Value == enId.Value)
                 ?? throw new ArgumentException($"Path not found: {path}");
             // Remove endnote reference from body
             foreach (var enRef in mainPart.Document!.Descendants<EndnoteReference>()
-                .Where(r => r.Id?.Value == enId).ToList())
+                .Where(r => r.Id?.Value == enId.Value).ToList())
                 enRef.Parent?.Remove();
             en.Remove();
             mainPart.EndnotesPart?.Endnotes?.Save();
