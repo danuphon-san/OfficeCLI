@@ -951,6 +951,17 @@ public partial class WordHandler
             // AddParagraph's pPrChange block at end-of-function.
             if (key.StartsWith("revision.", StringComparison.OrdinalIgnoreCase))
                 continue;
+            // paraMarkDel.* — consumed by AddParagraph's paraMarkDel block at
+            // end-of-function (mirrors paraMarkIns.* on the Get side, which
+            // BatchEmitter rewrites into bare revision.author + ins path).
+            // paraMarkIns.* is unused inside AddParagraph (BatchEmitter
+            // converts it before invoking add p), but allowlist it too so a
+            // user passing it directly doesn't trip UNSUPPORTED.
+            if (key.StartsWith("paraMarkDel.", StringComparison.OrdinalIgnoreCase)
+                || key.StartsWith("paramarkdel.", StringComparison.OrdinalIgnoreCase)
+                || key.StartsWith("paraMarkIns.", StringComparison.OrdinalIgnoreCase)
+                || key.StartsWith("paramarkins.", StringComparison.OrdinalIgnoreCase))
+                continue;
             if (!key.Contains('.'))
             {
                 // Bare run-level key (lang, bidi, kern, …) — try
@@ -1178,6 +1189,48 @@ public partial class WordHandler
                     para.ReplaceChild(ins, r);
                     ins.AppendChild(r);
                 }
+            }
+        }
+        // paraMarkDel: <w:pPr><w:rPr><w:del .../></w:rPr></w:pPr> — paragraph-
+        // mark deletion revision (paragraph join). Accept either explicit
+        // `revision.type=paraMarkDel` (or schema-short `paraMarkDel`) plus
+        // revision.author/.date/.id, OR a `paraMarkDel.*` namespace that
+        // mirrors the paraMarkIns.* readback. Without this branch the dump
+        // emitted by the new Get-side paraMarkDel.* readback round-tripped
+        // back through AddParagraph as plain props and the ¶-del marker was
+        // silently dropped.
+        string? pmdAuthor = null, pmdDate = null, pmdId = null;
+        bool hasPmdNs = properties.TryGetValue("paraMarkDel.author", out pmdAuthor);
+        hasPmdNs |= properties.TryGetValue("paraMarkDel.date", out pmdDate);
+        hasPmdNs |= properties.TryGetValue("paraMarkDel.id", out pmdId);
+        bool isParaMarkDelType = pTcKind != null &&
+            (pTcKind.Trim().Equals("paraMarkDel", StringComparison.OrdinalIgnoreCase)
+             || pTcKind.Trim().Equals("paragraphMarkDeletion", StringComparison.OrdinalIgnoreCase)
+             || pTcKind.Trim().Equals("del", StringComparison.OrdinalIgnoreCase));
+        if (hasPmdNs || isParaMarkDelType)
+        {
+            // Fall through to revision.author/date/id when the namespaced
+            // form wasn't provided (caller used revision.type=paraMarkDel).
+            if (!hasPmdNs)
+            {
+                properties.TryGetValue("revision.author", out pmdAuthor);
+                properties.TryGetValue("revision.date", out pmdDate);
+                properties.TryGetValue("revision.id", out pmdId);
+            }
+            var author = string.IsNullOrEmpty(pmdAuthor) ? "OfficeCLI" : pmdAuthor!;
+            DateTime date = !string.IsNullOrEmpty(pmdDate) && DateTime.TryParse(pmdDate, out var hd2)
+                ? hd2 : DateTime.UtcNow;
+            var pMarkRPr2 = pProps.ParagraphMarkRunProperties
+                          ?? pProps.PrependChild(new ParagraphMarkRunProperties());
+            // Don't double-emit if a Deleted element already lives here.
+            if (pMarkRPr2.GetFirstChild<Deleted>() == null)
+            {
+                pMarkRPr2.AppendChild(new Deleted
+                {
+                    Author = author,
+                    Date = date,
+                    Id = !string.IsNullOrEmpty(pmdId) ? pmdId : GenerateRevisionId(),
+                });
             }
         }
         return resultPath;
@@ -1827,6 +1880,11 @@ public partial class WordHandler
                 case "sizecs":
                 // BUG-DUMP5-10: consumed up-front for the w:ins/w:del
                 // wrapper emit at the bottom of this method.
+                // revision.type is dotted (so falls into this loop, not the
+                // bare-key loop) — the addRunCuratedBare allowlist above
+                // includes "revision.type" but never fires because of the
+                // `if (key.Contains('.')) continue;` filter; mirror it here.
+                case "revision.type":
                 case "revision.author":
                 case "revision.date":
                 case "revision.id":

@@ -1464,6 +1464,9 @@ public partial class WordHandler
         // disappears on dump round-trip even though the inner text
         // survives.
         var insAncestor = run.Ancestors<InsertedRun>().FirstOrDefault();
+        var moveFromAncestor = insAncestor == null ? run.Ancestors<MoveFromRun>().FirstOrDefault() : null;
+        var moveToAncestor = (insAncestor == null && moveFromAncestor == null)
+            ? run.Ancestors<MoveToRun>().FirstOrDefault() : null;
         if (insAncestor != null)
         {
             node.Format["revision.type"] = "ins";
@@ -1471,6 +1474,34 @@ public partial class WordHandler
                 node.Format["revision.author"] = insAncestor.Author!.Value!;
             if (insAncestor.Date?.Value is DateTime insDate)
                 node.Format["revision.date"] = insDate.ToString("o");
+            if (insAncestor.Id?.Value is { } insId)
+                node.Format["revision.id"] = insId.ToString();
+        }
+        else if (moveFromAncestor != null)
+        {
+            // CONSISTENCY(revision-wrapper-readback): w:moveFrom/w:moveTo wrap
+            // a run identically to w:ins/w:del; without a Get-side branch the
+            // wrapper attribution silently disappeared on dump round-trip and
+            // the BatchEmitter re-emitted the run as a plain `add r` (losing
+            // the move pairing entirely). Add accepts revision.type=moveFrom/
+            // moveTo + author/date/id.
+            node.Format["revision.type"] = "moveFrom";
+            if (!string.IsNullOrEmpty(moveFromAncestor.Author?.Value))
+                node.Format["revision.author"] = moveFromAncestor.Author!.Value!;
+            if (moveFromAncestor.Date?.Value is DateTime mfDate)
+                node.Format["revision.date"] = mfDate.ToString("o");
+            if (moveFromAncestor.Id?.Value is { } mfId)
+                node.Format["revision.id"] = mfId.ToString();
+        }
+        else if (moveToAncestor != null)
+        {
+            node.Format["revision.type"] = "moveTo";
+            if (!string.IsNullOrEmpty(moveToAncestor.Author?.Value))
+                node.Format["revision.author"] = moveToAncestor.Author!.Value!;
+            if (moveToAncestor.Date?.Value is DateTime mtDate)
+                node.Format["revision.date"] = mtDate.ToString("o");
+            if (moveToAncestor.Id?.Value is { } mtId)
+                node.Format["revision.id"] = mtId.ToString();
         }
         else
         {
@@ -1482,6 +1513,8 @@ public partial class WordHandler
                     node.Format["revision.author"] = delAncestor.Author!.Value!;
                 if (delAncestor.Date?.Value is DateTime delDate)
                     node.Format["revision.date"] = delDate.ToString("o");
+                if (delAncestor.Id?.Value is { } delId)
+                    node.Format["revision.id"] = delId.ToString();
             }
             else
             {
@@ -1497,6 +1530,24 @@ public partial class WordHandler
                         node.Format["revision.author"] = rPrChange.Author!.Value!;
                     if (rPrChange.Date?.Value is DateTime rDate)
                         node.Format["revision.date"] = rDate.ToString("o");
+                    if (rPrChange.Id?.Value is { } rId)
+                        node.Format["revision.id"] = rId.ToString();
+                    // BUG: rPrChange's inner snapshot (PreviousRunProperties
+                    // when written by SetRevision; plain RunProperties when
+                    // written by AddRun's empty-marker path; foreign producers
+                    // may use either) carries the pre-change run properties
+                    // (bold/italic/color/size/…). AddRun's rPrChange branch
+                    // re-stamps the marker with an empty snapshot, losing
+                    // what Word's Reject Change would restore. Surface
+                    // beforeLost so BatchEmitter can warn. See
+                    // WordHandler.Set.Revision.cs note on which strongly-typed
+                    // child class round-trips through OpenXml 3.x.
+                    var prevPrev = rPrChange.GetFirstChild<PreviousRunProperties>();
+                    var prevPlain = rPrChange.GetFirstChild<RunProperties>();
+                    bool prevHas = (prevPrev != null && prevPrev.HasChildren)
+                                || (prevPlain != null && prevPlain.HasChildren);
+                    if (prevHas)
+                        node.Format["revision.beforeLost"] = true;
                 }
             }
         }
@@ -2568,6 +2619,21 @@ public partial class WordHandler
                 node.Format["revision.author"] = pPrChange.Author!.Value!;
             if (pPrChange.Date?.Value is DateTime pDate)
                 node.Format["revision.date"] = pDate.ToString("o");
+            if (pPrChange.Id?.Value is { } pcId)
+                node.Format["revision.id"] = pcId.ToString();
+            // BUG: pPrChange's previous-pPr snapshot (alignment, spacing,
+            // indent, …) is what Word's Reject Change restores. Add v1
+            // re-stamps the marker with empty previous-pPr, losing the
+            // snapshot on dump→batch round-trip. SDK 3.x writes the snapshot
+            // as ParagraphPropertiesExtended (SetRevision path) or
+            // PreviousParagraphProperties (AddParagraph's empty-marker path /
+            // foreign producers). Probe both.
+            var prevExt = pPrChange.GetFirstChild<ParagraphPropertiesExtended>();
+            var prevPpr = pPrChange.GetFirstChild<PreviousParagraphProperties>();
+            bool prevPHas = (prevExt != null && prevExt.HasChildren)
+                         || (prevPpr != null && prevPpr.HasChildren);
+            if (prevPHas)
+                node.Format["revision.beforeLost"] = true;
         }
         // paraMarkIns: `<w:pPr><w:rPr><w:ins .../></w:rPr></w:pPr>` records
         // that the paragraph mark itself was inserted as a tracked change —
@@ -2588,6 +2654,22 @@ public partial class WordHandler
                     node.Format["paraMarkIns.author"] = pMarkIns.Author!.Value!;
                 if (pMarkIns.Date?.Value is DateTime piDate)
                     node.Format["paraMarkIns.date"] = piDate.ToString("o");
+                if (pMarkIns.Id?.Value is { } piId)
+                    node.Format["paraMarkIns.id"] = piId.ToString();
+            }
+            // paraMarkDel: <w:pPr><w:rPr><w:del .../></w:rPr></w:pPr> records
+            // that the paragraph mark was *deleted* as a tracked change
+            // (paragraph-join revision). Mirror paraMarkIns so dump round-trip
+            // preserves it.
+            var pMarkDel = pmrpRev.GetFirstChild<Deleted>();
+            if (pMarkDel != null)
+            {
+                if (!string.IsNullOrEmpty(pMarkDel.Author?.Value))
+                    node.Format["paraMarkDel.author"] = pMarkDel.Author!.Value!;
+                if (pMarkDel.Date?.Value is DateTime pdDate)
+                    node.Format["paraMarkDel.date"] = pdDate.ToString("o");
+                if (pMarkDel.Id?.Value is { } pdId)
+                    node.Format["paraMarkDel.id"] = pdId.ToString();
             }
         }
         if (pProps != null)

@@ -63,6 +63,27 @@ public static partial class WordBatchEmitter
             if (!props.ContainsKey("revision.date"))
                 props["revision.date"] = pmiDate;
         }
+        props.Remove("paraMarkIns.id");
+        // revision.beforeLost — Get-side flag set when pPrChange's
+        // PreviousParagraphProperties carries a real pre-change pPr snapshot
+        // that Add v1 can't reconstruct. Strip the key (Add wouldn't accept
+        // it) and emit a dump warning so callers know the Reject-Change
+        // restoration state will not survive replay.
+        if (props.Remove("revision.beforeLost", out var _) && ctx != null)
+        {
+            ctx.Warnings.Add(new DocxUnsupportedWarning(
+                Element: "revision.before",
+                Path: pNode.Path,
+                Reason: "pPrChange previous-properties snapshot dropped on dump→batch round-trip; Word's Reject-Change restoration state will be lost on replay"));
+        }
+        // paraMarkDel.* — surfaces the dump path through AddParagraph's
+        // paraMarkDel block (added alongside this readback). Pass the keys
+        // through unchanged; AddParagraph allowlists the prefix and consumes
+        // them at end-of-function. Don't fold into revision.* — that
+        // namespace already routes to ins/format paths and a paragraph can
+        // legitimately carry BOTH paraMarkDel (¶ join) and revision.type=
+        // format (pPrChange).
+        // (No remove here — let the props pass through to AddParagraph.)
         // BUG-DUMP26-01: numId/numLevel that came from style inheritance
         // (ResolveNumPrFromStyle, no direct w:numPr on the paragraph) must
         // not ride on `add p` — the style already supplies them, and emitting
@@ -257,7 +278,7 @@ public static partial class WordBatchEmitter
             if (TryEmitOleRun(run, paraTargetPath, items, ctx)) continue;
             if (TryEmitPictureRun(word, run, paraTargetPath, parentPath, targetIndex, items, ctx, sharedAttachPara)) continue;
             if (TryEmitNoteRefRun(run, paraTargetPath, items, ctx)) continue;
-            EmitPlainOrHyperlinkRun(run, paraTargetPath, items);
+            EmitPlainOrHyperlinkRun(run, paraTargetPath, items, ctx);
         }
     }
 
@@ -1183,11 +1204,22 @@ public static partial class WordBatchEmitter
         return false;
     }
 
-    private static void EmitPlainOrHyperlinkRun(DocumentNode run, string paraTargetPath, List<BatchItem> items)
+    private static void EmitPlainOrHyperlinkRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx = null)
     {
         var rProps = FilterEmittableProps(run.Format);
         if (!string.IsNullOrEmpty(run.Text))
             rProps["text"] = run.Text!;
+        // revision.beforeLost — see EmitParagraph counterpart. Strip from
+        // the emitted props (AddRun would flag it UNSUPPORTED) and surface
+        // a dump warning so the lost rPrChange snapshot is visible to the
+        // caller.
+        if (rProps.Remove("revision.beforeLost") && ctx != null)
+        {
+            ctx.Warnings.Add(new DocxUnsupportedWarning(
+                Element: "revision.before",
+                Path: run.Path,
+                Reason: "rPrChange previous-properties snapshot dropped on dump→batch round-trip; Word's Reject-Change restoration state will be lost on replay"));
+        }
 
         // Hyperlink-wrapped run: Get flattens a <w:hyperlink>'s child run
         // into a regular run-typed node but copies the resolved URL onto
