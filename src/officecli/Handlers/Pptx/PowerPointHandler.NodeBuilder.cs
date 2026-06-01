@@ -803,6 +803,12 @@ public partial class PowerPointHandler
             node.Format["gradient"] = ReadGradientString(gradFill);
             if (!node.Format.ContainsKey("fill"))
                 node.Format["fill"] = "gradient";
+            // bt-B2: when the source <a:gradFill> carries flip=... or a
+            // child <a:tileRect>, the semantic gradient= form can't carry
+            // them (BuildGradientFill never emits these). Surface the
+            // verbatim element so Set's gradientRaw key can re-install it.
+            if (HasGradientNonSemanticTuning(gradFill))
+                node.Format["gradientRaw"] = gradFill.OuterXml;
         }
 
         // Image (blip) fill on shape

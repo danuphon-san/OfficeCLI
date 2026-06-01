@@ -182,6 +182,18 @@ public static partial class PptxBatchEmitter
         if (result.ContainsKey("reflectionRaw"))
             result.Remove("reflection");
 
+        // bt-B2: same shape as reflectionRaw — gradientRaw carries the
+        // verbatim <a:gradFill flip=… ><a:tileRect/></a:gradFill>. The
+        // companion semantic gradient=linear;… key would overwrite it via
+        // ApplyGradientFill if it ran after the raw install.
+        if (result.ContainsKey("gradientRaw"))
+        {
+            result.Remove("gradient");
+            // fill=gradient marker is still consistent with the raw element
+            // — leave it so the shape Type stays "gradient" on consumers
+            // reading Format["fill"].
+        }
+
         return result;
     }
 }

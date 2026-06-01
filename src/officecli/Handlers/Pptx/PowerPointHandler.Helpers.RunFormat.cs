@@ -157,6 +157,21 @@ public partial class PowerPointHandler
         return "?";
     }
 
+    /// <summary>
+    /// bt-B2: detect a captured <a:gradFill> that carries attributes or child
+    /// elements ReadGradientString / BuildGradientFill don't model — namely
+    /// the `flip` attribute (x / y / xy / none) on the gradFill element and
+    /// the <a:tileRect> child (l/t/r/b offsets). Source-authored decks ship
+    /// these for fine-tuned fills; emitting only the semantic stops/angle
+    /// drops them on round-trip.
+    /// </summary>
+    internal static bool HasGradientNonSemanticTuning(Drawing.GradientFill gradFill)
+    {
+        if (gradFill.Flip?.HasValue == true) return true;
+        if (gradFill.GetFirstChild<Drawing.TileRectangle>() != null) return true;
+        return false;
+    }
+
     internal static string ReadGradientString(Drawing.GradientFill gradFill)
     {
         var stopEls = gradFill.GradientStopList?.Elements<Drawing.GradientStop>().ToList();
