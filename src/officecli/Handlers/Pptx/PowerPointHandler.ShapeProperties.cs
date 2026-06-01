@@ -1486,13 +1486,28 @@ public partial class PowerPointHandler
                         bool clearAttr = (key.Equals("lang", StringComparison.OrdinalIgnoreCase)
                                           || key.Equals("altLang", StringComparison.OrdinalIgnoreCase))
                                          && string.IsNullOrEmpty(value);
+                        // CONSISTENCY(rpr-bool-form): drawingML rPr xsd:boolean
+                        // attrs (b/i/noProof/normalizeH/dirty/err/smtClean/kumimoji)
+                        // must serialise as the lexical "1"/"0" PowerPoint
+                        // authors — passing through "true"/"false" produces
+                        // a file whose attrs PowerPoint accepts on read but
+                        // textual byte-diffs treat as drift. Get normalises
+                        // both wire forms to "true"/"false" for cross-handler
+                        // vocabulary parity; pin the write-side here so
+                        // dump→Get→replay round-trips the canonical form
+                        // instead of leaking the canonical-readback string
+                        // back onto disk. Mirrors the OneOnBool() pin on
+                        // hMerge / vMerge (R43 779099bc).
+                        string writeValue = value;
+                        if (DrawingRunBoolAttrs.Contains(key))
+                            writeValue = (value is "1" or "true" or "True") ? "1" : "0";
                         foreach (var run in runs)
                         {
                             var rPr = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
                             if (clearAttr)
                                 rPr.RemoveAttribute(key, "");
                             else
-                                rPr.SetAttribute(new OpenXmlAttribute("", key, "", value));
+                                rPr.SetAttribute(new OpenXmlAttribute("", key, "", writeValue));
                         }
                     }
                     if (handledByRun) break;
