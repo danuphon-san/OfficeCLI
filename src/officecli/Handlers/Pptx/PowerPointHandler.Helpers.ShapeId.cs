@@ -20,7 +20,13 @@ public partial class PowerPointHandler
     /// </summary>
     private void InitShapeIdCounter()
     {
-        const uint minStartId = 10000;
+        // CONSISTENCY(shape-id-high-range): auto-assigned ids start at 100000+
+        // so they cannot collide with PowerPoint-authored ids (which sit in
+        // the 1..99 range for placeholders and the 1000..99999 range for
+        // regular shapes). This lets dump→replay preserve the original cNvPr
+        // id verbatim for every shape (placeholder + regular) without risking
+        // collision when a later mutation auto-assigns a fresh id.
+        const uint minStartId = 100000;
         _usedShapeIds = new HashSet<uint>();
         uint maxId = minStartId - 1;
 
@@ -109,7 +115,8 @@ public partial class PowerPointHandler
     /// </summary>
     private uint GenerateUniqueShapeId(ShapeTree shapeTree)
     {
-        const uint minStartId = 10000;
+        // See CONSISTENCY(shape-id-high-range) in InitShapeIdCounter.
+        const uint minStartId = 100000;
         var startId = _nextShapeId;
         while (true)
         {

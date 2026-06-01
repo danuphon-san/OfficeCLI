@@ -242,34 +242,15 @@ public static partial class PptxBatchEmitter
         var props = FilterEmittableProps(full.Format);
         DeferSlideJumpLink(props, replayPath, ctx);
 
-        // CONSISTENCY(placeholder-id-autoassign): NodeBuilder emits the source
-        // cNvPr.Id verbatim on every shape — including placeholders. But
-        // placeholder cNvPr ids on PowerPoint-authored decks are NOT globally
-        // unique; the title placeholder on every slide is typically id=1,
-        // and slides inheriting a layout's placeholder reuse the layout's
-        // id (often the small range 1..10 that real PowerPoint reserves).
-        // Replay imports that bag into AcquireShapeId which throws on
-        // intra-slide-tree collision — so a deck where two placeholders
-        // legitimately carry id=1 (e.g. layout-bound title + reused-from-
-        // layout shape) breaks the batch. AcquireShapeId auto-assigns a
-        // fresh one from the 10000+ range and the placeholder still
-        // resolves positionally.
-        //
-        // CONSISTENCY(placeholder-id-preserve-on-spTgt-ref): EXCEPT when the
-        // slide's raw <p:timing> tree references that id via <p:spTgt
-        // spid="N"/>. Exotic timing is round-tripped via raw-set passthrough
-        // (literal XML — see EmitRawSlideSlice), which keeps the original
-        // spid; auto-assigning a fresh id to the targeted placeholder would
-        // leave every spTgt dangling. Keep the placeholder id only when at
-        // least one spTgt on this slide names it.
-        bool keepId = false;
-        if (props.TryGetValue("id", out var phIdStr)
-            && uint.TryParse(phIdStr, out var phId))
-        {
-            var sptgts = GetSlideSpTgtIds(ppt, parentSlidePath, ctx);
-            if (sptgts.Contains(phId)) keepId = true;
-        }
-        if (!keepId) props.Remove("id");
+        // CONSISTENCY(shape-id-high-range): preserve the source cNvPr.Id
+        // verbatim. AcquireShapeId's auto-assign base is 100000+ (well above
+        // the 1..99 range PowerPoint uses for placeholders and the typical
+        // 1000..99999 range for regular shapes), so id collisions with the
+        // counter are impossible. Per-slide cNvPr uniqueness is required by
+        // OOXML, and the source already satisfies it; we just echo it back.
+        // This also keeps <p:spTgt spid="N"/> references in the slide's
+        // <p:timing> tree (round-tripped via raw-set passthrough) pointing
+        // at the right shape.
 
         items.Add(new BatchItem
         {
