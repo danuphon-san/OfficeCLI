@@ -337,6 +337,27 @@ public static partial class PptxBatchEmitter
                     ord["shape"] = ord.GetValueOrDefault("shape", 0) + 1;
                     EmitPlaceholder(ppt, child, replayPath, $"{replayPath}/shape[{ord["shape"]}]", items, ctx);
                     break;
+                // Group children mirror the slide-level dispatch in
+                // EmitSlide: a group can host any shape-tree leaf its parent
+                // slide can. Pre-R12 the switch fell through to the
+                // "deferred to PR2" warning for picture/table/chart, which
+                // silently dropped every picture in `Add picture parent=/slide[N]/group[K]`
+                // round-trips. Replay parent for the typed Add is the group's
+                // positional path (`replayPath`), so the emitted ordinal
+                // matches what AddPicture / AddTable / AddChart produce
+                // when targeted at a group parent.
+                case "picture":
+                    ord["picture"] = ord.GetValueOrDefault("picture", 0) + 1;
+                    EmitPicture(ppt, child, replayPath, $"{replayPath}/picture[{ord["picture"]}]", items, ctx);
+                    break;
+                case "table":
+                    ord["table"] = ord.GetValueOrDefault("table", 0) + 1;
+                    EmitTable(ppt, child, replayPath, $"{replayPath}/table[{ord["table"]}]", items, ctx);
+                    break;
+                case "chart":
+                    ord["chart"] = ord.GetValueOrDefault("chart", 0) + 1;
+                    EmitChart(ppt, child, replayPath, items, ctx, ord["chart"]);
+                    break;
                 default:
                     ctx.Unsupported.Add(new UnsupportedWarning(
                         Element: child.Type ?? "unknown",

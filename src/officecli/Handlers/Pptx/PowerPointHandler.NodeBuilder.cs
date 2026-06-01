@@ -1778,7 +1778,14 @@ public partial class PowerPointHandler
             var cr = srcRect.Right?.Value ?? 0;
             var cb = srcRect.Bottom?.Value ?? 0;
             if (cl != 0 || ct != 0 || cr != 0 || cb != 0)
-                node.Format["crop"] = $"{cl / 1000.0:0.##},{ct / 1000.0:0.##},{cr / 1000.0:0.##},{cb / 1000.0:0.##}";
+                // OOXML stores crop edges in perMille (thousandths of a percent),
+                // so `12345` = 12.345% and every fractional digit through the
+                // third is significant. The Set side accepts `cropLeft=12.345`
+                // and stores `<a:srcRect l="12345"/>`; the readback must round
+                // to 3 decimals so dump → batch → replay is byte-stable.
+                // Pre-R12 the formatter was `0.##` (2 decimals), so `12.345`
+                // round-tripped as `12.35` — silent precision loss.
+                node.Format["crop"] = $"{cl / 1000.0:0.###},{ct / 1000.0:0.###},{cr / 1000.0:0.###},{cb / 1000.0:0.###}";
         }
 
         return node;
