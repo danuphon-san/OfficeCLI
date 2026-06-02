@@ -396,7 +396,7 @@ internal static partial class ChartHelper
         {
             if (!hasNameRef && topCatRefForBail == null) return;
         }
-        if (extSeries != null && !extSeries.Any(s => s.ValuesRef != null || s.CategoriesRef != null) && !hasNameRef)
+        if (extSeries != null && !extSeries.Any(s => s.ValuesRef != null || s.CategoriesRef != null || s.BubbleSizeRef != null) && !hasNameRef)
         {
             if (topCatRefForBail == null) return;
         }
@@ -515,6 +515,26 @@ internal static partial class ChartHelper
                         else
                             ser.AppendChild(newCat);
                     }
+                }
+            }
+
+            // R52 bt-3: rewrite <c:bubbleSize>'s default numLit (BuildBubbleChart
+            // seeds size = y-values) to numRef when series{N}.bubbleSize=<range>
+            // was supplied. Preserves the cached point values so PowerPoint
+            // renders the correct bubble pixel-geometry even before Excel
+            // re-evaluates the external workbook reference.
+            if (ser is C.BubbleChartSeries && !string.IsNullOrEmpty(info.BubbleSizeRef))
+            {
+                var bsEl = ser.GetFirstChild<C.BubbleSize>();
+                if (bsEl != null)
+                {
+                    var numCache = BuildNumberingCacheFromLiteral(
+                        bsEl.GetFirstChild<C.NumberLiteral>(), null);
+                    bsEl.RemoveAllChildren();
+                    var numRef = new C.NumberReference(new C.Formula(info.BubbleSizeRef));
+                    if (numCache != null)
+                        numRef.AppendChild(numCache);
+                    bsEl.AppendChild(numRef);
                 }
             }
         }

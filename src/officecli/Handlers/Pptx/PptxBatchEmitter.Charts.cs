@@ -151,6 +151,13 @@ public static partial class PptxBatchEmitter
                     "shadow",
                     "trendline", "trendline.dispRSqr", "trendline.dispEq",
                     "errbars",
+                    // R52 bt-3: bubble series per-point sizes. ParseSeriesData
+                    // Extended accepts both literal (comma-separated) and
+                    // range-reference values via series{N}.bubbleSize, and
+                    // ApplySeriesReferences rewrites the default numLit when
+                    // a range is given. Without this flatten, dump→replay
+                    // lost the source bubbleSize on bubble charts.
+                    "bubbleSize", "bubbleSizeRef",
                     // R38: per-series labelFont dotted sub-keys — Reader now
                     // emits these on each series node, so the per-series
                     // flatten must promote them to series{N}.labelFont.* on

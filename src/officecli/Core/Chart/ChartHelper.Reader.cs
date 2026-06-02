@@ -848,6 +848,28 @@ internal static partial class ChartHelper
                         if (xVals != null && xVals.Length > 0)
                             seriesNode.Format["x"] = string.Join(",", xVals.Select(v => v.ToString("G")));
                     }
+
+                    // R52 bt-3: bubble series carry per-point sizes under
+                    // <c:bubbleSize>; the data may live in <c:numLit> (literal)
+                    // OR <c:numRef> (external cell range with <c:numCache>).
+                    // The Builder always writes numLit on AddChart bubble, so
+                    // a source-authored numRef was silently erased on
+                    // dump→replay — the replayed bubble chart came back with
+                    // BubbleSize equal to the YValues (BuildBubbleChart's
+                    // default), losing both the cell ref and the cached
+                    // pixel-sized geometry. Surface both ref + cache values
+                    // (parallel to valuesRef + values for the y-axis) so the
+                    // batch emitter can rebuild either form.
+                    var bubbleSizeEl = serEl.GetFirstChild<C.BubbleSize>();
+                    if (bubbleSizeEl != null)
+                    {
+                        var sizeVals = ReadNumericData(bubbleSizeEl);
+                        if (sizeVals != null && sizeVals.Length > 0)
+                            seriesNode.Format["bubbleSize"] = string.Join(",", sizeVals.Select(v => v.ToString("G")));
+                        var sizeRef = ReadFormulaRef(bubbleSizeEl);
+                        if (!string.IsNullOrEmpty(sizeRef))
+                            seriesNode.Format["bubbleSizeRef"] = sizeRef;
+                    }
                     var nameRefF = serEl.GetFirstChild<C.SeriesText>()
                         ?.GetFirstChild<C.StringReference>()
                         ?.GetFirstChild<C.Formula>()?.Text;

@@ -73,6 +73,13 @@ internal static partial class ChartHelper
         public double[]? Values { get; set; }
         public string? ValuesRef { get; set; }       // e.g. "Sheet1!$B$2:$B$13"
         public string? CategoriesRef { get; set; }    // e.g. "Sheet1!$A$2:$A$13"
+        // R52 bt-3: bubble charts store per-point sizes in a third series
+        // dimension. The literal data round-trips via Format["bubbleSize"];
+        // BubbleSizeRef carries the external cell range so dump→replay
+        // preserves the source <c:numRef> instead of falling back to the
+        // BuildBubbleChart default (size = y-values).
+        public double[]? BubbleSizeValues { get; set; }
+        public string? BubbleSizeRef { get; set; }    // e.g. "[Book1.xlsx]Sheet1!$D$1:$D$3"
     }
 
     /// <summary>
@@ -318,8 +325,10 @@ internal static partial class ChartHelper
             var hasName = properties.TryGetValue($"series{i}.name", out var nameStr);
             var hasValues = properties.TryGetValue($"series{i}.values", out var valuesStr);
             var hasCats = properties.TryGetValue($"series{i}.categories", out var catsStr);
+            var hasBubbleSize = properties.TryGetValue($"series{i}.bubbleSize", out var bsStr);
+            var hasBubbleSizeRef = properties.ContainsKey($"series{i}.bubbleSizeRef");
 
-            if (!hasName && !hasValues && !hasCats) continue;
+            if (!hasName && !hasValues && !hasCats && !hasBubbleSize && !hasBubbleSizeRef) continue;
 
             var info = new SeriesInfo { Name = nameStr ?? $"Series {i}" };
 
@@ -335,6 +344,27 @@ internal static partial class ChartHelper
             {
                 if (IsRangeReference(catsStr))
                     info.CategoriesRef = NormalizeRangeReference(catsStr);
+            }
+
+            // R52 bt-3: bubble series carry per-point sizes. `series{N}.bubbleSize`
+            // accepts either a comma-separated literal list or a cell range; the
+            // range form preserves the source <c:numRef> so PowerPoint shows the
+            // correct bubble pixel-geometry from the linked workbook data.
+            if (!string.IsNullOrEmpty(bsStr))
+            {
+                if (IsRangeReference(bsStr))
+                    info.BubbleSizeRef = NormalizeRangeReference(bsStr);
+                else
+                    info.BubbleSizeValues = ParseSeriesValues(bsStr, info.Name + ".bubbleSize");
+            }
+            // `series{N}.bubbleSizeRef` is the explicit ref key emitted by the
+            // batch emitter when a source <c:bubbleSize><c:numRef> is detected.
+            // It coexists with the literal `series{N}.bubbleSize=cached,values`
+            // — the ref takes precedence, the literal becomes the numCache.
+            if (properties.TryGetValue($"series{i}.bubbleSizeRef", out var bsRefStr)
+                && !string.IsNullOrEmpty(bsRefStr))
+            {
+                info.BubbleSizeRef = NormalizeRangeReference(bsRefStr);
             }
 
             result.Add(info);

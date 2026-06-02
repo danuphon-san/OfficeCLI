@@ -225,6 +225,41 @@
         "--prop series1.values=\"120,150,180,210\""
       ],
       "enforcement": "strict"
+    },
+    "bubbleSize": {
+      "type": "string",
+      "description": "bubble chart per-point sizes; comma-separated numbers OR a cell range reference. Defaults to the y-values when omitted.",
+      "appliesWhen": {
+        "parent.chartType": [
+          "bubble"
+        ]
+      },
+      "add": true,
+      "set": false,
+      "get": true,
+      "examples": [
+        "--prop series1.bubbleSize=\"10,20,30\"",
+        "--prop series1.bubbleSize=\"Sheet1!$D$1:$D$3\""
+      ],
+      "readback": "comma-separated numeric list (cached values)",
+      "enforcement": "report"
+    },
+    "bubbleSizeRef": {
+      "type": "string",
+      "description": "A1 cell range backing bubble per-point sizes. Coexists with bubbleSize (the literal becomes the numCache).",
+      "appliesWhen": {
+        "parent.chartType": [
+          "bubble"
+        ]
+      },
+      "add": true,
+      "set": false,
+      "get": true,
+      "examples": [
+        "--prop series1.bubbleSizeRef=\"Sheet1!$D$1:$D$3\""
+      ],
+      "readback": "A1 range string",
+      "enforcement": "report"
     }
   }
 }
