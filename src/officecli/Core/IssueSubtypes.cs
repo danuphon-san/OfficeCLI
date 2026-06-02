@@ -24,6 +24,14 @@ public static class IssueSubtypes
     public const string DefinedNameBroken = "definedname_broken";
     public const string DefinedNameTargetMissing = "definedname_target_missing";
     public const string BrokenPartRef = "broken_part_ref";
+    /// <summary>pptx-only: notesSlide raw-set passthrough references an
+    /// rId (<c>r:embed</c> / <c>r:link</c>) the dump pass cannot reproduce
+    /// on the replay target (e.g. a non-image rel attached to a NotesSlidePart
+    /// — embedded media, OLE, etc.). The raw-set still emits, but PowerPoint
+    /// shows the referenced object as a broken placeholder on open. Emitted
+    /// as an UnsupportedWarning during dump; the surfaced site is the slide
+    /// owning the notes (<c>/slide[N]/notes</c>).</summary>
+    public const string NotesUnresolvedRid = "notes_unresolved_rid";
 
     /// <summary>Broad IssueType bucket names — the canonical surface shown
     /// in error messages and help. Single-letter aliases (<see cref="BucketAliases"/>)
@@ -47,7 +55,7 @@ public static class IssueSubtypes
     {
         FormulaNotEvaluated, FormulaCacheStale, FormulaRefMissingSheet, FormulaEvalError,
         FieldNotEvaluated, FieldCacheStale,
-        SlideFieldNotEvaluated,
+        SlideFieldNotEvaluated, NotesUnresolvedRid,
         ChartSeriesRefMissingSheet, ChartCacheStale,
         DefinedNameBroken, DefinedNameTargetMissing,
         BrokenPartRef,
@@ -72,7 +80,7 @@ public static class IssueSubtypes
             + "Opt-in only (request by exact name; not included in --type content): "
             + string.Join(", ", OptInSubtypes) + ". "
             + "Subtypes are format-specific — formula_* / chart_* / definedname_* apply to xlsx, "
-            + "field_* to docx, slide_field_* / broken_part_ref to pptx; requesting a subtype that does not apply to "
+            + "field_* to docx, slide_field_* / notes_unresolved_rid / broken_part_ref to pptx; requesting a subtype that does not apply to "
             + "the queried file returns count=0 (not an error). "
             + "All values are case-insensitive and surrounding whitespace is trimmed.";
     }

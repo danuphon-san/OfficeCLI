@@ -1111,6 +1111,15 @@ public partial class PowerPointHandler : IDocumentHandler
                     var smMatch = System.Text.RegularExpressions.Regex.Match(parentPartPath, @"^/slideMaster\[(\d+)\]$");
                     var slMatch = smMatch.Success ? null : System.Text.RegularExpressions.Regex.Match(parentPartPath, @"^/slideLayout\[(\d+)\]$");
                     var sldMatch = (smMatch.Success || (slMatch?.Success ?? false)) ? null : System.Text.RegularExpressions.Regex.Match(parentPartPath, @"^/slide\[(\d+)\]$");
+                    // CONSISTENCY(notes-image-host): mirror /slide[N]/master/layout
+                    // entries — dump emits add-part image /noteSlide[N] BEFORE the
+                    // notes raw-set replace so r:embed references in the notesSlide
+                    // XML resolve to a real ImagePart on replay. Without this the
+                    // post-replay notesSlide carries a dangling rId and PowerPoint
+                    // renders the speaker-notes picture as a broken placeholder.
+                    var nsMatch = (smMatch.Success || (slMatch?.Success ?? false) || (sldMatch?.Success ?? false))
+                        ? null
+                        : System.Text.RegularExpressions.Regex.Match(parentPartPath, @"^/noteSlide\[(\d+)\]$");
                     if (smMatch.Success)
                     {
                         var smIdx = int.Parse(smMatch.Groups[1].Value);
@@ -1152,9 +1161,26 @@ public partial class PowerPointHandler : IDocumentHandler
                             throw new ArgumentException($"slide index {sldIdx} out of range");
                         imageHost = sldParts[sldIdx - 1];
                     }
+                    else if (nsMatch != null && nsMatch.Success)
+                    {
+                        var nsIdx = int.Parse(nsMatch.Groups[1].Value);
+                        var sldParts = GetSlideParts().ToList();
+                        if (nsIdx < 1 || nsIdx > sldParts.Count)
+                            throw new ArgumentException($"noteSlide index {nsIdx} out of range");
+                        // NotesSlidePart may not exist yet on the replay target.
+                        // EmitNotes always lands its typed `add notes` row BEFORE
+                        // this add-part, but on a blank target with no prior
+                        // notes row the part is still absent; create it on
+                        // demand so the ImagePart has a host to attach to.
+                        // CONSISTENCY(grow-on-rawset): mirrors slideMaster/layout
+                        // auto-grow above and /notesMaster on-demand creation.
+                        var hostSlide = sldParts[nsIdx - 1];
+                        imageHost = hostSlide.NotesSlidePart
+                            ?? hostSlide.AddNewPart<NotesSlidePart>();
+                    }
                     else
                         throw new ArgumentException(
-                            "add-part image: parent must be /slide[N], /slideMaster[N], /slideLayout[N], or /notesMaster");
+                            "add-part image: parent must be /slide[N], /slideMaster[N], /slideLayout[N], /noteSlide[N], or /notesMaster");
                 }
 
                 if (properties == null || !properties.TryGetValue("data", out var imgB64) || string.IsNullOrEmpty(imgB64))
@@ -1288,6 +1314,68 @@ public partial class PowerPointHandler : IDocumentHandler
         }
         return result;
     }
+
+    /// <summary>
+    /// Same as <see cref="GetMasterImageParts"/> for a slide's NotesSlidePart.
+    /// Used by PptxBatchEmitter.EmitNotes so a notesSlide raw-set replace that
+    /// references <c>r:embed="rIdN"</c> on a <c>&lt;p:pic&gt;</c> blipFill
+    /// (image pasted into speaker notes) replays against an ImagePart with
+    /// the same rId. Without this the post-replay notesSlide carries a
+    /// dangling rId and PowerPoint shows a broken picture placeholder.
+    /// Returns an empty list when the slide has no notesSlide or no embedded
+    /// images.
+    /// </summary>
+    internal IReadOnlyList<MasterImageInfo> GetNoteSlideImageParts(int slideIdx)
+    {
+        var result = new List<MasterImageInfo>();
+        var pp = _doc.PresentationPart;
+        if (pp == null) return result;
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count) return result;
+        var notesPart = slideParts[slideIdx - 1].NotesSlidePart;
+        if (notesPart == null) return result;
+        foreach (var img in notesPart.ImageParts)
+        {
+            var rid = notesPart.GetIdOfPart(img);
+            using var s = img.GetStream();
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            result.Add(new MasterImageInfo(rid, img.ContentType, Convert.ToBase64String(ms.ToArray())));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Enumerate <c>r:embed</c> / <c>r:link</c> attribute values referenced by
+    /// the source notesSlide XML. Used by PptxBatchEmitter.EmitNotes to detect
+    /// rIds that the typed Add/Set surface cannot reproduce (anything not an
+    /// ImagePart enumerated by <see cref="GetNoteSlideImageParts"/>). When such
+    /// orphan rIds exist, the emitter surfaces a
+    /// <c>notes_unresolved_rid</c> warning so callers know the post-replay
+    /// notesSlide may have dangling references that PowerPoint will render
+    /// as broken placeholders.
+    /// </summary>
+    internal IReadOnlyList<string> GetNoteSlideExternalRelIds(int slideIdx)
+    {
+        var result = new List<string>();
+        var pp = _doc.PresentationPart;
+        if (pp == null) return result;
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count) return result;
+        var notesPart = slideParts[slideIdx - 1].NotesSlidePart;
+        if (notesPart == null) return result;
+        var xml = notesPart.NotesSlide?.OuterXml;
+        if (string.IsNullOrEmpty(xml)) return result;
+        var rx = new Regex(@"r:(?:embed|link|id)=""([^""]+)""");
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Match m in rx.Matches(xml))
+        {
+            var rid = m.Groups[1].Value;
+            if (seen.Add(rid)) result.Add(rid);
+        }
+        return result;
+    }
+
     internal bool HasNotesMaster =>
         _doc.PresentationPart?.NotesMasterPart != null;
     // Exposed for PptxBatchEmitter so it can iterate slides without going

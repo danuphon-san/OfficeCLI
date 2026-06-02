@@ -64,7 +64,38 @@ public static partial class PptxBatchEmitter
             });
         }
 
-        // Phase 2 — raw-set replace with the verbatim source /p:notes XML.
+        // Phase 2a — emit ImageParts attached to the NotesSlidePart BEFORE the
+        // raw-set replace. R58 bt-5: the notesSlide raw XML carries
+        // <p:pic> blipFill r:embed="rIdN" references when the speaker notes
+        // contain a pasted image. The R46 41c5e2ae fix forwarded the notes
+        // XML byte-equal but left the sidecar ImagePart unreplicated, so the
+        // post-replay notesSlide held a dangling rId and PowerPoint rendered
+        // the picture as a broken placeholder.
+        //
+        // Mirrors EmitMasterRawOne / EmitLayoutRawOne — add-part image pins
+        // the source's rId so the raw-set'd notes XML resolves on replay.
+        IReadOnlyList<PowerPointHandler.MasterImageInfo> noteImages;
+        try { noteImages = ppt.GetNoteSlideImageParts(slideIdx); }
+        catch { noteImages = System.Array.Empty<PowerPointHandler.MasterImageInfo>(); }
+        var resolvedRids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var imageInfo in noteImages)
+        {
+            items.Add(new BatchItem
+            {
+                Command = "add-part",
+                Parent = $"/noteSlide[{slideIdx}]",
+                Type = "image",
+                Props = new Dictionary<string, string>
+                {
+                    ["rid"] = imageInfo.RelId,
+                    ["content-type"] = imageInfo.ContentType,
+                    ["data"] = imageInfo.Base64Data,
+                },
+            });
+            resolvedRids.Add(imageInfo.RelId);
+        }
+
+        // Phase 2b — raw-set replace with the verbatim source /p:notes XML.
         // Mirrors EmitNoteSlideRawOne in PptxBatchEmitter.Resources.cs but
         // is called per-slide here so it lands AFTER the typed add has
         // created the underlying NotesSlidePart.
@@ -81,6 +112,30 @@ public static partial class PptxBatchEmitter
             Action = "replace",
             Xml = notesXml,
         });
+
+        // Phase 2c — surface unresolved rIds. R58 bt-5 fallback: when the
+        // notesSlide XML references an rId we did not just materialise as an
+        // ImagePart (embedded media, OLE, hyperlinks to chart parts, …),
+        // PowerPoint will still flag a broken reference on open. The R58
+        // primary fix covers ImageParts; everything else surfaces here as a
+        // notes_unresolved_rid warning so callers can investigate without a
+        // silent rendering regression. Drops the layout/master inherited rels
+        // (rId1 typically targets the notesSlideLayout — relinked by AddNotes).
+        IReadOnlyList<string> referencedRids;
+        try { referencedRids = ppt.GetNoteSlideExternalRelIds(slideIdx); }
+        catch { referencedRids = System.Array.Empty<string>(); }
+        foreach (var rid in referencedRids)
+        {
+            if (resolvedRids.Contains(rid)) continue;
+            // Heuristic: the inherited layout/slide rels (rId1, rId2) are
+            // re-wired by the typed `add notes` row above. Anything beyond
+            // those that we did not just emit is genuinely unresolved.
+            if (rid == "rId1" || rid == "rId2") continue;
+            ctx.Unsupported.Add(new UnsupportedWarning(
+                Element: OfficeCli.Core.IssueSubtypes.NotesUnresolvedRid,
+                SlidePath: $"{slidePath}/notes",
+                Reason: $"notesSlide raw-set passthrough references r:id='{rid}' which the dump pass cannot reproduce on the replay target. PowerPoint may render the referenced object as a broken placeholder. Likely cause: embedded media, OLE, or other non-ImagePart relationship attached to the speaker notes."));
+        }
     }
 
     // Slide-level legacy comments (`<p:cm>`) live in SlideCommentsPart, not
