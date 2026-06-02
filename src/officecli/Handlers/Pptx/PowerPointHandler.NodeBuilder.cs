@@ -2510,7 +2510,7 @@ public partial class PowerPointHandler
         return shape;
     }
 
-    private static DocumentNode ConnectorToNode(ConnectionShape cxn, int slideNum, int cxnIdx, string? parentPathPrefix = null)
+    private static DocumentNode ConnectorToNode(ConnectionShape cxn, int slideNum, int cxnIdx, string? parentPathPrefix = null, int depth = 0, OpenXmlPart? part = null)
     {
         var name = cxn.NonVisualConnectionShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Connector";
         var cxnPathSeg = BuildElementPathSegment("connector", cxn, cxnIdx);
@@ -2644,7 +2644,91 @@ public partial class PowerPointHandler
         if (cxnLocks?.NoChangeShapeType?.Value == true)
             node.Format["lockShapeType"] = "true";
 
+        // R57 bt-4: surface inline text label on <p:cxnSp> — PowerPoint
+        // (and most flowchart authoring tools) attach a <p:txBody> child to
+        // connectors to render an in-line label between the two endpoints.
+        // The OOXML p:cxnSp schema does NOT declare <p:txBody> as a typed
+        // child (only nvCxnSpPr / spPr / style / extLst), so the OpenXml SDK
+        // surfaces the entire <p:txBody> subtree as an OpenXmlUnknownElement
+        // tree. Reparse its OuterXml into a strongly-typed Presentation.TextBody
+        // so the existing paragraph/run walker can extract text + chars props.
+        // Without this, Get/dump silently drop every connector label and
+        // round-trip wipes the text entirely.
+        var cxnTextBody = ResolveConnectorTextBody(cxn);
+        if (cxnTextBody != null)
+        {
+            var cxnParas = cxnTextBody.Elements<Drawing.Paragraph>().ToList();
+            // Surface aggregate text so `view text` / single-line consumers
+            // see the label without descending into children.
+            var aggText = string.Join("\n", cxnParas
+                .Select(p => string.Join("", p.Elements<Drawing.Run>().Select(r => r.Text?.Text ?? ""))));
+            if (!string.IsNullOrEmpty(aggText)) node.Text = aggText;
+            node.ChildCount = cxnParas.Count;
+
+            if (depth > 0)
+            {
+                int paraIdx = 0;
+                foreach (var para in cxnParas)
+                {
+                    paraIdx++;
+                    var paraRuns = para.Elements<Drawing.Run>().ToList();
+                    var paraText = string.Join("", paraRuns.Select(r => r.Text?.Text ?? ""));
+                    var paraNode = new DocumentNode
+                    {
+                        Path = $"{node.Path}/paragraph[{paraIdx}]",
+                        Type = "paragraph",
+                        Text = paraText,
+                        ChildCount = paraRuns.Count
+                    };
+                    var paraPProps = para.ParagraphProperties;
+                    if (paraPProps?.Alignment?.HasValue == true)
+                    {
+                        var av = paraPProps.Alignment.Value;
+                        paraNode.Format["align"] = av == Drawing.TextAlignmentTypeValues.Center ? "center"
+                            : av == Drawing.TextAlignmentTypeValues.Right ? "right"
+                            : av == Drawing.TextAlignmentTypeValues.Justified ? "justify"
+                            : "left";
+                    }
+                    if (depth > 1)
+                    {
+                        int runIdx = 0;
+                        foreach (var runChild in para.Elements<Drawing.Run>())
+                        {
+                            runIdx++;
+                            paraNode.Children.Add(RunToNode(runChild,
+                                $"{node.Path}/paragraph[{paraIdx}]/run[{runIdx}]", part));
+                        }
+                    }
+                    node.Children.Add(paraNode);
+                }
+            }
+        }
+
         return node;
+    }
+
+    // R57 bt-4: connector <p:txBody> lives outside the SDK's typed p:cxnSp
+    // schema and parses as an OpenXmlUnknownElement subtree. Locate it by
+    // LocalName ("txBody") and reparse its OuterXml as a strongly-typed
+    // Presentation.TextBody so callers can walk a:p / a:r / a:t through the
+    // regular typed accessors. Also tolerates the legal-but-rare case where
+    // the SDK does recognize the txBody (e.g. if a future schema update lifts
+    // the restriction): GetFirstChild<TextBody>() returns it directly.
+    internal static DocumentFormat.OpenXml.Presentation.TextBody? ResolveConnectorTextBody(ConnectionShape cxn)
+    {
+        var typed = cxn.GetFirstChild<DocumentFormat.OpenXml.Presentation.TextBody>();
+        if (typed != null) return typed;
+        var unk = cxn.ChildElements.OfType<OpenXmlUnknownElement>()
+            .FirstOrDefault(e => e.LocalName == "txBody");
+        if (unk == null) return null;
+        try
+        {
+            return new DocumentFormat.OpenXml.Presentation.TextBody(unk.OuterXml);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>

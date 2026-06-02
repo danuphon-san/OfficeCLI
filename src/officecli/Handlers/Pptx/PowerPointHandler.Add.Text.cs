@@ -181,35 +181,59 @@ public partial class PowerPointHandler
                 // emit can target either form via positional ordinals.
                 var paraParentMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]/shape\[(\d+)\]$");
                 var paraPhMatch = paraParentMatch.Success ? null : Regex.Match(parentPath, @"^/slide\[(\d+)\]/placeholder\[(\w+)\]$");
-                if (!paraParentMatch.Success && (paraPhMatch == null || !paraPhMatch.Success))
-                    throw new ArgumentException("Paragraphs must be added to a shape or placeholder: /slide[N]/shape[M] or /slide[N]/placeholder[X]");
+                // R57 bt-4: accept connector parents so dump→replay round-trips
+                // multi-paragraph / multi-run connector labels (the inline
+                // `text=` prop on AddConnector handles only the single-run
+                // case). The connector's <p:txBody> is not declared by the
+                // p:cxnSp schema — see ConnectorEnsureTextBody.
+                var paraCxnMatch = (paraParentMatch.Success || (paraPhMatch?.Success == true))
+                    ? null
+                    : Regex.Match(parentPath, @"^/slide\[(\d+)\]/connector\[([^\]]+)\]$");
+                if (!paraParentMatch.Success && (paraPhMatch == null || !paraPhMatch.Success) && (paraCxnMatch == null || !paraCxnMatch.Success))
+                    throw new ArgumentException("Paragraphs must be added to a shape, placeholder, or connector: /slide[N]/shape[M], /slide[N]/placeholder[X], or /slide[N]/connector[K]");
 
                 SlidePart paraSlidePart;
-                Shape paraShape;
+                Shape? paraShape = null;
+                ConnectionShape? paraCxn = null;
                 int paraSlideIdx;
                 int paraShapeIdx;
+                string paraReturnPathHead;
                 if (paraParentMatch.Success)
                 {
                     paraSlideIdx = int.Parse(paraParentMatch.Groups[1].Value);
                     paraShapeIdx = int.Parse(paraParentMatch.Groups[2].Value);
                     (paraSlidePart, paraShape) = ResolveShape(paraSlideIdx, paraShapeIdx);
+                    paraReturnPathHead = $"/slide[{paraSlideIdx}]/{BuildElementPathSegment("shape", paraShape, paraShapeIdx)}";
                 }
-                else
+                else if (paraPhMatch != null && paraPhMatch.Success)
                 {
-                    paraSlideIdx = int.Parse(paraPhMatch!.Groups[1].Value);
+                    paraSlideIdx = int.Parse(paraPhMatch.Groups[1].Value);
                     var phToken = paraPhMatch.Groups[2].Value;
                     var slideParts = GetSlideParts().ToList();
                     if (paraSlideIdx < 1 || paraSlideIdx > slideParts.Count)
                         throw new ArgumentException($"Slide {paraSlideIdx} not found (total: {slideParts.Count})");
                     paraSlidePart = slideParts[paraSlideIdx - 1];
                     paraShape = ResolvePlaceholderShape(paraSlidePart, phToken);
-                    // Synthetic index for return path — placeholder positional
-                    // lookup happens by Set's path resolver, this is informational.
                     paraShapeIdx = 1;
+                    paraReturnPathHead = $"/slide[{paraSlideIdx}]/{BuildElementPathSegment("shape", paraShape, paraShapeIdx)}";
+                }
+                else
+                {
+                    paraSlideIdx = int.Parse(paraCxnMatch!.Groups[1].Value);
+                    var cxnTok = paraCxnMatch.Groups[2].Value;
+                    var slideParts = GetSlideParts().ToList();
+                    if (paraSlideIdx < 1 || paraSlideIdx > slideParts.Count)
+                        throw new ArgumentException($"Slide {paraSlideIdx} not found (total: {slideParts.Count})");
+                    paraSlidePart = slideParts[paraSlideIdx - 1];
+                    paraCxn = ResolveConnectorByToken(paraSlidePart, cxnTok);
+                    paraShapeIdx = ConnectorPositionalIndex(paraSlidePart, paraCxn);
+                    paraReturnPathHead = $"/slide[{paraSlideIdx}]/{BuildElementPathSegment("connector", paraCxn, paraShapeIdx)}";
                 }
 
-                var textBody = paraShape.TextBody
-                    ?? throw new InvalidOperationException("Shape has no text body");
+                var textBody = paraShape != null
+                    ? (paraShape.TextBody
+                        ?? throw new InvalidOperationException("Shape has no text body"))
+                    : ConnectorEnsureTextBody(paraCxn!);
 
                 var newPara = new Drawing.Paragraph();
                 var pProps = new Drawing.ParagraphProperties();
@@ -377,7 +401,7 @@ public partial class PowerPointHandler
 
                 var paraCount = textBody.Elements<Drawing.Paragraph>().Count();
                 GetSlide(paraSlidePart).Save();
-                return $"/slide[{paraSlideIdx}]/{BuildElementPathSegment("shape", paraShape, paraShapeIdx)}/paragraph[{paraCount}]";
+                return $"{paraReturnPathHead}/paragraph[{paraCount}]";
     }
 
 
@@ -485,13 +509,21 @@ public partial class PowerPointHandler
                 // AddParagraph and SetParagraph already accept.
                 var runParaMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]((?:/group\[\d+\])*)/shape\[(\d+)\](?:/(?:paragraph|p)\[(\d+)\])?$");
                 var runPhMatch = runParaMatch.Success ? null : Regex.Match(parentPath, @"^/slide\[(\d+)\]((?:/group\[\d+\])*)/placeholder\[(\w+)\](?:/(?:paragraph|p)\[(\d+)\])?$");
-                if (!runParaMatch.Success && (runPhMatch == null || !runPhMatch.Success))
-                    throw new ArgumentException("Runs must be added to a shape/placeholder or paragraph: /slide[N]/shape[M], /slide[N]/placeholder[X], /slide[N]/shape[M]/paragraph[P], or /slide[N]/placeholder[X]/paragraph[P]");
+                // R57 bt-4: accept connector parents (slide-root only; group-
+                // nested connectors fall back to positional resolution under
+                // the group walker, deferred to a follow-up if encountered).
+                var runCxnMatch = (runParaMatch.Success || (runPhMatch?.Success == true))
+                    ? null
+                    : Regex.Match(parentPath, @"^/slide\[(\d+)\]/connector\[([^\]]+)\](?:/(?:paragraph|p)\[(\d+)\])?$");
+                if (!runParaMatch.Success && (runPhMatch == null || !runPhMatch.Success) && (runCxnMatch == null || !runCxnMatch.Success))
+                    throw new ArgumentException("Runs must be added to a shape/placeholder/connector or paragraph: /slide[N]/shape[M], /slide[N]/placeholder[X], /slide[N]/connector[K], or one of those with /paragraph[P] suffix");
 
                 SlidePart runSlidePart;
-                Shape runShape;
+                Shape? runShape = null;
+                ConnectionShape? runCxn = null;
                 int runSlideIdx;
                 int runShapeIdx;
+                string runReturnPathHead;
                 System.Text.RegularExpressions.Group paraGroup;
                 if (runParaMatch.Success)
                 {
@@ -501,6 +533,7 @@ public partial class PowerPointHandler
                     if (string.IsNullOrEmpty(grpChain))
                     {
                         (runSlidePart, runShape) = ResolveShape(runSlideIdx, runShapeIdx);
+                        runReturnPathHead = $"/slide[{runSlideIdx}]/{BuildElementPathSegment("shape", runShape, runShapeIdx)}";
                     }
                     else
                     {
@@ -528,12 +561,13 @@ public partial class PowerPointHandler
                         if (runShapeIdx < 1 || runShapeIdx > shapesInScope.Count)
                             throw new ArgumentException($"Shape {runShapeIdx} not found in group scope (have {shapesInScope.Count})");
                         runShape = shapesInScope[runShapeIdx - 1];
+                        runReturnPathHead = $"/slide[{runSlideIdx}]{grpChain}/{BuildElementPathSegment("shape", runShape, runShapeIdx)}";
                     }
                     paraGroup = runParaMatch.Groups[4];
                 }
-                else
+                else if (runPhMatch != null && runPhMatch.Success)
                 {
-                    runSlideIdx = int.Parse(runPhMatch!.Groups[1].Value);
+                    runSlideIdx = int.Parse(runPhMatch.Groups[1].Value);
                     // Placeholder paths nested inside a group are rare in
                     // PowerPoint (placeholders typically live at slide-level),
                     // but accept the syntax for symmetry with the shape branch
@@ -549,10 +583,26 @@ public partial class PowerPointHandler
                     runShape = ResolvePlaceholderShape(runSlidePart, phToken);
                     runShapeIdx = 1;
                     paraGroup = runPhMatch.Groups[4];
+                    runReturnPathHead = $"/slide[{runSlideIdx}]/{BuildElementPathSegment("shape", runShape, runShapeIdx)}";
+                }
+                else
+                {
+                    runSlideIdx = int.Parse(runCxnMatch!.Groups[1].Value);
+                    var cxnTok = runCxnMatch.Groups[2].Value;
+                    var slideParts = GetSlideParts().ToList();
+                    if (runSlideIdx < 1 || runSlideIdx > slideParts.Count)
+                        throw new ArgumentException($"Slide {runSlideIdx} not found (total: {slideParts.Count})");
+                    runSlidePart = slideParts[runSlideIdx - 1];
+                    runCxn = ResolveConnectorByToken(runSlidePart, cxnTok);
+                    runShapeIdx = ConnectorPositionalIndex(runSlidePart, runCxn);
+                    paraGroup = runCxnMatch.Groups[3];
+                    runReturnPathHead = $"/slide[{runSlideIdx}]/{BuildElementPathSegment("connector", runCxn, runShapeIdx)}";
                 }
 
-                var runTextBody = runShape.TextBody
-                    ?? throw new InvalidOperationException("Shape has no text body");
+                var runTextBody = runShape != null
+                    ? (runShape.TextBody
+                        ?? throw new InvalidOperationException("Shape has no text body"))
+                    : ConnectorEnsureTextBody(runCxn!);
 
                 Drawing.Paragraph targetPara;
                 int targetParaIdx;
@@ -568,9 +618,23 @@ public partial class PowerPointHandler
                 {
                     // Append to last paragraph
                     var paras = runTextBody.Elements<Drawing.Paragraph>().ToList();
-                    targetPara = paras.LastOrDefault()
-                        ?? throw new InvalidOperationException("Shape has no paragraphs");
-                    targetParaIdx = paras.Count;
+                    if (paras.Count == 0)
+                    {
+                        // R57 bt-4: connector txBody starts empty (no seeded
+                        // <a:p>) so `add run` against a fresh connector path
+                        // would throw before even creating the run. Seed one
+                        // paragraph on demand — mirrors AddShape's auto-empty
+                        // seed pattern at the txBody level.
+                        var seeded = new Drawing.Paragraph();
+                        runTextBody.Append(seeded);
+                        targetPara = seeded;
+                        targetParaIdx = 1;
+                    }
+                    else
+                    {
+                        targetPara = paras[^1];
+                        targetParaIdx = paras.Count;
+                    }
                 }
 
                 var runText = properties.GetValueOrDefault("text", "");
@@ -768,7 +832,7 @@ public partial class PowerPointHandler
 
                 var runCount = targetPara.Elements<Drawing.Run>().Count();
                 GetSlide(runSlidePart).Save();
-                return $"/slide[{runSlideIdx}]/{BuildElementPathSegment("shape", runShape, runShapeIdx)}/paragraph[{targetParaIdx}]/run[{runCount}]";
+                return $"{runReturnPathHead}/paragraph[{targetParaIdx}]/run[{runCount}]";
     }
 
     // CONSISTENCY(escape-sequences): cross-handler convention — \t in paragraph

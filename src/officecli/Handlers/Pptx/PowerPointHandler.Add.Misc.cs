@@ -289,6 +289,31 @@ public partial class PowerPointHandler
                 if (!skipOutline)
                     connector.ShapeProperties.AppendChild(cxnOutline);
 
+                // R57 bt-4: in-line text label on the connector (<p:txBody>
+                // child of <p:cxnSp>). PowerPoint and most flowchart authoring
+                // tools attach a txBody to connectors that show a label
+                // between their endpoints. The OOXML p:cxnSp schema does not
+                // declare txBody, so we attach the typed
+                // Presentation.TextBody as a permissive child — round-trips
+                // through the SDK as an OpenXmlUnknownElement on reload
+                // (NodeBuilder.ResolveConnectorTextBody reparses it back to
+                // the typed form). Accept `text` for the single-paragraph
+                // single-run inline case; multi-paragraph / multi-run
+                // labels arrive via subsequent `add paragraph` / `add run`
+                // ops against the connector path.
+                if (properties.TryGetValue("text", out var cxnText) && !string.IsNullOrEmpty(cxnText))
+                {
+                    XmlTextValidator.ValidateOrThrow(cxnText, "text");
+                    var cxnRunProps = new Drawing.RunProperties { Language = "en-US" };
+                    var cxnPara = new Drawing.Paragraph(new Drawing.Run(cxnRunProps,
+                        MakePreservingText(cxnText)));
+                    var cxnTxBody = new DocumentFormat.OpenXml.Presentation.TextBody(
+                        new Drawing.BodyProperties(),
+                        new Drawing.ListStyle(),
+                        cxnPara);
+                    connector.AppendChild(cxnTxBody);
+                }
+
                 InsertAtPosition(cxnShapeTree, connector, index);
                 if (properties.TryGetValue("zorder", out var cxnZ)
                     || properties.TryGetValue("z-order", out cxnZ)
@@ -297,6 +322,68 @@ public partial class PowerPointHandler
                 GetSlide(cxnSlidePart).Save();
 
                 return $"/slide[{cxnSlideIdx}]/{BuildElementPathSegment("connector", connector, cxnShapeTree.Elements<ConnectionShape>().Count())}";
+    }
+
+    // R57 bt-4: Resolve a connector under a slide by either positional index
+    // ("3") or cNvPr id form ("@id=N" matching BuildElementPathSegment). Used
+    // by AddParagraph / AddRun connector-parent branches.
+    internal static ConnectionShape ResolveConnectorByToken(SlidePart slidePart, string token)
+    {
+        var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree
+            ?? throw new InvalidOperationException("Slide has no shape tree");
+        var connectors = shapeTree.Elements<ConnectionShape>().ToList();
+        var idMatch = Regex.Match(token, @"^@id=(\d+)$");
+        if (idMatch.Success && uint.TryParse(idMatch.Groups[1].Value, out var id))
+        {
+            var match = connectors.FirstOrDefault(c =>
+                c.NonVisualConnectionShapeProperties?.NonVisualDrawingProperties?.Id?.Value == id);
+            if (match == null)
+                throw new ArgumentException($"Connector with id={id} not found");
+            return match;
+        }
+        if (int.TryParse(token, out var posIdx))
+        {
+            if (posIdx < 1 || posIdx > connectors.Count)
+                throw new ArgumentException($"Connector {posIdx} not found (total: {connectors.Count})");
+            return connectors[posIdx - 1];
+        }
+        throw new ArgumentException($"Invalid connector token: '{token}'");
+    }
+
+    internal static int ConnectorPositionalIndex(SlidePart slidePart, ConnectionShape cxn)
+    {
+        var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree
+            ?? throw new InvalidOperationException("Slide has no shape tree");
+        return shapeTree.Elements<ConnectionShape>().ToList().IndexOf(cxn) + 1;
+    }
+
+    // R57 bt-4: locate the connector's <p:txBody> (lazily creating one when
+    // absent) and return it as a strongly-typed Presentation.TextBody whose
+    // edits are committed back to the connector XML. The OpenXml SDK parses
+    // the unknown txBody subtree on cxnSp as a raw OpenXmlUnknownElement; we
+    // detect that form, replace it with a reparsed typed TextBody, and append
+    // a fresh one when the connector carries no label yet. Subsequent
+    // AddParagraph / AddRun edits land on the live typed element so changes
+    // serialize correctly.
+    internal static DocumentFormat.OpenXml.Presentation.TextBody ConnectorEnsureTextBody(ConnectionShape cxn)
+    {
+        var typed = cxn.GetFirstChild<DocumentFormat.OpenXml.Presentation.TextBody>();
+        if (typed != null) return typed;
+
+        var unk = cxn.ChildElements.OfType<OpenXmlUnknownElement>()
+            .FirstOrDefault(e => e.LocalName == "txBody");
+        if (unk != null)
+        {
+            var rebuilt = new DocumentFormat.OpenXml.Presentation.TextBody(unk.OuterXml);
+            cxn.ReplaceChild(rebuilt, unk);
+            return rebuilt;
+        }
+
+        var fresh = new DocumentFormat.OpenXml.Presentation.TextBody(
+            new Drawing.BodyProperties(),
+            new Drawing.ListStyle());
+        cxn.AppendChild(fresh);
+        return fresh;
     }
 
     /// <summary>

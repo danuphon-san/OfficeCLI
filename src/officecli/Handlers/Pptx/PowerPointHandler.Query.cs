@@ -990,7 +990,7 @@ public partial class PowerPointHandler
                     var inner = ngCurrent.Elements<ConnectionShape>().ToList();
                     if (ngLeafIdx < 1 || ngLeafIdx > inner.Count)
                         throw new ArgumentException($"Connector {ngLeafIdx} not found in group {ngPathPrefix} (total: {inner.Count})");
-                    return ConnectorToNode(inner[ngLeafIdx - 1], ngSlideIdx, ngLeafIdx, ngPathPrefix);
+                    return ConnectorToNode(inner[ngLeafIdx - 1], ngSlideIdx, ngLeafIdx, ngPathPrefix, depth, ngSlidePart);
                 }
                 case "table":
                 {
@@ -1220,7 +1220,7 @@ public partial class PowerPointHandler
             var connectors = shapeTreeEl.Elements<ConnectionShape>().ToList();
             if (elementIdx < 1 || elementIdx > connectors.Count)
                 throw new ArgumentException($"Connector {elementIdx} not found (total: {connectors.Count})");
-            return ConnectorToNode(connectors[elementIdx - 1], slideIdx, elementIdx);
+            return ConnectorToNode(connectors[elementIdx - 1], slideIdx, elementIdx, parentPathPrefix: null, depth: depth, part: targetSlidePart);
         }
         else if (elementType == "group")
         {
@@ -2010,7 +2010,7 @@ public partial class PowerPointHandler
                 {
                     if (y.TypeName != "connector") continue;
                     var cxn = (ConnectionShape)y.Element;
-                    var cxnNode = ConnectorToNode(cxn, slideNum, y.IndexInParent, y.ParentPath);
+                    var cxnNode = ConnectorToNode(cxn, slideNum, y.IndexInParent, y.ParentPath, depth: 0, part: null);
                     if (MatchesGenericAttributes(cxnNode, parsed.Attributes))
                         results.Add(cxnNode);
                 }

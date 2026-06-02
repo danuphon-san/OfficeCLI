@@ -324,8 +324,49 @@ public static partial class PptxBatchEmitter
     private static void EmitConnector(PowerPointHandler ppt, DocumentNode cxnNode, string parentSlidePath,
                                       List<BatchItem> items, SlideEmitContext ctx)
     {
-        var full = ppt.Get(cxnNode.Path);
+        // R57 bt-4: depth=3 mirrors EmitShape — surface paragraph→run→inline
+        // runs so the connector-label single-run-collapse heuristic below can
+        // read the run's text + char-prop bag.
+        var full = ppt.Get(cxnNode.Path, depth: 3);
         var props = FilterEmittableProps(full.Format);
+
+        // R57 bt-4: PowerPoint allows a <p:txBody> child on <p:cxnSp> to render
+        // an in-line label between the connector's endpoints. NodeBuilder
+        // surfaces paragraphs / runs under the connector node; replay them
+        // through AddConnector (single-run-collapse: text= inline) + the
+        // generic text body walker (multi-run / multi-paragraph fall-through).
+        var cxnParagraphs = (full.Children ?? new List<DocumentNode>())
+            .Where(c => c.Type == "paragraph" || c.Type == "p").ToList();
+        bool seededFirstParaHasRun = false;
+        if (cxnParagraphs.Count > 0)
+        {
+            var firstPara = cxnParagraphs[0];
+            var firstParaRuns = (firstPara.Children ?? new List<DocumentNode>())
+                .Where(c => c.Type == "run" || c.Type == "r").ToList();
+            // Collapse the simplest case (one paragraph, one run, no other
+            // children) onto an inline `text=` prop so the connector add ships
+            // a complete label without a follow-up paragraph/run op chain.
+            if (cxnParagraphs.Count == 1
+                && firstParaRuns.Count == 1
+                && (firstPara.Children?.Count ?? 0) == 1
+                && !string.IsNullOrEmpty(firstParaRuns[0].Text))
+            {
+                props["text"] = firstParaRuns[0].Text!;
+                seededFirstParaHasRun = true;
+                // Drop the children from `full` so EmitTextBody downstream
+                // doesn't re-emit them — text= already covers the round-trip.
+                full.Children = new List<DocumentNode>();
+            }
+            else if (firstParaRuns.Count >= 1 && !string.IsNullOrEmpty(firstParaRuns[0].Text))
+            {
+                // Multi-run / multi-paragraph case: still seed the first run
+                // via inline `text=` so the connector lands with a paragraph
+                // already present; subsequent runs / paragraphs append via
+                // EmitTextBody's `add` ops.
+                props["text"] = firstParaRuns[0].Text!;
+                seededFirstParaHasRun = true;
+            }
+        }
 
         // R24 — NodeBuilder emits startShape / endShape as raw OOXML shape IDs.
         // Replay reassigns IDs through AcquireShapeId, so the original numeric
@@ -381,6 +422,15 @@ public static partial class PptxBatchEmitter
                 Path = replayPath,
                 Props = deferredArrows,
             });
+        }
+
+        // R57 bt-4: emit follow-up paragraph/run ops for connector labels that
+        // didn't collapse onto inline `text=`. EmitTextBody under a connector
+        // path resolves through AddParagraph / AddRun's connector branches.
+        if ((full.Children?.Count ?? 0) > 0)
+        {
+            var cxnReplayPath = ReplayPathForCxn(cxnNode.Path ?? "", parentSlidePath);
+            EmitTextBody(ppt, full, cxnReplayPath, items, seededFirstParaHasRun: seededFirstParaHasRun, ctx: ctx);
         }
     }
 
