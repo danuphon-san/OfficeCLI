@@ -293,7 +293,7 @@ public partial class PowerPointHandler
     /// Additional properties (set separately):
     ///   advancetime=3000    auto-advance after N ms
     ///   advanceclick=false  disable click-to-advance
-    /// Examples: "fade", "wipe-left", "push-right", "split-horizontal-in", "zoom-out-slow", "none"
+    /// Examples: "fade", "fade-thru-black", "wipe-left", "push-right", "split-horizontal-in", "zoom-out-slow", "none"
     /// </summary>
     private static void ApplyTransition(SlidePart slidePart, string value)
     {
@@ -302,6 +302,43 @@ public partial class PowerPointHandler
         // Step 1: Build the Transition element using SDK (for correct child XML generation)
         var parts = value.Split('-');
         var typeName = parts[0].ToLowerInvariant();
+
+        // CT_OptionalBlackTransition exposes a `thruBlk` boolean attribute that
+        // fades through a black intermediate frame. Only the fade transition
+        // surfaces this through PowerPoint's UI ("Fade Through Black"), and
+        // CT_FadeTransition is the OOXML home of the attribute on real-world
+        // decks. Extract the modifier up front so the remaining suffix tokens
+        // still flow through the standard direction/speed/duration parser
+        // (`fade-thru-black-med` round-trips with speed intact).
+        bool fadeThroughBlack = false;
+        if (typeName == "fade" && parts.Length > 1)
+        {
+            var rebuilt = new List<string> { parts[0] };
+            for (int i = 1; i < parts.Length; i++)
+            {
+                var lowered = parts[i].ToLowerInvariant();
+                // Accept both the two-token form ("thru-black", "through-black")
+                // and the single-token CamelCase/run-on forms ("thruBlack",
+                // "throughblack", "thruBlk"). Keeps the canonical readback
+                // ("fade-thru-black") aligned with the human-readable UI label
+                // while still tolerating the OOXML attribute spelling on input.
+                if ((lowered == "thru" || lowered == "through")
+                    && i + 1 < parts.Length
+                    && parts[i + 1].Equals("black", StringComparison.OrdinalIgnoreCase))
+                {
+                    fadeThroughBlack = true;
+                    i++; // consume "black"
+                    continue;
+                }
+                if (lowered is "thrublack" or "throughblack" or "thrublk")
+                {
+                    fadeThroughBlack = true;
+                    continue;
+                }
+                rebuilt.Add(parts[i]);
+            }
+            parts = rebuilt.ToArray();
+        }
 
         if (value.Equals("none", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("false", StringComparison.OrdinalIgnoreCase))
@@ -418,7 +455,7 @@ public partial class PowerPointHandler
 
         OpenXmlElement? transElem = typeName switch
         {
-            "fade" => new FadeTransition(),
+            "fade" => fadeThroughBlack ? new FadeTransition { ThroughBlack = true } : new FadeTransition(),
             "cut" => new CutTransition(),
             "dissolve" => new DissolveTransition(),
             "circle" => new CircleTransition(),
@@ -2396,6 +2433,14 @@ public partial class PowerPointHandler
             if (dirMatch.Success)
                 typeName = $"{typeName}-{dirMatch.Groups[1].Value.ToLowerInvariant()}";
 
+            // Fade through black: <p:fade thruBlk="1"/> — same readback surface
+            // as the typed FadeTransition.ThroughBlack path so dump → batch
+            // round-trips when this fallback branch handles the slide (e.g.
+            // mc:AlternateContent-wrapped or PublishTrimmed SDK builds).
+            if (typeName == "fade"
+                && System.Text.RegularExpressions.Regex.IsMatch(childAttrs, @"thruBlk=""(1|true)"""))
+                typeName = "fade-thru-black";
+
             node.Format["transition"] = typeName;
         }
 
@@ -2517,6 +2562,13 @@ public partial class PowerPointHandler
     /// </summary>
     private static string? ReadTransitionDirection(OpenXmlElement transElem)
     {
+        // Fade-through-black: surfaced as the `thru-black` modifier so
+        // <p:fade thruBlk="1"/> round-trips as `fade-thru-black` instead of
+        // collapsing to plain `fade` and silently dropping the attribute on
+        // re-emit (the prior bug — dump → batch produced bare <p:fade/>).
+        if (transElem is FadeTransition fade && fade.ThroughBlack?.Value == true)
+            return "thru-black";
+
         // Slide direction transitions: always surface the direction when it was
         // explicitly written, even when it matches the schema default ("left"),
         // so set transition=wipe-left round-trips through Get instead of
