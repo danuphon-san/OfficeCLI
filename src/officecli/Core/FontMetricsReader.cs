@@ -1,6 +1,8 @@
 // Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Collections.Concurrent;
+
 namespace OfficeCli.Core;
 
 /// <summary>
@@ -367,17 +369,21 @@ internal static class FontMetricsReader
 
     // ==================== Cached ratio lookup ====================
 
-    private static readonly Dictionary<string, double> s_ratioCache = new(StringComparer.OrdinalIgnoreCase);
+    // ConcurrentDictionary (not a plain Dictionary): GetRatio runs on parallel
+    // render threads (e.g. concurrent ViewAsHtml calls), and an unsynchronized
+    // Dictionary write corrupts its internal state. GetOrAdd runs the factory
+    // WITHOUT holding a lock, so the font-file I/O below never blocks another
+    // thread (no deadlock); a same-key race just recomputes the identical ratio
+    // and the last writer wins, which is harmless for this pure computation.
+    private static readonly ConcurrentDictionary<string, double> s_ratioCache = new(StringComparer.OrdinalIgnoreCase);
 
     public static double GetRatio(string fontFamily)
     {
-        if (s_ratioCache.TryGetValue(fontFamily, out var cached))
-            return cached;
-
-        var hit = FindFont(fontFamily);
-        var ratio = hit.HasValue ? GetLineHeightRatio(hit.Value.path, hit.Value.idx) : 1.0;
-        s_ratioCache[fontFamily] = ratio;
-        return ratio;
+        return s_ratioCache.GetOrAdd(fontFamily, static family =>
+        {
+            var hit = FindFont(family);
+            return hit.HasValue ? GetLineHeightRatio(hit.Value.path, hit.Value.idx) : 1.0;
+        });
     }
 
     // ==================== Ascent/Descent override ====================
@@ -649,17 +655,16 @@ internal static class FontMetricsReader
         public bool IsEmpty => SuperSizeEm == 0 && SubSizeEm == 0;
     }
 
-    private static readonly Dictionary<string, SuperSubMetrics> s_superSubCache
+    // ConcurrentDictionary for the same reason as s_ratioCache: parallel render
+    // threads share this cache, and GetOrAdd's factory runs lock-free so the
+    // font-file read in ReadSuperSubMetrics cannot deadlock or serialize.
+    private static readonly ConcurrentDictionary<string, SuperSubMetrics> s_superSubCache
         = new(StringComparer.OrdinalIgnoreCase);
 
     public static SuperSubMetrics GetSuperSubMetrics(string fontFamily)
     {
         if (string.IsNullOrEmpty(fontFamily)) return default;
-        if (s_superSubCache.TryGetValue(fontFamily, out var cached)) return cached;
-
-        var m = ReadSuperSubMetrics(fontFamily);
-        s_superSubCache[fontFamily] = m;
-        return m;
+        return s_superSubCache.GetOrAdd(fontFamily, static family => ReadSuperSubMetrics(family));
     }
 
     private static SuperSubMetrics ReadSuperSubMetrics(string fontFamily)
