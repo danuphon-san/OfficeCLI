@@ -1055,5 +1055,29 @@ public partial class WordHandler
     {
         props.AppendChild(elem);
         Core.SchemaOrder.Place(props, elem);
+
+        // The w14 run-property extensions (glow / shadow / … / textFill) are
+        // appended at the very END of rPr, but the SDK particle comparator
+        // treats them as unknown and sorts unknowns to the FRONT — so Place
+        // judges a just-added STANDARD child (e.g. <w:lang>) to come *after* the
+        // w14 block and leaves it stranded behind them, which is schema-invalid
+        // (every CT_RPr child must precede the w14 extension block). If elem is a
+        // standard element that ended up after a w14 sibling, hoist it before the
+        // first w14 child.
+        if (elem.NamespaceUri != W14Ns)
+        {
+            OpenXmlElement? firstW14 = null;
+            bool sawElem = false;
+            foreach (var c in props.ChildElements)
+            {
+                if (ReferenceEquals(c, elem)) { sawElem = true; }
+                else if (c.NamespaceUri == W14Ns) { firstW14 = c; break; }
+            }
+            if (firstW14 != null && !sawElem)
+            {
+                elem.Remove();
+                props.InsertBefore(elem, firstW14);
+            }
+        }
     }
 }
