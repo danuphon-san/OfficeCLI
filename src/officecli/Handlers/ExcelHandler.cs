@@ -345,7 +345,7 @@ public partial class ExcelHandler : IDocumentHandler
         _ = affected;
     }
 
-    public List<ValidationError> Validate() => RawXmlHelper.ValidateDocument(_doc);
+    public List<ValidationError> Validate() => RawXmlHelper.ValidateDocument(_doc, _filePath);
 
     public void Save()
     {

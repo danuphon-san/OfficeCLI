@@ -532,7 +532,7 @@ public partial class WordHandler : IDocumentHandler
         _ = affected;
     }
 
-    public List<ValidationError> Validate() => RawXmlHelper.ValidateDocument(_doc);
+    public List<ValidationError> Validate() => RawXmlHelper.ValidateDocument(_doc, _filePath);
 
     /// <summary>
     /// Run the global id-uniqueness passes once, just before a deferred-batch

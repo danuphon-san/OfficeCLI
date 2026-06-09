@@ -479,7 +479,7 @@ internal static class RawXmlHelper
     /// <summary>
     /// Validate an OpenXmlPackage and return structured errors.
     /// </summary>
-    public static List<ValidationError> ValidateDocument(OpenXmlPackage package)
+    public static List<ValidationError> ValidateDocument(OpenXmlPackage package, string? filePath = null)
     {
         // Validate against a throwaway clone, never the live package.
         // PreflightXmlParts opens each part's stream (GetStream); on the LIVE
@@ -516,6 +516,13 @@ internal static class RawXmlHelper
         // when we've already explained the real cause.
         var orphanRefErrors = DetectOrphanedHeaderFooterReferences(clone);
         errors.AddRange(orphanRefErrors);
+        // Cross-format OPC structural check: [Content_Types].xml that declares
+        // parts only via <Override> and omits <Default Extension="rels"> is
+        // OPC-legal and passes schema validation, but real Word/Excel/PowerPoint
+        // refuse to open it ("file may be corrupt"). Read the manifest from the
+        // original package on disk (the in-memory clone re-serializes a healthy
+        // Content_Types, so the defect is only visible in the source file).
+        errors.AddRange(DetectMissingDefaultRelsContentType(package, filePath));
         var validator = new OpenXmlValidator(DocumentFormat.OpenXml.FileFormatVersions.Microsoft365);
         // BUG-R6-08: documents containing w:numPicBullet can trip an NRE
         // inside SDK validation when one of its child accessors hits a
@@ -648,6 +655,74 @@ internal static class RawXmlHelper
                 Check(hr.Id?.Value ?? "", "Header", hr.Type?.InnerText);
             foreach (var fr in sectPr.Elements<DocumentFormat.OpenXml.Wordprocessing.FooterReference>())
                 Check(fr.Id?.Value ?? "", "Footer", fr.Type?.InnerText);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Cross-format OPC structural check: every OPC package contains relationship
+    /// (<c>.rels</c>) parts, so its <c>[Content_Types].xml</c> manifest must
+    /// declare their content type. The canonical, Word/Office-required way is a
+    /// <c>&lt;Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/&gt;</c>
+    /// entry. A manifest that lists parts only via <c>&lt;Override&gt;</c> and omits
+    /// this <c>&lt;Default&gt;</c> is OPC-legal and passes schema validation, yet
+    /// real Word/Excel/PowerPoint refuse to open the file ("file may be corrupt").
+    /// Flag the missing <c>&lt;Default Extension="rels"&gt;</c> so callers learn the
+    /// true reason an otherwise schema-clean file won't open.
+    ///
+    /// Reads the raw manifest from the original file on disk via
+    /// <see cref="TryReadByZipUri"/> (the in-memory SDK clone re-serializes a
+    /// healthy Content_Types, so the defect is invisible there). Returns an empty
+    /// list when the manifest cannot be read (no file path / not on disk) — never
+    /// a false positive.
+    /// </summary>
+    private static List<ValidationError> DetectMissingDefaultRelsContentType(
+        OpenXmlPackage package, string? filePath)
+    {
+        var result = new List<ValidationError>();
+        if (filePath == null) return result;
+
+        string? manifest;
+        try
+        {
+            manifest = TryReadByZipUri(package, filePath, "[Content_Types].xml");
+        }
+        catch
+        {
+            // Unreadable/empty manifest: leave to the other checks; don't guess.
+            return result;
+        }
+        if (string.IsNullOrEmpty(manifest)) return result;
+
+        System.Xml.Linq.XDocument doc;
+        try
+        {
+            doc = System.Xml.Linq.XDocument.Parse(manifest);
+        }
+        catch
+        {
+            return result;
+        }
+
+        System.Xml.Linq.XNamespace ct =
+            "http://schemas.openxmlformats.org/package/2006/content-types";
+        var hasDefaultRels = doc.Descendants(ct + "Default").Any(d =>
+            string.Equals(
+                (string?)d.Attribute("Extension"), "rels",
+                StringComparison.OrdinalIgnoreCase));
+
+        if (!hasDefaultRels)
+        {
+            result.Add(new ValidationError(
+                "PackageStructure",
+                "[Content_Types].xml is missing a <Default Extension=\"rels\" "
+                + "ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/> "
+                + "declaration. Every OPC package contains .rels relationship parts, "
+                + "and Word/Excel/PowerPoint refuse to open a file whose Content_Types "
+                + "declares parts only via <Override> without this <Default> entry "
+                + "(\"the file may be corrupt\"). Add the <Default Extension=\"rels\" ...> "
+                + "entry to [Content_Types].xml to make the package openable.",
+                null, "/[Content_Types].xml"));
         }
         return result;
     }

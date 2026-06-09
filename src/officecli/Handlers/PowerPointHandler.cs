@@ -1225,7 +1225,7 @@ public partial class PowerPointHandler : IDocumentHandler
         }
     }
 
-    public List<ValidationError> Validate() => RawXmlHelper.ValidateDocument(_doc);
+    public List<ValidationError> Validate() => RawXmlHelper.ValidateDocument(_doc, _filePath);
 
     public void Save()
     {
