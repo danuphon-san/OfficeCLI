@@ -637,6 +637,56 @@ public partial class WordHandler
         return resultPath;
     }
 
+    // ==================== CT_Style schema-order insertion ====================
+    // BUG-DUMP-STYLE-LATENT: canonical CT_Style child order (subset, in
+    // document order):
+    //   name, aliases, basedOn, next, link, autoRedefine, hidden,
+    //   uiPriority, semiHidden, unhideWhenUsed, qFormat, locked,
+    //   personalCompose, personalReply, personal, rPr, pPr, tblPr, trPr, tcPr,
+    //   tblStylePr.
+    // Word and the OOXML validator reject out-of-order children, so a Set that
+    // inserts a latent-style flag onto a style that already has pPr/rPr must
+    // place it ahead of those. AddStyle appends in this order already; Set uses
+    // this helper to splice into the right slot. Maps a child to its rank.
+    private static int StyleChildOrder(OpenXmlElement el) => el switch
+    {
+        StyleName => 0,
+        Aliases => 1,
+        BasedOn => 2,
+        NextParagraphStyle => 3,
+        LinkedStyle => 4,
+        AutoRedefine => 5,
+        StyleHidden => 6,
+        UIPriority => 7,
+        SemiHidden => 8,
+        UnhideWhenUsed => 9,
+        PrimaryStyle => 10,   // <w:qFormat/>
+        Locked => 11,
+        StyleParagraphProperties => 14,
+        StyleRunProperties => 13,
+        _ => 99,
+    };
+
+    // Insert (or replace) a single-occurrence latent-style flag child at the
+    // CT_Style schema-order position. Removes any existing instance first so
+    // re-applying via Set is idempotent and never duplicates the element.
+    private static void InsertStyleChildInOrder(Style style, OpenXmlElement newChild)
+    {
+        var newRank = StyleChildOrder(newChild);
+        // Drop any existing instance of the same element type.
+        var existing = style.ChildElements
+            .Where(c => c.GetType() == newChild.GetType()).ToList();
+        foreach (var e in existing) e.Remove();
+
+        OpenXmlElement? successor = null;
+        foreach (var child in style.ChildElements)
+        {
+            if (StyleChildOrder(child) > newRank) { successor = child; break; }
+        }
+        if (successor != null) successor.InsertBeforeSelf(newChild);
+        else style.AppendChild(newChild);
+    }
+
     private string AddStyle(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         // Create a new style in the styles part
@@ -849,6 +899,37 @@ public partial class WordHandler
         if (properties.TryGetValue("hidden", out var sHidden))
         {
             if (IsTruthy(sHidden)) newStyle.AppendChild(new StyleHidden());
+        }
+        // BUG-DUMP-STYLE-LATENT: latent-style flags. CT_Style child order is
+        // strict — these come AFTER autoRedefine/hidden and BEFORE pPr/rPr in
+        // exactly this sequence: uiPriority, semiHidden, unhideWhenUsed,
+        // qFormat, locked. Out-of-order children are rejected by Word/validator.
+        // Without these, the default Normal style's <w:qFormat/> (and authored
+        // uiPriority/semiHidden) vanished on every dump→batch round-trip.
+        if ((properties.TryGetValue("uiPriority", out var sUiPriority)
+                || properties.TryGetValue("uipriority", out sUiPriority))
+            && !string.IsNullOrEmpty(sUiPriority))
+        {
+            newStyle.AppendChild(new UIPriority { Val = ParseHelpers.SafeParseInt(sUiPriority, "uiPriority") });
+        }
+        if (properties.TryGetValue("semiHidden", out var sSemiHidden)
+            || properties.TryGetValue("semihidden", out sSemiHidden))
+        {
+            if (IsTruthy(sSemiHidden)) newStyle.AppendChild(new SemiHidden());
+        }
+        if (properties.TryGetValue("unhideWhenUsed", out var sUnhide)
+            || properties.TryGetValue("unhidewhenused", out sUnhide))
+        {
+            if (IsTruthy(sUnhide)) newStyle.AppendChild(new UnhideWhenUsed());
+        }
+        if (properties.TryGetValue("qFormat", out var sQFormat)
+            || properties.TryGetValue("qformat", out sQFormat))
+        {
+            if (IsTruthy(sQFormat)) newStyle.AppendChild(new PrimaryStyle());
+        }
+        if (properties.TryGetValue("locked", out var sLocked))
+        {
+            if (IsTruthy(sLocked)) newStyle.AppendChild(new Locked());
         }
 
         // Style paragraph properties
@@ -1133,6 +1214,16 @@ public partial class WordHandler
             // loop would route `hidden` to ApplyRunFormatting (vanish alias)
             // and double-stamp it on rPr.
             "autoRedefine", "autoredefine", "hidden",
+            // BUG-DUMP-STYLE-LATENT: latent-style flags consumed in the explicit
+            // dispatch above (uiPriority/semiHidden/unhideWhenUsed/qFormat/
+            // locked). Without listing them here the per-key fallback loop would
+            // route them to GenericXmlQuery / ApplyRunFormatting and either
+            // double-stamp or surface a misleading UNSUPPORTED warning.
+            "uiPriority", "uipriority",
+            "semiHidden", "semihidden",
+            "unhideWhenUsed", "unhidewhenused",
+            "qFormat", "qformat",
+            "locked",
             // w:default="1" — consumed in the explicit dispatch above (sets
             // Style.Default). List here so the per-key sweep doesn't flag it.
             "default",

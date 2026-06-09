@@ -663,6 +663,11 @@ public partial class WordHandler
             // so these Style-level bare flags were silently lost on dump.
             if (style.GetFirstChild<AutoRedefine>() != null) styleNode.Format["autoRedefine"] = true;
             if (style.GetFirstChild<StyleHidden>() != null) styleNode.Format["hidden"] = true;
+            // BUG-DUMP-STYLE-LATENT: latent-style flags (qFormat / uiPriority /
+            // semiHidden / unhideWhenUsed / locked). Without these the default
+            // Normal style's <w:qFormat/> (and authored uiPriority/semiHidden)
+            // vanished on every dump→batch — even a pristine blank lost it.
+            ReadStyleLatentFlags(style, styleNode);
 
             // Read run properties
             var rPr = style.StyleRunProperties;
@@ -1730,6 +1735,10 @@ public partial class WordHandler
                 styleNode.Format["basedOn"] = style.BasedOn.Val.Value;
                 styleNode.Format["basedOn.path"] = $"/styles/{style.BasedOn.Val.Value}";
             }
+                    // BUG-DUMP-STYLE-LATENT: mirror the single-read builder so
+                    // the query-list stub (slash-in-id dump fallback) also
+                    // carries the latent-style flags.
+                    ReadStyleLatentFlags(style, styleNode);
 
                     // Filter by :contains
                     if (parsed.ContainsText != null && !(styleName.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase) == true))
@@ -3318,6 +3327,22 @@ public partial class WordHandler
         }
 
         return sb.ToString();
+    }
+
+    // BUG-DUMP-STYLE-LATENT: surface a style's latent-style flags so dump→batch
+    // round-trips them. qFormat / semiHidden / unhideWhenUsed / locked are bare
+    // toggle children (presence-based, mirroring autoRedefine/hidden);
+    // uiPriority carries an int. Without these, the default Normal style's
+    // <w:qFormat/> (and authored uiPriority/semiHidden) vanished on every
+    // round-trip — even a pristine blank lost it. Shared by both style-node
+    // builders (single /styles/Id read and the query-list fallback).
+    private static void ReadStyleLatentFlags(Style style, DocumentNode node)
+    {
+        if (style.UIPriority?.Val?.Value is int uip) node.Format["uiPriority"] = uip;
+        if (style.GetFirstChild<SemiHidden>() != null) node.Format["semiHidden"] = true;
+        if (style.GetFirstChild<UnhideWhenUsed>() != null) node.Format["unhideWhenUsed"] = true;
+        if (style.GetFirstChild<PrimaryStyle>() != null) node.Format["qFormat"] = true;
+        if (style.GetFirstChild<Locked>() != null) node.Format["locked"] = true;
     }
 
     /// <summary>

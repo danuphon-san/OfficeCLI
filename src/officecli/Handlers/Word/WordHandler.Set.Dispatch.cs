@@ -1878,6 +1878,38 @@ public partial class WordHandler
                     }
                     break;
                 }
+                // BUG-DUMP-STYLE-LATENT: latent-style flags as direct CT_Style
+                // children (NOT pPr/rPr). Without explicit cases these fell to
+                // the default probe (which only knows pPr/rPr) and surfaced as
+                // unsupported. InsertStyleChildInOrder splices each into its
+                // strict schema slot, ahead of any existing pPr/rPr.
+                case "uipriority":
+                    InsertStyleChildInOrder(style, new UIPriority { Val = ParseHelpers.SafeParseInt(value, "uiPriority") });
+                    break;
+                case "semihidden":
+                    if (IsTruthy(value)) InsertStyleChildInOrder(style, new SemiHidden());
+                    else style.RemoveAllChildren<SemiHidden>();
+                    break;
+                case "unhidewhenused":
+                    if (IsTruthy(value)) InsertStyleChildInOrder(style, new UnhideWhenUsed());
+                    else style.RemoveAllChildren<UnhideWhenUsed>();
+                    break;
+                case "qformat":
+                    if (IsTruthy(value)) InsertStyleChildInOrder(style, new PrimaryStyle());
+                    else style.RemoveAllChildren<PrimaryStyle>();
+                    break;
+                case "locked":
+                    if (IsTruthy(value)) InsertStyleChildInOrder(style, new Locked());
+                    else style.RemoveAllChildren<Locked>();
+                    break;
+                case "autoredefine":
+                    if (IsTruthy(value)) InsertStyleChildInOrder(style, new AutoRedefine());
+                    else style.RemoveAllChildren<AutoRedefine>();
+                    break;
+                case "hidden":
+                    if (IsTruthy(value)) InsertStyleChildInOrder(style, new StyleHidden());
+                    else style.RemoveAllChildren<StyleHidden>();
+                    break;
                 default:
                 {
                     // Long-tail OOXML fallback — symmetric with the Get-side

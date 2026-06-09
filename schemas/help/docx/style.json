@@ -129,6 +129,78 @@
       "readback": "LinkedStyle.Val",
       "enforcement": "report"
     },
+    "qFormat": {
+      "type": "bool",
+      "aliases": [
+        "qformat"
+      ],
+      "description": "mark as a 'primary' (quick) style shown in Word's Styles gallery (<w:qFormat/>). The default Normal style carries this; without round-tripping it the gallery designation is lost.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop qFormat=true"
+      ],
+      "readback": "presence of <w:qFormat/>",
+      "enforcement": "report"
+    },
+    "uiPriority": {
+      "type": "int",
+      "aliases": [
+        "uipriority"
+      ],
+      "description": "sort order of the style in Word's Styles pane / Recommended list (<w:uiPriority>). Lower sorts first.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop uiPriority=9"
+      ],
+      "readback": "UIPriority.Val",
+      "enforcement": "report"
+    },
+    "semiHidden": {
+      "type": "bool",
+      "aliases": [
+        "semihidden"
+      ],
+      "description": "hide the style from the main Styles gallery while keeping it usable (<w:semiHidden/>). Usually paired with unhideWhenUsed.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop semiHidden=true"
+      ],
+      "readback": "presence of <w:semiHidden/>",
+      "enforcement": "report"
+    },
+    "unhideWhenUsed": {
+      "type": "bool",
+      "aliases": [
+        "unhidewhenused"
+      ],
+      "description": "reveal a semiHidden style in the gallery once it is first applied in the document (<w:unhideWhenUsed/>).",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop unhideWhenUsed=true"
+      ],
+      "readback": "presence of <w:unhideWhenUsed/>",
+      "enforcement": "report"
+    },
+    "locked": {
+      "type": "bool",
+      "description": "lock the style against use when document formatting protection is active (<w:locked/>).",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop locked=true"
+      ],
+      "readback": "presence of <w:locked/>",
+      "enforcement": "report"
+    },
     "align": {
       "type": "enum",
       "values": [
