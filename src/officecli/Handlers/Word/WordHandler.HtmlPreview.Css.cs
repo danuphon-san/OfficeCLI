@@ -1609,15 +1609,19 @@ public partial class WordHandler
         // w:position (OOXML §17.3.2.24) — "raised/lowered text by N points"
         // character property, distinct from super/subscript: the glyph is
         // shifted vertically WITHOUT changing the font size. Val is in
-        // HALF-POINTS, positive = raised, negative = lowered. Mirror the
-        // super/subscript approach (position:relative shifts the visual glyph
-        // without expanding the line box) but keep the original font-size.
-        // bottom: positive raises, negative lowers — so val/2 maps directly.
+        // HALF-POINTS, positive = raised, negative = lowered. Unlike
+        // super/subscript (which intentionally keeps the line box fixed),
+        // Word EXPANDS the line height to contain raised/lowered text so it
+        // doesn't overlap adjacent paragraphs. CSS vertical-align with a
+        // length shifts the inline box AND grows the line box to contain it,
+        // matching Word. (position:relative shifts only the glyph and leaves
+        // the line box at base height, causing overlap.) val/2 = pt; positive
+        // raises (positive vertical-align), negative lowers.
         var posVal = rProps.Position?.Val?.Value;
         if (!string.IsNullOrEmpty(posVal) && int.TryParse(posVal, out var posHalfPt) && posHalfPt != 0)
         {
             var offsetPt = posHalfPt / 2.0;
-            parts.Add($"position:relative;bottom:{offsetPt:0.###}pt");
+            parts.Add($"vertical-align:{offsetPt:0.###}pt");
         }
 
         // SmallCaps / AllCaps
