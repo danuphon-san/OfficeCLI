@@ -1900,6 +1900,29 @@ public static partial class WordBatchEmitter
             var spec = ctx.ChartSpecs[ctx.ChartCursor.Index];
             ctx.ChartCursor.Index++;
             var chartProps = BuildChartProps(spec);
+            // BUG-DUMP-R38-1: the chart node's width/height come from
+            // WordHandler.Query formatted as 1-decimal CENTIMETRES (cx/cy /
+            // EmuPerCmF, "F1"). Replaying that cm string through ParseEmu in
+            // AddChart snaps the <wp:extent cx cy> back to a 360000-EMU (0.1cm)
+            // grid — e.g. cx=5486400 (15.24cm) -> 5472000 (15.2cm), a 14400-EMU
+            // width loss that visibly reflows the chart's title/bars/labels.
+            // Emit the EXACT cx/cy straight from <wp:extent> as "<emu>emu" so
+            // ParseEmu reconstructs the original value byte-for-byte. Mirrors
+            // the inline-picture path (R28) above. effectExtent is out of scope:
+            // AddChart accepts no effectExtent prop and these chart anchors
+            // carry all-zero effectExtent.
+            var chartXml = word.GetElementXml(run.Path);
+            if (!string.IsNullOrEmpty(chartXml))
+            {
+                var chartExtMatch = System.Text.RegularExpressions.Regex.Match(
+                    chartXml,
+                    @"wp:extent\b[^>]*\bcx=""(\d+)""[^>]*\bcy=""(\d+)""");
+                if (chartExtMatch.Success)
+                {
+                    chartProps["width"] = chartExtMatch.Groups[1].Value + "emu";
+                    chartProps["height"] = chartExtMatch.Groups[2].Value + "emu";
+                }
+            }
             items.Add(new BatchItem
             {
                 Command = "add",
