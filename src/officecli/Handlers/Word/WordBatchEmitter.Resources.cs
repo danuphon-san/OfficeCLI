@@ -384,6 +384,26 @@ public static partial class WordBatchEmitter
         string xml;
         try { xml = word.Raw("/theme"); }
         catch { xml = ""; }
+        // BUG-DUMP-R37-5: a theme-LESS source (word.Raw returns the literal
+        // "(no theme)" sentinel) must round-trip with NO theme part. The blank
+        // rebuild template auto-stamps a theme1.xml whose minorFont resolves CJK
+        // glyphs differently from Word's app-default theme, tightening CJK line
+        // height and drifting body text upward. Faithfully round-trip the
+        // source's theme-absence: emit a `remove` so the rebuilt doc has no
+        // theme part either (RawSet /theme + action=remove deletes the part and
+        // its document.xml.rels relationship — no dangling ref). Mirrors
+        // EmitDocDefaultsRaw's remove branch for a source lacking docDefaults.
+        if (string.Equals(xml.Trim(), "(no theme)", StringComparison.Ordinal))
+        {
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = "/theme",
+                Xpath = "/a:theme",
+                Action = "remove",
+            });
+            return;
+        }
         xml = CanonicalizeRawXml(xml);
         // A bare <a:theme/> (or <a:theme name="Office Theme"/>) is schema-INVALID:
         // <a:theme> requires a child <a:themeElements> (clrScheme + fontScheme +

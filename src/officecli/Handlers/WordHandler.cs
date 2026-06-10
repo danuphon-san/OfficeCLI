@@ -454,6 +454,24 @@ public partial class WordHandler : IDocumentHandler
             rootElement = mainPart.WordprocessingCommentsPart?.Comments ?? throw new InvalidOperationException("No comments part");
         else if (lowerPath is "/theme")
         {
+            // BUG-DUMP-R37-5: a theme-LESS source must round-trip with NO theme
+            // part — the blank rebuild template auto-stamps theme1.xml, whose
+            // minorFont resolves CJK glyphs to a different fallback than Word's
+            // app-default theme, tightening CJK line height and drifting body
+            // text. EmitThemeRaw emits `action=remove` on /theme when the source
+            // had none; delete the whole ThemePart (DeletePart also drops the
+            // document.xml.rels theme relationship, so no dangling ref remains).
+            // Mirrors EmitDocDefaultsRaw's remove path for a source lacking
+            // docDefaults. Idempotent: a re-dump of the rebuilt (theme-less) doc
+            // sees no theme and emits the same remove.
+            if (string.Equals(action, "remove", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(partPath, "/theme", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(xpath, "/a:theme", StringComparison.OrdinalIgnoreCase))
+            {
+                if (mainPart.ThemePart != null)
+                    mainPart.DeletePart(mainPart.ThemePart);
+                return;
+            }
             // CONSISTENCY(raw-set-create-missing-part): blank docs created via
             // BlankDocCreator have no ThemePart; dump→batch round-trip from a
             // real Word/python-docx file emits raw-set /theme replace which
