@@ -1568,6 +1568,15 @@ public static partial class WordBatchEmitter
         {
             fieldProps["noSeparator"] = "true";
         }
+        // BUG-DUMP-R37-4: forward the source field's lock bit so AddField
+        // recreates it locked (begin fldChar @w:fldLock). Carried on the synth
+        // Format by CollapseFieldChains (complex) / Navigation (fldSimple).
+        if (fieldProps != null
+            && run.Format.TryGetValue("fldLock", out var flkv) && flkv != null
+            && string.Equals(flkv.ToString(), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            fieldProps["fldLock"] = "true";
+        }
         // BUG-DUMP-R24-2: source field had a separator but an empty cached
         // result. Pass an explicit empty `text` so AddField emits an empty
         // result run instead of fabricating a «name» placeholder.

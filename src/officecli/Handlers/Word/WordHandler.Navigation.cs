@@ -2244,6 +2244,12 @@ public partial class WordHandler
                 // closes the loop the Round 3 dirty fix opened.
                 if (fldCharEl.Dirty?.Value == true)
                     node.Format["dirty"] = true;
+                // BUG-DUMP-R37-4: <w:fldChar w:fldLock="true"> — the field is
+                // locked against F9/recalc. Lives on the begin fldChar; surface
+                // it so CollapseFieldChains can carry it onto the synthetic
+                // field node and AddField re-applies it on replay.
+                if (fldCharEl.FieldLock?.Value == true)
+                    node.Format["fldLock"] = true;
                 if (fldCharEl.FormFieldData != null)
                 {
                     node.Format["hasFormFieldData"] = true;
@@ -4635,6 +4641,10 @@ public partial class WordHandler
                 // surfaces the dirty + cached combination separately.
                 var fldDirty = fld.Dirty?.Value == true;
                 if (fldDirty) fldNode.Format["dirty"] = true;
+                // BUG-DUMP-R37-4: <w:fldSimple w:fldLock="true"> — locked
+                // against F9/recalc. Surface it so the round-trip re-applies
+                // it on the rebuilt (complex) field's begin fldChar.
+                if (fld.FieldLock?.Value == true) fldNode.Format["fldLock"] = true;
                 fldNode.Format["evaluated"] = displayText.Length > 0;
                 node.Children.Add(fldNode);
                 fldSimpleIdx++;
@@ -4660,6 +4670,8 @@ public partial class WordHandler
                         fldNode.Format["fieldType"] = instrUpper.ToLowerInvariant();
                     var fldDirtyHl = fld.Dirty?.Value == true;
                     if (fldDirtyHl) fldNode.Format["dirty"] = true;
+                    // BUG-DUMP-R37-4: see sibling fldSimple branch above.
+                    if (fld.FieldLock?.Value == true) fldNode.Format["fldLock"] = true;
                     fldNode.Format["evaluated"] = displayText.Length > 0;
                     node.Children.Add(fldNode);
                     perHlFldIdx++;

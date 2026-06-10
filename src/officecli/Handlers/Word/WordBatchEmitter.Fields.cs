@@ -412,6 +412,13 @@ public static partial class WordBatchEmitter
             {
                 synth.Format["_resultFmt." + fieldVertAlign] = true;
             }
+            // BUG-DUMP-R37-4: propagate the begin fldChar's fldLock so the
+            // rebuilt field is recreated locked (AddField re-applies it to the
+            // begin fldChar). Surfaced by Navigation onto the begin fieldChar
+            // node's Format.
+            if (c.Format.TryGetValue("fldLock", out var flk) && flk != null
+                && string.Equals(flk.ToString(), "true", StringComparison.OrdinalIgnoreCase))
+                synth.Format["fldLock"] = "true";
             // BUG-DUMP18-02: propagate hyperlink-scope hint from the begin
             // run so the field-emit branch can target the hyperlink parent
             // on replay.

@@ -1119,7 +1119,18 @@ public partial class WordHandler
         bool fieldNoSeparator = (properties.TryGetValue("noseparator", out var nsv)
                               || properties.TryGetValue("noSeparator", out nsv))
                               && IsTruthy(nsv);
-        var fieldRunBegin = new Run(new FieldChar { FieldCharType = FieldCharValues.Begin });
+        // BUG-DUMP-R37-4: <w:fldChar w:fldLock="true"> prevents Word from
+        // updating the field on F9/recalc. The lock lives on the BEGIN fldChar
+        // (CT_FldChar @w:fldLock); losing it makes a locked field updatable
+        // again. The dump emits `fldLock=true` on the synthetic field node;
+        // apply it to the begin fldChar (a separator-less complex field still
+        // has a begin run, so this covers both shapes).
+        bool fieldLocked = (properties.TryGetValue("fldLock", out var flv)
+                         || properties.TryGetValue("fldlock", out flv))
+                         && IsTruthy(flv);
+        var fieldCharBegin = new FieldChar { FieldCharType = FieldCharValues.Begin };
+        if (fieldLocked) fieldCharBegin.FieldLock = true;
+        var fieldRunBegin = new Run(fieldCharBegin);
         var fieldRunInstr = new Run(new FieldCode(fieldInstr) { Space = SpaceProcessingModeValues.Preserve });
         var fieldRunSep = fieldNoSeparator
             ? null
@@ -1450,6 +1461,10 @@ public partial class WordHandler
         // WrapFieldRunsInRevision, not the per-type instruction builders.
         "revision.type", "revision.author", "revision.date", "revision.id",
         "noseparator", "noSeparator",
+        // BUG-DUMP-R37-4: <w:fldChar w:fldLock="true"> — F9/recalc lock applies
+        // to ANY field type. Consumed by the begin-fldChar builder, not a
+        // per-type instruction builder, so it is universal.
+        "fldlock", "fldLock",
     };
 
     // Render today's DateTime for the result-run placeholder of a DATE/TIME

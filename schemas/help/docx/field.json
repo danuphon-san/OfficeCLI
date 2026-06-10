@@ -113,6 +113,15 @@
       "examples": ["--prop vertAlign=superscript", "--prop superscript=true"],
       "readback": "n/a (applied to the field's run properties)",
       "enforcement": "report"
+    },
+    "fldLock": {
+      "type": "bool",
+      "description": "field lock (w:fldChar/w:fldSimple @w:fldLock) — when true, Word does NOT update the field on F9 / Update Field / recalc; the cached result stays put. Universal across field types (rides on the begin fldChar). On a dump→batch round-trip a fldSimple lock is preserved through the conversion to a complex field.",
+      "aliases": ["fldlock"],
+      "add": true, "set": false, "get": true,
+      "examples": ["--prop fldLock=true"],
+      "readback": "true (only emitted when the field is locked)",
+      "enforcement": "report"
     }
   }
 }
