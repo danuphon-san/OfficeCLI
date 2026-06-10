@@ -187,11 +187,49 @@ public partial class WordHandler
                     System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0.0)
                 .ToList();
             double colTotal = twipsByCol.Sum();
+            int colCount = twipsByCol.Count;
+
+            // Per-cell pct widths (w:tcW type="pct") are authoritative over the
+            // tblGrid (Word stores equal gridCols even when cells carry explicit
+            // percentages, e.g. a 30/40/30 table whose only width-bearing row is
+            // not row 1). Scan every row and, per column, capture the first
+            // explicit pct/dxa tcW so the colgroup reflects the real proportions
+            // instead of equal gridCol distribution. dxa wins over pct only if
+            // pct is absent for that column. Columns with no explicit cell width
+            // fall back to the gridCol-derived value below.
+            var pctByCol = new double?[colCount];
+            foreach (var r in table.Elements<TableRow>())
+            {
+                int ci = 0;
+                foreach (var tc in r.Elements<TableCell>())
+                {
+                    if (ci >= colCount) break;
+                    var tcW = tc.TableCellProperties?.TableCellWidth;
+                    if (tcW?.Type?.InnerText == "pct" && pctByCol[ci] == null
+                        && int.TryParse(tcW.Width?.Value, out var pctVal) && pctVal > 0)
+                    {
+                        // pct units are 1/50th of a percent (5000 = 100%)
+                        pctByCol[ci] = pctVal / 50.0;
+                    }
+                    // gridSpan-aware advance so column index stays aligned
+                    var span = tc.TableCellProperties?.GridSpan?.Val?.Value ?? 1;
+                    ci += span < 1 ? 1 : span;
+                }
+            }
+
             int colIdx = 0;
             foreach (var col in tblGrid.Elements<GridColumn>())
             {
                 var w = col.Width?.Value;
-                if (w != null && isFixedLayout)
+                if (colIdx < colCount && pctByCol[colIdx] is double explicitPct)
+                {
+                    // Explicit per-cell percentage drives the column width; this
+                    // overrides both fixed-pt and gridCol-proportion paths so the
+                    // browser renders the authored 30/40/30-style proportions.
+                    var twipsAttr = w != null ? $" data-col-twips=\"{w}\"" : "";
+                    sb.Append($"<col style=\"width:{explicitPct:0.##}%\"{twipsAttr}>");
+                }
+                else if (w != null && isFixedLayout)
                 {
                     var pt = double.Parse(w, System.Globalization.CultureInfo.InvariantCulture) / 20.0; // twips to pt
                     sb.Append($"<col style=\"width:{pt:0.##}pt\" data-col-twips=\"{w}\">");
