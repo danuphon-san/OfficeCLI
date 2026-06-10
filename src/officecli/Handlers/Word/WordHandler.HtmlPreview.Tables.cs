@@ -327,6 +327,14 @@ public partial class WordHandler
 
                 sb.Append($"<{tag}{attrs}>");
 
+                // Diagonal cell borders (w:tl2br / w:tr2bl) — emit the SVG
+                // overlay as the first child of the cell so it paints over the
+                // content. The <td> already carries position:relative (added in
+                // GetTableCellInlineCss when a diagonal is present). Mirrors the
+                // Excel/PPTX cell-diag idiom.
+                var diagSvg = TryBuildCellDiagonalSvg(cell);
+                if (diagSvg != null) sb.Append(diagSvg);
+
                 // hRule="exact": browsers ignore max-height on <td> (table layout
                 // forces cells to contain their content), so wrap content in an
                 // inner div with fixed height + overflow:hidden. The wrap also

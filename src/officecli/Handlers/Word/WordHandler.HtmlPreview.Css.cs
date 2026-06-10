@@ -2045,6 +2045,16 @@ public partial class WordHandler
             if (!IsBorderNone(tcBorders.BottomBorder)) { parts.RemoveAll(p => p.StartsWith("border-bottom:")); RenderBorderCss(parts, tcBorders.BottomBorder, "border-bottom"); }
             if (!IsBorderNone(tcBorders.LeftBorder)) { parts.RemoveAll(p => p.StartsWith("border-left:")); RenderBorderCss(parts, tcBorders.LeftBorder, "border-left"); }
             if (!IsBorderNone(tcBorders.RightBorder)) { parts.RemoveAll(p => p.StartsWith("border-right:")); RenderBorderCss(parts, tcBorders.RightBorder, "border-right"); }
+
+            // Diagonal cell borders (w:tl2br / w:tr2bl) render as an absolutely
+            // positioned SVG overlay inside the <td> (HTML has no diagonal
+            // border). The <td> must become position:relative for the overlay
+            // to anchor — added only when a diagonal is actually present to
+            // minimize CSS regression surface. Mirrors the Excel/PPTX cell-diag
+            // idiom. The SVG itself is prepended to the cell content in
+            // RenderTableHtml via TryBuildCellDiagonalSvg.
+            if (TryBuildCellDiagonalSvg(cell) != null)
+                parts.Add("position:relative");
         }
 
         // Cell width
@@ -2117,6 +2127,74 @@ public partial class WordHandler
     }
 
     // ==================== CSS Helpers ====================
+
+    /// <summary>
+    /// If the cell carries a diagonal border (w:tl2br / w:tr2bl with a non-nil
+    /// style), return an absolutely-positioned inline SVG that draws the
+    /// diagonal line(s) inside the TD — HTML has no native diagonal border.
+    /// tl2br = top-left (0,0) → bottom-right (100%,100%);
+    /// tr2bl = top-right (100%,0) → bottom-left (0,100%). Both may be present.
+    /// Honors w:sz (eighths-of-pt → pt) and w:color. Returns null when the cell
+    /// has no diagonal. Mirrors the Excel/PPTX cell-diag overlay idiom. The TD
+    /// must be position:relative for the overlay to anchor (set in
+    /// GetTableCellInlineCss).
+    /// </summary>
+    private string? TryBuildCellDiagonalSvg(TableCell? cell)
+    {
+        var tcBorders = cell?.TableCellProperties?.TableCellBorders;
+        if (tcBorders == null) return null;
+
+        var tlBr = tcBorders.TopLeftToBottomRightCellBorder;
+        var trBl = tcBorders.TopRightToBottomLeftCellBorder;
+        bool hasTlBr = !IsBorderNone(tlBr);
+        bool hasTrBl = !IsBorderNone(trBl);
+        if (!hasTlBr && !hasTrBl) return null;
+
+        var lines = new StringBuilder();
+        if (hasTlBr)
+        {
+            var (color, widthPt) = ResolveDiagonalLine(tlBr!);
+            lines.Append($"<line x1=\"0\" y1=\"0\" x2=\"100%\" y2=\"100%\" stroke=\"{color}\" stroke-width=\"{widthPt:0.##}\"/>");
+        }
+        if (hasTrBl)
+        {
+            var (color, widthPt) = ResolveDiagonalLine(trBl!);
+            lines.Append($"<line x1=\"0\" y1=\"100%\" x2=\"100%\" y2=\"0\" stroke=\"{color}\" stroke-width=\"{widthPt:0.##}\"/>");
+        }
+
+        return $"<svg class=\"cell-diag\" width=\"100%\" height=\"100%\" style=\"position:absolute;inset:0;pointer-events:none;overflow:visible\" preserveAspectRatio=\"none\">{lines}</svg>";
+    }
+
+    /// <summary>Resolve a diagonal cell border's color + stroke width (pt) the
+    /// same way RenderBorderCss resolves box borders (sz eighths-of-pt, hex or
+    /// themeColor with tint/shade, fallback black).</summary>
+    private (string color, double widthPt) ResolveDiagonalLine(OpenXmlElement border)
+    {
+        var sz = border.GetAttributes().FirstOrDefault(a => a.LocalName == "sz").Value;
+        var color = border.GetAttributes().FirstOrDefault(a => a.LocalName == "color").Value;
+        var widthPt = sz != null && int.TryParse(sz, out var s) ? Math.Max(0.5, s / 8.0) : 1.0;
+
+        string cssColor;
+        if (color != null && !color.Equals("auto", StringComparison.OrdinalIgnoreCase) && IsHexColor(color))
+        {
+            cssColor = $"#{color}";
+        }
+        else
+        {
+            var themeColor = border.GetAttributes().FirstOrDefault(a => a.LocalName == "themeColor").Value;
+            if (themeColor != null && GetThemeColors().TryGetValue(themeColor, out var tcHex))
+            {
+                var tint = border.GetAttributes().FirstOrDefault(a => a.LocalName == "themeTint").Value;
+                var shade = border.GetAttributes().FirstOrDefault(a => a.LocalName == "themeShade").Value;
+                cssColor = ApplyTintShade(tcHex, tint, shade);
+            }
+            else
+            {
+                cssColor = "#000";
+            }
+        }
+        return (cssColor, widthPt);
+    }
 
     private void RenderBorderCss(List<string> parts, OpenXmlElement? border, string cssProp)
     {
