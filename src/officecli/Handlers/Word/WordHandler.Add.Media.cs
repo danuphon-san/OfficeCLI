@@ -368,6 +368,25 @@ public partial class WordHandler
             : "";
 
         var imgDocPropId = NextDocPropId();
+        // BUG-DUMP-R29-1: parse the optional effectExtent prop ("l,t,r,b", 4
+        // EMU ints — may be negative) captured by the dump emit. Word's inline
+        // layout height depends on this margin; without it the rebuild
+        // collapses to 0/0/0/0 and downstream content drifts up. Absent →
+        // null → CreateImageRun/CreateAnchorImageRun default to 0/0/0/0
+        // (interactive Add back-compat). Tolerant of whitespace/bad input.
+        (long L, long T, long R, long B)? effectExtent = null;
+        if (properties.TryGetValue("effectExtent", out var eeStr) && !string.IsNullOrWhiteSpace(eeStr))
+        {
+            var eeParts = eeStr.Split(',');
+            if (eeParts.Length == 4
+                && long.TryParse(eeParts[0].Trim(), out var eeL)
+                && long.TryParse(eeParts[1].Trim(), out var eeT)
+                && long.TryParse(eeParts[2].Trim(), out var eeR)
+                && long.TryParse(eeParts[3].Trim(), out var eeB))
+            {
+                effectExtent = (eeL, eeT, eeR, eeB);
+            }
+        }
         Run imgRun;
         // BUG-R4-BT3: a non-"none" `wrap` value implies floating placement —
         // wrap only has meaning on a <wp:anchor>. Previously, callers passing
@@ -414,11 +433,11 @@ public partial class WordHandler
             // their distinct stacking order instead of collapsing to 1U.
             uint relHeight = properties.TryGetValue("relativeHeight", out var relHeightStr)
                 && uint.TryParse(relHeightStr, out var rh) ? rh : 1U;
-            imgRun = CreateAnchorImageRun(relId, cxEmu, cyEmu, altText, wrapType, hPos, vPos, hRel, vRel, behind, imgDocPropId, pictureName, hAlign, vAlign, relHeight);
+            imgRun = CreateAnchorImageRun(relId, cxEmu, cyEmu, altText, wrapType, hPos, vPos, hRel, vRel, behind, imgDocPropId, pictureName, hAlign, vAlign, relHeight, effectExtent);
         }
         else
         {
-            imgRun = CreateImageRun(relId, cxEmu, cyEmu, altText, imgDocPropId, pictureName);
+            imgRun = CreateImageRun(relId, cxEmu, cyEmu, altText, imgDocPropId, pictureName, effectExtent);
         }
 
         // Wire the asvg:svgBlip extension after the run is built. Walking

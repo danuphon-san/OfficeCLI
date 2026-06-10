@@ -1749,6 +1749,27 @@ public static partial class WordBatchEmitter
                     picProps["width"] = extMatch.Groups[1].Value + "emu";
                     picProps["height"] = extMatch.Groups[2].Value + "emu";
                 }
+                // BUG-DUMP-R29-1: Word's inline-picture layout HEIGHT depends on
+                // <wp:effectExtent l/t/r/b> (the drawing's visual overflow/effect
+                // margin) even when <wp:extent> is identical. The rebuild
+                // hardcoded effectExtent to 0/0/0/0 (CreateImageRun /
+                // CreateAnchorImageRun), so each affected drawing rendered
+                // ~35px shorter, pulling downstream content up across page
+                // boundaries — a visible document-wide vertical drift. Capture
+                // the source l/t/r/b as a single "l,t,r,b" EMU prop so AddPicture
+                // can restore it byte-for-byte. Absent (or all-zero) effectExtent
+                // is the interactive default and needs no prop.
+                var eeMatch = System.Text.RegularExpressions.Regex.Match(
+                    picXml,
+                    @"wp:effectExtent\b[^>]*\bl=""(-?\d+)""[^>]*\bt=""(-?\d+)""[^>]*\br=""(-?\d+)""[^>]*\bb=""(-?\d+)""");
+                if (eeMatch.Success
+                    && !(eeMatch.Groups[1].Value == "0" && eeMatch.Groups[2].Value == "0"
+                         && eeMatch.Groups[3].Value == "0" && eeMatch.Groups[4].Value == "0"))
+                {
+                    picProps["effectExtent"] =
+                        $"{eeMatch.Groups[1].Value},{eeMatch.Groups[2].Value}," +
+                        $"{eeMatch.Groups[3].Value},{eeMatch.Groups[4].Value}";
+                }
             }
             items.Add(new BatchItem
             {

@@ -49,12 +49,19 @@ public partial class WordHandler
         return maxId + 1;
     }
 
-    private static Run CreateImageRun(string relationshipId, long cx, long cy, string altText, uint docPropId, string? pictureName = null)
+    private static Run CreateImageRun(string relationshipId, long cx, long cy, string altText, uint docPropId, string? pictureName = null,
+        (long L, long T, long R, long B)? effectExtent = null)
     {
         var docPrName = pictureName ?? altText;
+        // BUG-DUMP-R29-1: honour the captured <wp:effectExtent> (drawing's
+        // visual overflow/effect margin) instead of the old hardcoded
+        // 0/0/0/0, which flattened every inline drawing's effect margin and
+        // shifted its layout height. Defaults to 0/0/0/0 when the caller has
+        // no effectExtent prop (interactive Add).
+        var ee = effectExtent ?? (0, 0, 0, 0);
         var inline = new DW.Inline(
             new DW.Extent { Cx = cx, Cy = cy },
-            new DW.EffectExtent { LeftEdge = 0, TopEdge = 0, RightEdge = 0, BottomEdge = 0 },
+            new DW.EffectExtent { LeftEdge = ee.L, TopEdge = ee.T, RightEdge = ee.R, BottomEdge = ee.B },
             new DW.DocProperties { Id = docPropId, Name = docPrName, Description = altText },
             new DW.NonVisualGraphicFrameDrawingProperties(
                 new A.GraphicFrameLocks { NoChangeAspect = true }
@@ -95,7 +102,8 @@ public partial class WordHandler
         string wrap, long hPos, long vPos,
         DW.HorizontalRelativePositionValues hRel, DW.VerticalRelativePositionValues vRel,
         bool behindText, uint docPropId, string? pictureName = null,
-        string? hAlign = null, string? vAlign = null, uint relativeHeight = 1U)
+        string? hAlign = null, string? vAlign = null, uint relativeHeight = 1U,
+        (long L, long T, long R, long B)? effectExtent = null)
     {
         OpenXmlElement wrapElement = wrap.ToLowerInvariant() switch
         {
@@ -140,7 +148,15 @@ public partial class WordHandler
             new DW.HorizontalPosition(hChild) { RelativeFrom = hRel },
             new DW.VerticalPosition(vChild) { RelativeFrom = vRel },
             new DW.Extent { Cx = cx, Cy = cy },
-            new DW.EffectExtent { LeftEdge = 0, TopEdge = 0, RightEdge = 0, BottomEdge = 0 },
+            // BUG-DUMP-R29-1: see CreateImageRun — restore the anchored
+            // drawing's captured effectExtent instead of hardcoding zeros.
+            new DW.EffectExtent
+            {
+                LeftEdge = (effectExtent ?? (0, 0, 0, 0)).L,
+                TopEdge = (effectExtent ?? (0, 0, 0, 0)).T,
+                RightEdge = (effectExtent ?? (0, 0, 0, 0)).R,
+                BottomEdge = (effectExtent ?? (0, 0, 0, 0)).B
+            },
             wrapElement,
             new DW.DocProperties { Id = anchorDocPropId, Name = docPrName, Description = altText },
             new DW.NonVisualGraphicFrameDrawingProperties(

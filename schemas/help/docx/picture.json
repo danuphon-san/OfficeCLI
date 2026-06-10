@@ -120,6 +120,17 @@
       "readback": "raw uint z-order on floating pictures (e.g. `251664384`)",
       "enforcement": "report"
     },
+    "effectExtent": {
+      "type": "string",
+      "add": true,
+      "set": false,
+      "get": false,
+      "description": "drawing visual overflow/effect margin (wp:effectExtent) as 4 comma-separated EMU ints: left,top,right,bottom. Word's inline-picture layout height depends on this even when wp:extent is identical, so the dump→batch round-trip restores it byte-for-byte. Round-trip prop — emitted by `dump --format batch`, not by `get`; absent value defaults to 0,0,0,0 (the interactive Add default).",
+      "examples": [
+        "--prop effectExtent=0,0,9525,9525"
+      ],
+      "enforcement": "report"
+    },
     "hPosition": {
       "type": "length",
       "add": true,
