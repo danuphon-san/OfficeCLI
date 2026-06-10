@@ -2733,7 +2733,18 @@ public partial class ExcelHandler
         if (fmtCode.Contains(';'))
         {
             var sections = fmtCode.Split(';');
-            if (value < 0 && sections.Length >= 2) section = sections[1];
+
+            // Explicit [condition] sections (e.g. [Blue][>50]0;[Red]0). Excel
+            // evaluates the bracketed conditions IN DECLARATION ORDER; the first
+            // satisfied section applies, and the last unconditioned section is the
+            // "else". This overrides the positional positive/negative/zero rule
+            // and must match ApplyNumberFormat's section selection so the color
+            // comes from the same section as the formatted value.
+            if (System.Text.RegularExpressions.Regex.IsMatch(fmtCode, @"\[[<>=]=?\d"))
+            {
+                section = SelectConditionalSection(value, sections);
+            }
+            else if (value < 0 && sections.Length >= 2) section = sections[1];
             else if (value == 0 && sections.Length >= 3) section = sections[2];
             else section = sections[0];
         }
@@ -2743,6 +2754,45 @@ public partial class ExcelHandler
         }
 
         return ParseSectionColor(section);
+    }
+
+    /// <summary>
+    /// Pick the section that applies to <paramref name="value"/> when at least one
+    /// section carries a bracketed [comparison] condition. Conditions are evaluated
+    /// left-to-right; the first satisfied condition wins, an unconditioned section
+    /// is the "else". Falls back to the first section when nothing matches. Mirrors
+    /// the selection in ApplyNumberFormat.
+    /// </summary>
+    private static string SelectConditionalSection(double value, string[] sections)
+    {
+        foreach (var raw in sections)
+        {
+            var sec = raw.Trim();
+            var condMatch = System.Text.RegularExpressions.Regex.Match(
+                sec, @"\[(<=|>=|<>|<|>|=)(-?\d+\.?\d*)\]");
+            if (condMatch.Success)
+            {
+                var op = condMatch.Groups[1].Value;
+                var cmp = double.Parse(condMatch.Groups[2].Value,
+                    System.Globalization.CultureInfo.InvariantCulture);
+                bool satisfied = op switch
+                {
+                    "<" => value < cmp,
+                    "<=" => value <= cmp,
+                    ">" => value > cmp,
+                    ">=" => value >= cmp,
+                    "=" => value == cmp,
+                    "<>" => value != cmp,
+                    _ => false
+                };
+                if (satisfied) return sec;
+            }
+            else
+            {
+                return sec; // unconditioned else
+            }
+        }
+        return sections[0].Trim();
     }
 
     /// <summary>
