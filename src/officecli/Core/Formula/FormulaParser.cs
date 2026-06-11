@@ -453,6 +453,28 @@ internal static class FormulaParser
                 return $"\\{cmd}{{{baseText}}}";
             }
 
+            case "func":
+            {
+                // BUG-DUMP-R48-1: m:func named-function (sin/cos/log) — was concatenated to "sinx"
+                var fName = element.ChildElements.FirstOrDefault(e => e.LocalName == "fName");
+                var fArg = element.ChildElements.FirstOrDefault(e => e.LocalName == "e");
+                var nameText = fName != null ? JoinChildren(fName).Trim() : "";
+                var argLatex = fArg != null ? ArgToLatex(fArg) : "";
+                string nameLatex;
+                // CONSISTENCY(formula-funcname): known upright functions emit the
+                // dedicated command (\sin etc.); the parser round-trips these to an
+                // m:nor run. \operatorname{...} (ParseCommand case "operatorname")
+                // covers arbitrary names, so unknown names stay readable too.
+                if (_uprightFunctionNames.Contains(nameText))
+                    nameLatex = "\\" + nameText;
+                else if (!string.IsNullOrEmpty(nameText))
+                    nameLatex = $"\\operatorname{{{nameText}}}";
+                else
+                    // No usable name — fall back to the default concat behavior.
+                    return JoinChildren(element);
+                return string.IsNullOrEmpty(argLatex) ? nameLatex : nameLatex + " " + argLatex;
+            }
+
             case "m": // matrix
             {
                 var matrixRows = element.ChildElements.Where(e => e.LocalName == "mr").ToList();
