@@ -454,8 +454,54 @@ internal static class RawXmlHelper
         var prefixedNs = string.Join(" ", nsDict.Select(kv => $"xmlns:{kv.Key}=\"{kv.Value}\""));
         var defaultNsDecl = !string.IsNullOrEmpty(defaultNs) ? $"xmlns=\"{defaultNs}\"" : "";
         var wrappedXml = $"<_root {defaultNsDecl} {prefixedNs}>{xml}</_root>";
-        var parsed = XDocument.Parse(wrappedXml);
+        // BUG-DUMP-R35-2: parse whitespace-PRESERVED, then normalize. The
+        // default loader (LoadOptions.None) silently drops every
+        // whitespace-only text node — including content whitespace in leaf
+        // text elements (`<w:t> </w:t>` without xml:space="preserve"), so a
+        // space-only run injected via raw-set vanished from the document
+        // ("John Smith" → "JohnSmith"). NormalizeFragmentWhitespace keeps the
+        // old behavior for inter-element formatting whitespace (pretty-printed
+        // --xml input stays clean) but retains leaf-content whitespace and
+        // stamps xml:space="preserve" on its parent so the downstream SDK
+        // parse (OpenXmlElement.InnerXml, which also discards insignificant
+        // whitespace) and every later reopen keep it too.
+        var parsed = XDocument.Parse(wrappedXml, LoadOptions.PreserveWhitespace);
+        NormalizeFragmentWhitespace(parsed.Root!);
         return parsed.Root!.Elements().ToList();
+    }
+
+    // BUG-DUMP-R35-2: post-pass over a whitespace-preserved fragment parse.
+    // A whitespace-only text node is FORMATTING when its parent also has
+    // element children (or is the synthetic _root wrapper) — remove it,
+    // matching the previous LoadOptions.None behavior. It is CONTENT when its
+    // parent is a leaf element (`<w:t> </w:t>`, `<a:t> </a:t>`) — keep it and
+    // stamp xml:space="preserve" (XML-core attribute, namespace-independent)
+    // so both XLinq re-serialization and the OpenXml SDK reader treat it as
+    // significant.
+    private static void NormalizeFragmentWhitespace(XElement root)
+    {
+        var wsTextNodes = root.DescendantNodes().OfType<XText>()
+            .Where(t => t.Value.Length > 0 && string.IsNullOrWhiteSpace(t.Value))
+            .ToList();
+        foreach (var t in wsTextNodes)
+        {
+            var parent = t.Parent;
+            if (parent == null) continue;
+            // xml:space="preserve" already in scope → significant by decree.
+            var inScope = parent.AncestorsAndSelf()
+                .Select(a => (string?)a.Attribute(XNamespace.Xml + "space"))
+                .FirstOrDefault(v => v != null);
+            if (string.Equals(inScope, "preserve", StringComparison.Ordinal))
+                continue;
+            if (parent == root || parent.Elements().Any())
+            {
+                t.Remove(); // formatting whitespace between elements
+            }
+            else
+            {
+                parent.SetAttributeValue(XNamespace.Xml + "space", "preserve");
+            }
+        }
     }
 
     private static XmlNamespaceManager BuildNamespaceManager(XDocument xDoc)
