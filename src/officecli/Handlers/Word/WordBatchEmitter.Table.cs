@@ -337,6 +337,16 @@ public static partial class WordBatchEmitter
             tableAddProps = tableProps;
         }
 
+        // Pin the column direction explicitly. AddTable's interactive
+        // convenience auto-stamps <w:bidiVisual/> when the surrounding
+        // context is RTL and no direction was passed — correct for a user
+        // typing `add table` into an Arabic document, wrong for replay: a
+        // source table WITHOUT bidiVisual (LTR columns inside an RTL doc)
+        // came back visually mirrored. The reader emits direction=rtl only
+        // when bidiVisual is present, so absence here means LTR — say so.
+        if (!tableAddProps.ContainsKey("direction"))
+            tableAddProps["direction"] = "ltr";
+
         items.Add(new BatchItem
         {
             Command = "add",
