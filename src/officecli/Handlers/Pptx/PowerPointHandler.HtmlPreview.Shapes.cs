@@ -1094,9 +1094,8 @@ public partial class PowerPointHandler
         // Dash pattern
         var dashAttr = "";
         var prstDash = outline?.GetFirstChild<Drawing.PresetDash>();
-        if (prstDash?.Val?.HasValue == true)
+        if (prstDash?.Val?.HasValue == true && prstDash.Val.InnerText is { } dashVal)
         {
-            var dashVal = prstDash.Val.InnerText;
             // CONSISTENCY(dash-presets): reuse the canonical CSS-tables dash converter
             // so the shapes/connector path emits the SAME dasharray as table borders.
             // Previously this path had its own divergent switch where lgDash == dash

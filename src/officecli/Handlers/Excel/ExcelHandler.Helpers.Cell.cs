@@ -539,7 +539,7 @@ public partial class ExcelHandler
             var targetCol = cols[colOffset];
 
             // Read the header cell's current display text.
-            var sheetData = worksheet.Worksheet.GetFirstChild<SheetData>();
+            var sheetData = worksheet.Worksheet?.GetFirstChild<SheetData>();
             var hdrRow = sheetData?.Elements<Row>()
                 .FirstOrDefault(r => r.RowIndex?.Value == startRow);
             var headerCell = hdrRow?.Elements<Cell>()
