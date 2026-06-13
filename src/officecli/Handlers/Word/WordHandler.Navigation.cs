@@ -4112,6 +4112,20 @@ public partial class WordHandler
                 node.Format["markRPr.font.ea"] = rf.EastAsia.Value;
             if (rf?.ComplexScript?.Value != null)
                 node.Format["markRPr.font.cs"] = rf.ComplexScript.Value;
+            // Theme-bound slots (<w:rFonts w:asciiTheme="minorHAnsi" …/>):
+            // the ¶ mark's font sets the line height of an empty spacer
+            // paragraph, so dropping a theme binding (mark renders in the
+            // docDefaults face instead of the theme face) changes each
+            // spacer's height slightly and the accumulated drift reflows
+            // page breaks across the whole document.
+            if (rf?.AsciiTheme?.HasValue == true)
+                node.Format["markRPr.font.asciiTheme"] = rf.AsciiTheme.InnerText;
+            if (rf?.HighAnsiTheme?.HasValue == true)
+                node.Format["markRPr.font.hAnsiTheme"] = rf.HighAnsiTheme.InnerText;
+            if (rf?.EastAsiaTheme?.HasValue == true)
+                node.Format["markRPr.font.eaTheme"] = rf.EastAsiaTheme.InnerText;
+            if (rf?.ComplexScriptTheme?.HasValue == true)
+                node.Format["markRPr.font.csTheme"] = rf.ComplexScriptTheme.InnerText;
             // ¶-mark font hint + character spacing (mirror the run-level
             // font.hint / charSpacing readback so the paragraph mark's glyph
             // properties round-trip too — see RunToNode).

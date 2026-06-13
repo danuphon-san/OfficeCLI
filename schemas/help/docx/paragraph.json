@@ -1260,6 +1260,38 @@
       "readback": "eastAsia / cs / default",
       "enforcement": "report"
     },
+    "markRPr.font.asciiTheme": {
+      "type": "string",
+      "description": "paragraph-mark run theme font binding (w:pPr/w:rPr/w:rFonts/@w:asciiTheme), e.g. minorHAnsi.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "enforcement": "report"
+    },
+    "markRPr.font.hAnsiTheme": {
+      "type": "string",
+      "description": "paragraph-mark run theme font binding (w:pPr/w:rPr/w:rFonts/@w:hAnsiTheme), e.g. minorHAnsi.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "enforcement": "report"
+    },
+    "markRPr.font.eaTheme": {
+      "type": "string",
+      "description": "paragraph-mark run theme font binding (w:pPr/w:rPr/w:rFonts/@w:eastAsiaTheme), e.g. minorHAnsi.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "enforcement": "report"
+    },
+    "markRPr.font.csTheme": {
+      "type": "string",
+      "description": "paragraph-mark run theme font binding (w:pPr/w:rPr/w:rFonts/@w:csTheme), e.g. minorHAnsi.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "enforcement": "report"
+    },
     "markRPr.charSpacing": {
       "type": "length",
       "description": "paragraph-mark run character spacing (w:pPr/w:rPr/w:spacing @val, twips internally).",
