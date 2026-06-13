@@ -2061,6 +2061,30 @@ public partial class WordHandler
             sdtBlock.AppendChild(sdtContent);
 
             InsertAtIndexOrAppend(parent, sdtBlock, index);
+            // BUG-DUMP-R47-8: a table cell whose sole source content is a block
+            // SDT — <w:tc><w:tcPr/><w:sdt>…</w:sdt></w:tc>, common in form
+            // templates that wrap each cell value in a content control — has NO
+            // standalone paragraph. AddTable seeds every cell with one empty
+            // paragraph; appending the SDT leaves that seed as a spurious leading
+            // empty paragraph, so the cell renders two lines (a blank line above
+            // the value) and the row grows — drifting table and page layout. When
+            // the SDT becomes the cell's content, drop a leading empty auto-seed
+            // paragraph so the rebuilt cell matches the source's SDT-only shape.
+            // Gated tightly: only an empty paragraph (no runs / no text) that sits
+            // before the just-added SDT is removed; a cell that already had real
+            // paragraph content keeps it.
+            if (parent is TableCell sdtCell)
+            {
+                var seed = sdtCell.Elements<Paragraph>().FirstOrDefault();
+                if (seed != null
+                    && sdtCell.Elements().TakeWhile(e => e != sdtBlock).Contains(seed)
+                    && !seed.Elements<Run>().Any()
+                    && !seed.Elements<Hyperlink>().Any()
+                    && !seed.Descendants<Text>().Any())
+                {
+                    seed.Remove();
+                }
+            }
             // Root-aware path: the sdtBlock may have been inserted into a
             // header/footer; count SdtBlock siblings under its actual parent
             // and prefix with the correct root segment.
