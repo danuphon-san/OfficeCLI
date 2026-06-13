@@ -404,7 +404,7 @@ public static partial class WordBatchEmitter
             if (TryEmitPermRun(run, paraTargetPath, items)) continue;
             if (TryEmitPgNumRun(word, run, parentPath, items, ctx)) continue;
             if (TryEmitDateFieldRun(word, run, parentPath, items, ctx)) continue;
-            if (TryEmitHyphenRun(word, run, parentPath, items, ctx)) continue;
+            if (TryEmitHyphenRun(word, run, parentPath, paraTargetPath, items, ctx, hlBaseline)) continue;
             if (TryEmitRubyRun(run, parentPath, paraTargetPath, items, ctx)) continue;
             if (TryEmitBdoRun(run, parentPath, items, ctx)) continue;
             if (TryEmitDirRun(run, parentPath, items, ctx)) continue;
@@ -1431,7 +1431,7 @@ public static partial class WordBatchEmitter
         return true;
     }
 
-    private static bool TryEmitHyphenRun(WordHandler word, DocumentNode run, string parentPath, List<BatchItem> items, BodyEmitContext? ctx)
+    private static bool TryEmitHyphenRun(WordHandler word, DocumentNode run, string parentPath, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx, int hlBaseline = 0)
     {
         // BUG-DUMP-R40-3: a run containing <w:noBreakHyphen/> (non-breaking
         // hyphen) or <w:softHyphen/> (discretionary hyphen) — siblings of <w:t>
@@ -1444,14 +1444,25 @@ public static partial class WordBatchEmitter
         // RunToNode stamps Format["_hasHyphen"].
         if (!run.Format.ContainsKey("_hasHyphen")) return false;
         // Only the /body host has the addressable last() paragraph anchor the
-        // raw-set targets; a header/footer/cell-hosted hyphen needs a different
-        // anchor (backlog, same conservatism as the pgNum/dateField fallback).
+        // raw-set targets; a header/footer/cell-hosted hyphen has no body anchor.
+        // BUG-DUMP-R47-2: the prior code warned and returned true WITHOUT emitting
+        // anything — silently dropping the run's ENTIRE <w:t> text (the warning's
+        // "the run's text is preserved" was a lie). A footer run
+        // "<w:softHyphen/><w:t>336, 42 USC § …contact </w:t>" vanished whole,
+        // shortening the footer enough to shift body pagination. Emit the run
+        // through the standard text path instead: run.Text carries GetRunText's
+        // hyphen glyph (U+00AD soft / U+2011 non-breaking), so the visible text —
+        // and a literal-glyph hyphen — survive; only the structural element
+        // degrades to that glyph. paraTargetPath is the correct header/footer/cell
+        // paragraph anchor (EmitPlainOrHyperlinkRun also reproduces the sibling
+        // runs' noMarkRPrInherit/font props and any hyperlink wrapper).
         if (parentPath != "/body")
         {
+            EmitPlainOrHyperlinkRun(run, paraTargetPath, items, ctx, hlBaseline);
             ctx?.Warnings.Add(new DocxUnsupportedWarning(
                 Element: "hyphen",
                 Path: run.Path,
-                Reason: "non-breaking/soft hyphen (w:noBreakHyphen/w:softHyphen) inside a header/footer/table cell could not be serialized for round-trip; the structural hyphen is lost from the replayed document (the run's text is preserved)"));
+                Reason: "structural soft/non-breaking hyphen (w:softHyphen/w:noBreakHyphen) inside a header/footer/table cell degrades to a literal hyphen glyph in the run text on round-trip; the run's visible text is preserved"));
             return true;
         }
         var rawXml = word.RawElementXml(run.Path);

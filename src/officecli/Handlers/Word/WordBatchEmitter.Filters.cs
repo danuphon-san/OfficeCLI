@@ -43,6 +43,12 @@ public static partial class WordBatchEmitter
         // TryEmitDateFieldRun only (routes the run to a verbatim raw-set
         // passthrough); never replayed as an Add/Set property.
         "_hasDateField",
+        // BUG-DUMP-R47-2: internal flag set by RunToNode when a run contains
+        // <w:softHyphen/>/<w:noBreakHyphen/>. Consumed by TryEmitHyphenRun; the
+        // /body path raw-sets the verbatim run, the header/footer/cell path now
+        // emits the run text (glyph-degraded) through EmitPlainOrHyperlinkRun —
+        // which runs FilterEmittableProps, so the marker must be stripped here.
+        "_hasHyphen",
         // BUG-DUMP-R35-2: internal flag set by Navigation on a run synthesized
         // from inside a <w:smartTag>/<w:customXml> wrapper. Consumed by
         // EmitPlainOrHyperlinkRun (drives the deterministic "wrapper flattened"
