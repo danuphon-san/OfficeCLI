@@ -519,6 +519,24 @@ public partial class PowerPointHandler
                         if (string.IsNullOrEmpty(cellText) && hasAnyRun)
                             cellNode.Format["hasEmptyRun"] = true;
 
+                        // Verbatim cell text-body passthrough. The batch emitter
+                        // rebuilds a cell via `set tc[K] text=...`, which routes
+                        // through AppendLineWithTabs and produces BARE paragraphs:
+                        // every per-paragraph <a:pPr> child (lnSpc/spcBef/spcAft/
+                        // buClrTx/buFontTx/buSzTx/buNone/tabLst/defRPr), the
+                        // <a:lstStyle>, and every run's rich <a:rPr> (ea/latin/
+                        // solidFill) are dropped — the cell text reflows off the
+                        // source's intended metrics. Capture the whole <a:txBody>
+                        // OuterXml so the cell Set path can re-inject it verbatim,
+                        // superseding the text= rebuild. Only when the cell carries
+                        // real paragraph content (skip the trivial empty-cell seed,
+                        // which round-trips fine through the existing text= path).
+                        // CONSISTENCY(cell-txbody-raw-passthrough): mirrors the shape
+                        // lstStyleRaw / effectsRaw verbatim passthrough.
+                        if (cell.TextBody != null
+                            && CellTextBodyHasRichContent(cell.TextBody))
+                            cellNode.Format["txBodyRaw"] = cell.TextBody.OuterXml;
+
                         // Cell fill (blip, gradient, or solid)
                         var tcPr = cell.TableCellProperties ?? cell.GetFirstChild<Drawing.TableCellProperties>();
                         var cellBlipFill = tcPr?.GetFirstChild<Drawing.BlipFill>();

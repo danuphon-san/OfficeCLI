@@ -2297,6 +2297,32 @@ public partial class PowerPointHandler
         {
             switch (key.ToLowerInvariant())
             {
+                case "txbodyraw":
+                {
+                    // Verbatim cell text-body re-injection. The plain text=
+                    // rebuild produces bare paragraphs (no pPr/lstStyle/rPr
+                    // richness); the captured OuterXml restores the source's
+                    // full <a:txBody> — bodyPr, lstStyle, every paragraph's
+                    // pPr (lnSpc/spc/bu*/tabLst/defRPr) and every run's rPr
+                    // (ea/latin/solidFill) and endParaRPr. Replace the cell's
+                    // entire text body with the parsed verbatim element.
+                    // The emitter suppresses the companion text= op when this
+                    // key is present, so there is no clobber ordering hazard.
+                    if (string.IsNullOrWhiteSpace(value)) break;
+                    var parsedBody = new Drawing.TextBody(value);
+                    var existingBody = cell.TextBody;
+                    if (existingBody != null)
+                    {
+                        existingBody.InsertAfterSelf(parsedBody);
+                        existingBody.Remove();
+                    }
+                    else
+                    {
+                        // txBody is the first child of a:tc (before a:tcPr).
+                        cell.PrependChild(parsedBody);
+                    }
+                    break;
+                }
                 case "text":
                 {
                     XmlTextValidator.ValidateOrThrow(value, "text");

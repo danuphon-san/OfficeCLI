@@ -15,6 +15,33 @@ public partial class PowerPointHandler
 {
 
     /// <summary>
+    /// True when a table cell's text body carries formatting that the plain
+    /// `set tc text=...` rebuild path would drop: a non-empty &lt;a:lstStyle&gt;,
+    /// any paragraph &lt;a:pPr&gt; with children (lnSpc/spc/bu*/tabLst/defRPr),
+    /// any run &lt;a:rPr&gt; with children (ea/latin/solidFill), or an
+    /// &lt;a:endParaRPr&gt; with children. Used to gate the verbatim txBodyRaw
+    /// capture so trivial empty-seed cells keep round-tripping through text=.
+    /// </summary>
+    private static bool CellTextBodyHasRichContent(Drawing.TextBody body)
+    {
+        var lstStyle = body.GetFirstChild<Drawing.ListStyle>();
+        if (lstStyle != null && lstStyle.HasChildren) return true;
+        foreach (var para in body.Elements<Drawing.Paragraph>())
+        {
+            var pPr = para.ParagraphProperties;
+            if (pPr != null && pPr.HasChildren) return true;
+            foreach (var run in para.Elements<Drawing.Run>())
+            {
+                var rPr = run.RunProperties;
+                if (rPr != null && rPr.HasChildren) return true;
+            }
+            var endRPr = para.GetFirstChild<Drawing.EndParagraphRunProperties>();
+            if (endRPr != null && endRPr.HasChildren) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Read table cell border properties.
     /// Maps a:lnL/lnR/lnT/lnB → border.left, border.right, border.top, border.bottom in Format.
     /// </summary>

@@ -75,8 +75,43 @@ public static partial class PptxBatchEmitter
                 // text=""` — which routes through AppendLineWithTabs and
                 // produces the canonical empty run.
                 bool forceEmptyText = cellProps.Remove("hasEmptyRun");
+
+                // Border verbatim-raw wins over the granular border.<edge>.*
+                // keys. The Set path reuses an existing border element when the
+                // granular op runs, so a stray granular op after the raw inject
+                // appends an out-of-order child (e.g. solidFill into an lnB that
+                // already carries noFill) and breaks the schema. Drop every
+                // granular border key for an edge whose .raw counterpart is
+                // present; the raw element is authoritative and self-contained.
+                foreach (var edge in new[] { "left", "right", "top", "bottom", "tl2br", "tr2bl" })
+                {
+                    if (!cellProps.ContainsKey($"border.{edge}.raw")) continue;
+                    foreach (var suffix in new[] { "", ".width", ".color", ".dash", ".compound" })
+                        cellProps.Remove($"border.{edge}{suffix}");
+                }
+                // The summary keys (border / border.all) fan out to all four
+                // straight edges; if any of those edges has a raw, the summary
+                // would re-touch it. Drop the summaries whenever any edge raw is
+                // present — raws fully describe their edges.
+                if (new[] { "left", "right", "top", "bottom" }
+                        .Any(e => cellProps.ContainsKey($"border.{e}.raw")))
+                {
+                    cellProps.Remove("border");
+                    cellProps.Remove("border.all");
+                }
+
+                // When the cell carries a verbatim txBodyRaw (rich pPr/lstStyle/
+                // rPr the text= rebuild would drop), the raw passthrough already
+                // contains the full text — emitting a companion text= op would
+                // rebuild bare paragraphs and clobber it. Suppress text= in that
+                // case and let the txBodyRaw set op restore the body verbatim.
+                bool hasRawBody = cellProps.ContainsKey("txBodyRaw");
                 // Set tc accepts text= for replacing the cell's text body.
-                if (!string.IsNullOrEmpty(cell.Text))
+                if (hasRawBody)
+                {
+                    // raw body is authoritative; no text= companion.
+                }
+                else if (!string.IsNullOrEmpty(cell.Text))
                     cellProps["text"] = cell.Text!;
                 else if (forceEmptyText)
                     cellProps["text"] = "";
