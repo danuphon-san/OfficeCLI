@@ -45,6 +45,10 @@ public static partial class WordBatchEmitter
         // subscript) uniformly to every rebuilt field run, so these are
         // losslessly expressible through the typed `add field` path.
         "superscript", "subscript",
+        // BUG-DUMP-R52-FIELDITALIC: AddField now applies these too, so a
+        // single-run italic/underlined/struck field result round-trips through
+        // the typed path instead of silently shedding them.
+        "italic", "underline", "strike",
     };
 
     private static bool FieldRunHasFormatting(DocumentNode run)

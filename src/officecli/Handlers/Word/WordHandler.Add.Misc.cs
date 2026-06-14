@@ -1304,6 +1304,8 @@ public partial class WordHandler
         RunProperties? fieldRProps = null;
         if (properties.TryGetValue("font", out var fFont) || properties.TryGetValue("size", out _) ||
             properties.TryGetValue("bold", out _) || properties.TryGetValue("color", out _) ||
+            properties.TryGetValue("italic", out _) || properties.TryGetValue("underline", out _) ||
+            properties.TryGetValue("strike", out _) ||
             hasFieldFontSlot || fieldVertAlign != null)
         {
             fieldRProps = new RunProperties();
@@ -1317,6 +1319,18 @@ public partial class WordHandler
             }
             if (properties.TryGetValue("bold", out var fb) && IsTruthy(fb))
                 fieldRProps.AppendChild(new Bold());
+            // BUG-DUMP-R52-FIELDITALIC: italic/underline/strike on a field's
+            // cached result (a title-page <SUBJECT> placeholder rendered italic)
+            // were dropped — they were absent from AddField's vocabulary AND from
+            // FieldAddSupportedFormatKeys, so the typed `add field` path shed them
+            // and (being single-run) the field never took the rich raw-set route.
+            // ApplyRunFormatting writes each in CT_RPr schema order.
+            if (properties.TryGetValue("italic", out var fi) && IsTruthy(fi))
+                ApplyRunFormatting(fieldRProps, "italic", fi);
+            if (properties.TryGetValue("underline", out var fu) && !string.IsNullOrEmpty(fu))
+                ApplyRunFormatting(fieldRProps, "underline", fu);
+            if (properties.TryGetValue("strike", out var fst) && IsTruthy(fst))
+                ApplyRunFormatting(fieldRProps, "strike", fst);
             // BUG-R13B(BUG1): route field color through ApplyRunFormatting (same
             // resolver the run/hyperlink Add paths use) so scheme/theme color
             // names (accent1, dark1, …) write the w:themeColor attribute instead
