@@ -1636,6 +1636,34 @@ public partial class PowerPointHandler : IDocumentHandler
         return (nmp.GetIdOfPart(themePart), themePart.Theme.OuterXml);
     }
 
+    /// <summary>
+    /// 1-based ordinal of a slide's layout within the same
+    /// SlideMasterParts→SlideLayoutParts enumeration that
+    /// <see cref="ResolveSlideLayout"/> indexes (its numeric-index match path)
+    /// and that the raw-set <c>/slideLayout[N]</c> emission walks. Returns null
+    /// when the slide or its layout can't be resolved.
+    ///
+    /// The batch dump emits this as the slide's `layout=` so replay re-binds to
+    /// the EXACT source layout. Emitting the layout NAME is ambiguous: decks
+    /// routinely carry several layouts sharing a name (e.g. two "标题幻灯片"
+    /// under different masters), and ResolveSlideLayout's name match returns the
+    /// first — which can chain the slide to the wrong master and silently drop a
+    /// master-level background. The ordinal is unambiguous and stable because
+    /// replay reconstructs masters/layouts in this same enumeration order.
+    /// </summary>
+    internal int? GetSlideLayoutOrdinal(int slideNum)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return null;
+        var slideParts = GetSlideParts().ToList();
+        if (slideNum < 1 || slideNum > slideParts.Count) return null;
+        var layoutPart = slideParts[slideNum - 1].SlideLayoutPart;
+        if (layoutPart == null) return null;
+        var allLayouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        var idx = allLayouts.IndexOf(layoutPart);
+        return idx >= 0 ? idx + 1 : null;
+    }
+
     /// <summary>Same as <see cref="GetMasterImageParts"/> for slideLayouts.</summary>
     internal IReadOnlyList<MasterImageInfo> GetLayoutImageParts(int layoutIdx)
     {

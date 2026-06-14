@@ -433,6 +433,20 @@ public static partial class PptxBatchEmitter
         var fullSlide = ppt.Get(slidePath);
         var slideProps = FilterEmittableProps(fullSlide.Format);
 
+        // Re-bind to the EXACT source layout by ordinal rather than the
+        // human-facing layout name. Layout names collide (decks routinely carry
+        // several "标题幻灯片"/"Title Slide" layouts under different masters);
+        // ResolveSlideLayout's name match would pick the first, chaining the
+        // slide to the wrong master and dropping any master-level background.
+        // The ordinal resolves through ResolveSlideLayout's numeric-index path,
+        // which walks the same master→layout enumeration replay reconstructs.
+        if (slideProps.ContainsKey("layout"))
+        {
+            var layoutOrdinal = ppt.GetSlideLayoutOrdinal(slideNum);
+            if (layoutOrdinal.HasValue)
+                slideProps["layout"] = layoutOrdinal.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         if (exotic.HasExoticTransition)
         {
             // Strip transition-related props so the add slide doesn't write a
