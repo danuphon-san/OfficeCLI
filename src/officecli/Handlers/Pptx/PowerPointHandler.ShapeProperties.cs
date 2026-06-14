@@ -2309,7 +2309,11 @@ public partial class PowerPointHandler
                     // The emitter suppresses the companion text= op when this
                     // key is present, so there is no clobber ordering hazard.
                     if (string.IsNullOrWhiteSpace(value)) break;
-                    var parsedBody = new Drawing.TextBody(value);
+                    // Re-inject xml:space="preserve" on whitespace-bearing <a:t>
+                    // before the SDK reparses, or the parser drops space-only /
+                    // edge-whitespace run text (PowerPoint authors these spacer
+                    // runs without the attribute). See PreserveWhitespaceInRawText.
+                    var parsedBody = new Drawing.TextBody(PreserveWhitespaceInRawText(value));
                     var existingBody = cell.TextBody;
                     if (existingBody != null)
                     {

@@ -38,6 +38,42 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// Pre-process a verbatim &lt;a:txBody&gt;/run-XML string so the SDK parser
+    /// keeps whitespace-only and edge-whitespace &lt;a:t&gt; content. When raw
+    /// drawingml XML is reparsed via <c>new Drawing.TextBody(xml)</c>, the SDK
+    /// reader treats a text node with no <c>xml:space="preserve"</c> as
+    /// collapsible whitespace and drops it — a source run that displayed
+    /// spaces (visual spacers, indentation) comes back as an empty
+    /// self-closing &lt;a:t/&gt;, silently deleting the text. PowerPoint authors
+    /// such whitespace runs WITHOUT the attribute, so the captured OuterXml
+    /// lacks it; inject it on the parse boundary for every &lt;a:t&gt; whose
+    /// content begins or ends with whitespace. Mirrors MakePreservingText's
+    /// per-run rule applied across a raw body string. Non-whitespace runs and
+    /// &lt;a:t&gt; that already carry xml:space are left untouched.
+    /// </summary>
+    internal static string PreserveWhitespaceInRawText(string xml)
+    {
+        if (string.IsNullOrEmpty(xml) || xml.IndexOf("<a:t", StringComparison.Ordinal) < 0)
+            return xml;
+        // Match an <a:t ...>content</a:t> element (any attribute prefix; the
+        // package writer never realiases the `a` prefix on drawingml runs).
+        return Regex.Replace(xml,
+            @"<a:t(?<attrs>(?:\s[^>]*?)?)>(?<content>.*?)</a:t>",
+            m =>
+            {
+                var attrs = m.Groups["attrs"].Value;
+                var content = m.Groups["content"].Value;
+                // Already preserved, or no edge whitespace to protect — leave verbatim.
+                if (content.Length == 0
+                    || attrs.Contains("xml:space", StringComparison.Ordinal)
+                    || (!char.IsWhiteSpace(content[0]) && !char.IsWhiteSpace(content[^1])))
+                    return m.Value;
+                return $"<a:t{attrs} xml:space=\"preserve\">{content}</a:t>";
+            },
+            RegexOptions.Singleline);
+    }
+
+    /// <summary>
     /// Read a table cell's text content, joining multi-paragraph text with "\n".
     /// CONSISTENCY(cell-text-readback): cell.TextBody?.InnerText concatenates
     /// paragraphs without separators, which silently loses line-break structure
