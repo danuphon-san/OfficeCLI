@@ -2108,6 +2108,38 @@ public partial class PowerPointHandler : IDocumentHandler
     }
 
     /// <summary>
+    /// Picture-bullet images on a slide: each <c>&lt;a:buBlip&gt;&lt;a:blip
+    /// r:embed="rIdN"&gt;</c> in the slide's shape tree (paragraph-level
+    /// <c>&lt;a:pPr&gt;</c> or shape-level <c>&lt;a:lstStyle&gt;</c>) uses an
+    /// image as the bullet glyph. The bullet markup round-trips verbatim via
+    /// bulletRaw / lstStyleRaw, keeping <c>r:embed="rIdN"</c>, but the slide
+    /// ImagePart it points at is NOT re-created by the typed `add picture` path
+    /// (which only covers <p:pic> shapes), so the rebuilt slide carried a
+    /// dangling relationship and the bullet glyph was lost. Surfaced as
+    /// (rId, content-type, base64) — the SOURCE rId pinned — so the emitter can
+    /// re-create each via an add-part image row BEFORE the shapes are added
+    /// (claiming the source rId before AddPicture auto-assigns around it).
+    /// Mirrors the slide background-image carrier (<see cref="GetSlideImagePartsByRelId"/>).
+    /// </summary>
+    internal IReadOnlyList<MasterImageInfo> GetSlideBulletImageParts(int slideIdx)
+    {
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count) return Array.Empty<MasterImageInfo>();
+        var spTree = GetSlide(slideParts[slideIdx - 1]).CommonSlideData?.ShapeTree;
+        if (spTree == null) return Array.Empty<MasterImageInfo>();
+        const string aNs = "http://schemas.openxmlformats.org/drawingml/2006/main";
+        var rids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var el in spTree.Descendants())
+        {
+            if (el.LocalName != "buBlip" || el.NamespaceUri != aNs) continue;
+            var blip = el.GetFirstChild<DocumentFormat.OpenXml.Drawing.Blip>();
+            var embed = blip?.Embed?.Value;
+            if (!string.IsNullOrEmpty(embed)) rids.Add(embed);
+        }
+        return rids.Count == 0 ? Array.Empty<MasterImageInfo>() : GetSlideImagePartsByRelId(slideIdx, rids);
+    }
+
+    /// <summary>
     /// Enumerate <c>r:embed</c> / <c>r:link</c> attribute values referenced by
     /// the source notesSlide XML. Used by PptxBatchEmitter.EmitNotes to detect
     /// rIds that the typed Add/Set surface cannot reproduce (anything not an

@@ -507,6 +507,31 @@ public static partial class PptxBatchEmitter
             Props = slideProps.Count > 0 ? slideProps : null,
         });
 
+        // Picture-bullet image carrier. A paragraph/shape whose bullet glyph is an
+        // image (<a:buBlip><a:blip r:embed="rIdN">) round-trips its bullet markup
+        // verbatim via bulletRaw/lstStyleRaw, but the slide ImagePart it points at
+        // is not re-created by `add picture` — the rebuilt slide dangled and the
+        // bullet glyph was lost. Emit add-part image with the SOURCE rId pinned
+        // HERE, right after `add slide` and BEFORE any shape/picture is added, so
+        // the bullet image claims its source rId before AddPicture auto-assigns
+        // (which would otherwise grab it and force a collision). Mirrors the
+        // slide background-image carrier.
+        foreach (var bi in ppt.GetSlideBulletImageParts(slideNum))
+        {
+            items.Add(new BatchItem
+            {
+                Command = "add-part",
+                Parent = slidePath,
+                Type = "image",
+                Props = new Dictionary<string, string>
+                {
+                    ["rid"] = bi.RelId,
+                    ["content-type"] = bi.ContentType,
+                    ["data"] = bi.Base64Data,
+                },
+            });
+        }
+
         // ShapeToNode tags placeholder shapes as plain "textbox"/"title". To
         // emit them as `add placeholder` we cross-reference each shape's cNvPr
         // id with the slide's Query("placeholder") result.
