@@ -256,6 +256,18 @@ public partial class WordHandler
                 || properties.TryGetValue("strikethrough", out ntStrike)
                 || properties.TryGetValue("font.strikethrough", out ntStrike))
                 ApplyRunFormatting(EnsureNoTextMarkRPr(), "strike", ntStrike);
+            // BUG-DUMP-R62-MARKVANISH: <w:vanish/> on a no-text paragraph's ¶-mark
+            // hides the pilcrow, collapsing the empty paragraph to zero height —
+            // the mechanism Word uses for the hidden spacer between two adjacent
+            // tables (keeps them flush). The run path applies vanish (~line 851)
+            // but a no-text paragraph never enters it, so the hidden spacer
+            // re-rendered visible on replay and opened a gap that reflowed the
+            // document. Route it onto the ¶ mark rPr like the other toggles.
+            // (vanish is the only character toggle that changes the empty
+            // paragraph's height, so it's the one that matters here.)
+            if (properties.TryGetValue("vanish", out var ntVanish)
+                || properties.TryGetValue("hidden", out ntVanish))
+                ApplyRunFormatting(EnsureNoTextMarkRPr(), "vanish", ntVanish);
             if (properties.TryGetValue("font", out var ntFont)
                 || properties.TryGetValue("font.name", out ntFont))
                 ApplyRunFormatting(EnsureNoTextMarkRPr(), "font", ntFont);

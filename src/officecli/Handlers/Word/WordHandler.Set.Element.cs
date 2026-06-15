@@ -2327,6 +2327,20 @@ public partial class WordHandler
                     else
                         trPr.RemoveAllChildren<Hidden>();
                     break;
+                // BUG-DUMP-R62-ROWCELLSPACING: row-level <w:tblCellSpacing> (the
+                // inter-cell gap for this row, CT_TrPr). Mirrors the table-level
+                // cellspacing case (SetElementTable) but on the row's trPr; same
+                // dxa width parse. CT_TblWidth shape — Type must be Dxa for a
+                // twips width to take effect.
+                case "cellspacing":
+                    trPr.RemoveAllChildren<TableCellSpacing>();
+                    if (!string.IsNullOrEmpty(value))
+                        trPr.AppendChild(new TableCellSpacing
+                        {
+                            Width = ParseHelpers.SafeParseUint(value, "cellspacing").ToString(),
+                            Type = TableWidthUnitValues.Dxa
+                        });
+                    break;
                 case "cnfstyle":
                 {
                     // ST_Cnf @val bitmask (see ValidateCnfStyleBitmask). cnfStyle

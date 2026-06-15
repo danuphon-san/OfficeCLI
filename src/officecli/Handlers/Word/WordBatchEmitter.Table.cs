@@ -1034,6 +1034,9 @@ public static partial class WordBatchEmitter
         // widths (ragged/indented table edge). Carried through `set tr` so
         // SetElementTableRow re-emits <w:gridBefore>/<w:wBefore>/<w:gridAfter>/<w:wAfter>.
         "gridBefore", "wBefore", "gridAfter", "wAfter",
+        // BUG-DUMP-R62-ROWCELLSPACING: row-level <w:tblCellSpacing> (inter-cell
+        // gap for this row). SetElementTableRow re-emits it onto the row's trPr.
+        "cellSpacing",
     };
 
     /// <summary>Read a string-valued key from a DocumentNode.Format dict

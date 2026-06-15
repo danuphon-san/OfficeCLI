@@ -4487,6 +4487,20 @@ public partial class WordHandler
             var strikeEl = rp?.Strike ?? (OpenXmlLeafElement?)markRp?.GetFirstChild<Strike>();
             if (strikeEl != null && !node.Format.ContainsKey("strike")) node.Format["strike"] = true;
 
+            // BUG-DUMP-R62-MARKVANISH: an empty paragraph's ¶-mark <w:vanish/>
+            // (hidden text) makes the paragraph zero-height. The canonical case is
+            // the spacer paragraph Word inserts between two adjacent tables: marked
+            // vanish, it collapses so the tables render flush; un-marked, it renders
+            // at its ¶-glyph height and opens a visible gap that pushes every row
+            // below down (a whole-document reflow on a form-heavy template). The
+            // bare-key fallback read every other mark toggle (bold/italic/strike/
+            // color/kern) but not vanish, so the spacer reappeared on dump→batch.
+            // Mirror the run reader's vanish readback; AddParagraph's bare-key path
+            // applies it to the ¶ mark rPr (run-less) or the run (single-run).
+            var vanishEl = rp?.Vanish ?? (Vanish?)markRp?.GetFirstChild<Vanish>();
+            if (vanishEl != null && IsToggleOn(vanishEl) && !node.Format.ContainsKey("vanish"))
+                node.Format["vanish"] = true;
+
             var hlEl = rp?.Highlight ?? markRp?.GetFirstChild<Highlight>();
             if (hlEl?.Val != null && !node.Format.ContainsKey("highlight"))
                 node.Format["highlight"] = hlEl.Val.InnerText;
@@ -5492,6 +5506,19 @@ public partial class WordHandler
         var wAfter = trPr.GetFirstChild<WidthAfterTableRow>();
         if (wAfter != null && FormatTableWidth(wAfter.Width, wAfter.Type?.Value) is { } wAfterStr)
             node.Format["wAfter"] = wAfterStr;
+        // BUG-DUMP-R62-ROWCELLSPACING: row-level <w:trPr><w:tblCellSpacing> sets
+        // the spacing BETWEEN cells for THIS row (CT_TrPr) — distinct from the
+        // table-level tblPr/tblCellSpacing read at ~line 2874. Previously unread,
+        // so a form-table whose every row carries cellSpacing="20" collapsed
+        // flush on dump→batch: each row shed its inter-cell gap, and the lost
+        // per-row height accumulated into a multi-row vertical drift that reflowed
+        // the whole document (all pages went red). Surface under the same
+        // `cellSpacing` key the table reader uses — the row node is distinct, so
+        // there's no collision — and let SetElementTableRow + RowOnlyKeys
+        // round-trip it.
+        if (trPr.GetFirstChild<TableCellSpacing>() is { } rowCellSpacing
+            && SafeWidth(rowCellSpacing.Width) is int rowCsW)
+            node.Format["cellSpacing"] = rowCsW;
     }
 
     // BUG-DUMP-R42-2 / BUG-DUMP-R42-6: shared width readback for OOXML
