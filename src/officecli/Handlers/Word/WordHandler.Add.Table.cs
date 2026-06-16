@@ -745,8 +745,11 @@ public partial class WordHandler
             if (kLowAdd is "tblp.horzanchor" or "tblp.horizontalanchor"
                 or "tblppr.horzanchor" or "tblppr.horizontalanchor")
             {
-                var tpp = tblProps.GetFirstChild<TablePositionProperties>()
-                    ?? tblProps.AppendChild(new TablePositionProperties());
+                // CONSISTENCY(tblpr-schema-order): tblpPr is rank 1 in CT_TblPr.
+                // Appending it (as the old code did) lands it last, after
+                // tblLook → schema-invalid floating table. Reuse the Set-side
+                // helper so Add inserts it in order, same as set tblp.*.
+                var tpp = EnsureTablePositionProperties(tblProps);
                 tpp.HorizontalAnchor = value.ToLowerInvariant() switch
                 {
                     "margin" => HorizontalAnchorValues.Margin,
@@ -759,8 +762,11 @@ public partial class WordHandler
             if (kLowAdd is "tblp.vertanchor" or "tblp.verticalanchor"
                 or "tblppr.vertanchor" or "tblppr.verticalanchor")
             {
-                var tpp = tblProps.GetFirstChild<TablePositionProperties>()
-                    ?? tblProps.AppendChild(new TablePositionProperties());
+                // CONSISTENCY(tblpr-schema-order): tblpPr is rank 1 in CT_TblPr.
+                // Appending it (as the old code did) lands it last, after
+                // tblLook → schema-invalid floating table. Reuse the Set-side
+                // helper so Add inserts it in order, same as set tblp.*.
+                var tpp = EnsureTablePositionProperties(tblProps);
                 tpp.VerticalAnchor = value.ToLowerInvariant() switch
                 {
                     "margin" => VerticalAnchorValues.Margin,
@@ -781,8 +787,11 @@ public partial class WordHandler
                 var ftTwips = ParseTwips(value);
                 if (ftTwips > 32767)
                     throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must be 0..32767 twips (OOXML ST_TwipsMeasure short range).");
-                var tpp = tblProps.GetFirstChild<TablePositionProperties>()
-                    ?? tblProps.AppendChild(new TablePositionProperties());
+                // CONSISTENCY(tblpr-schema-order): tblpPr is rank 1 in CT_TblPr.
+                // Appending it (as the old code did) lands it last, after
+                // tblLook → schema-invalid floating table. Reuse the Set-side
+                // helper so Add inserts it in order, same as set tblp.*.
+                var tpp = EnsureTablePositionProperties(tblProps);
                 if (kLowAdd.EndsWith("leftfromtext")) tpp.LeftFromText = (short)ftTwips;
                 else if (kLowAdd.EndsWith("rightfromtext")) tpp.RightFromText = (short)ftTwips;
                 else if (kLowAdd.EndsWith("topfromtext")) tpp.TopFromText = (short)ftTwips;
