@@ -283,6 +283,13 @@ public static partial class WordBatchEmitter
                 Reason: $"bookmark end '{bmn}' has no emitted start (start sits at an unplaceable position, e.g. between table rows); the range marker pair is dropped"));
             return true;
         });
+        // BUG-DUMP-NOTENOTICE-FIDELITY: restore custom separator /
+        // continuationSeparator content AND the dropped continuationNotice
+        // (re-id'd above the rebuilt body range, settings ref re-added) for
+        // docs that HAVE body notes. Must run last: the body walk above created
+        // the notes part and renumbered body notes 1..N, so the fixup's targeted
+        // raw-set ops land on the existing part and the fresh notice id is known.
+        EmitNoteSpecialNotesFixup(word, items);
         return (items, warnings);
     }
 

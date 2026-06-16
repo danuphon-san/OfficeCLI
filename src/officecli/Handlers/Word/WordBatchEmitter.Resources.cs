@@ -327,6 +327,154 @@ public static partial class WordBatchEmitter
         });
     }
 
+    // BUG-DUMP-NOTENOTICE-FIDELITY: the HAS-BODY-NOTES complement of
+    // EmitNoteSeparatorsRaw. When a source has body footnotes/endnotes, the
+    // `add footnote`/`add endnote` body walk recreates the notes part — but
+    // only with DEFAULT separator (-1) and continuationSeparator (0) notes
+    // carrying the bare glyph mark. Two losses follow:
+    //   1. A CUSTOMIZED separator/continuationSeparator (real "[Footnote
+    //      continued …]" text, a PAGE field, a rule) is replaced by the bare
+    //      default — its authored content vanishes.
+    //   2. A continuationNotice special note (Word's "[Footnote continued on
+    //      next page]", typically id=1) is dropped entirely, and because
+    //      AddFootnote renumbers body notes from 1 up, that id gets REUSED by a
+    //      real body note. EmitSettingsRaw's R58 strip drops the now-dangling
+    //      ref to avoid the "file may be corrupted" Word reports for it.
+    //
+    // This fixup restores both with full fidelity, running AFTER the body walk
+    // (so the part already exists and the body-note id range is known):
+    //   - For -1 / 0: a targeted raw-set REPLACE swaps the seeded default note
+    //     for the source's verbatim one (only when the source note is custom).
+    //   - For continuationNotice (and any other reserved special id beyond
+    //     -1/0): re-id it to a FRESH id above the rebuilt body range
+    //     (max body id + 1) so it cannot collide with a body note, append it,
+    //     and re-add the settings footnotePr ref at the new id via a targeted
+    //     raw-set on <w:footnotePr> (overriding the R58 strip).
+    //
+    // Not a whole-part replace (that would clobber the body notes Add just
+    // created). Mirrors EmitNoteSeparatorsRaw's conservatism: parse failure or
+    // a non-custom source falls back to the existing (lossy) default path.
+    private static void EmitNoteSpecialNotesFixup(WordHandler word, List<BatchItem> items)
+    {
+        EmitOneNoteSpecialNotesFixup(word, items, "footnote", "/word/footnotes.xml",
+            "/footnotes", "footnotePr");
+        EmitOneNoteSpecialNotesFixup(word, items, "endnote", "/word/endnotes.xml",
+            "/endnotes", "endnotePr");
+    }
+
+    private static void EmitOneNoteSpecialNotesFixup(
+        WordHandler word, List<BatchItem> items, string queryKind,
+        string zipUri, string semanticPart, string settingsNotePr)
+    {
+        // Only the has-body-notes case — the no-body case is EmitNoteSeparatorsRaw.
+        int bodyNoteCount;
+        try { bodyNoteCount = word.Query(queryKind).Count; }
+        catch { return; }
+        if (bodyNoteCount == 0) return;
+
+        string xml;
+        try { xml = word.Raw(zipUri); }
+        catch { return; }
+        if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return;
+        xml = CanonicalizeRawXml(xml);
+
+        System.Xml.Linq.XDocument doc;
+        try { doc = System.Xml.Linq.XDocument.Parse(xml); }
+        catch { return; }
+        if (doc.Root == null) return;
+        var wNs = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+        // A note carries CUSTOM content when it holds drawn text / a field /
+        // a drawing beyond the bare separator glyph mark — same probe shape as
+        // HasCustomNoteSeparator, applied per note.
+        static bool IsCustom(System.Xml.Linq.XElement note, System.Xml.Linq.XNamespace w)
+            => note.Descendants(w + "t").Any()
+            || note.Descendants(w + "fldChar").Any()
+            || note.Descendants(w + "instrText").Any()
+            || note.Descendants(w + "drawing").Any()
+            || note.Descendants(w + "pict").Any();
+
+        // The rebuild renumbers body notes 1..bodyNoteCount, so the next free
+        // id sits at bodyNoteCount+1. Re-id every restored continuationNotice
+        // upward from there (multiple are possible in principle).
+        int nextFreeId = bodyNoteCount + 1;
+        // continuationNotice ids to re-add to settings footnotePr (new ids).
+        var noticeRefIds = new List<int>();
+        bool anyFixup = false;
+
+        foreach (var note in doc.Root.Elements())
+        {
+            if (note.Name.LocalName is not ("footnote" or "endnote")) continue;
+            var idStr = note.Attribute(wNs + "id")?.Value;
+            if (!int.TryParse(idStr, out var id)) continue;
+            var type = note.Attribute(wNs + "type")?.Value;
+
+            if (id == -1 || id == 0)
+            {
+                // separator / continuationSeparator — only restore when custom;
+                // a bare default note already matches what AddFootnote seeded.
+                if (type is not ("separator" or "continuationSeparator")) continue;
+                if (!IsCustom(note, wNs)) continue;
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = semanticPart,
+                    Xpath = $"/w:{queryKind}s/w:{queryKind}[@w:id='{id}']",
+                    Action = "replace",
+                    Xml = note.ToString(System.Xml.Linq.SaveOptions.DisableFormatting)
+                });
+                anyFixup = true;
+            }
+            else if (id > 0 && type is "continuationNotice")
+            {
+                // continuationNotice (or any reserved special note with a
+                // positive id) — only the source body refs use the 2..N range;
+                // a special note never has a body reference, so re-id it to a
+                // fresh id above the rebuilt body range and append it.
+                int freshId = nextFreeId++;
+                note.SetAttributeValue(wNs + "id", freshId.ToString());
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = semanticPart,
+                    Xpath = $"/w:{queryKind}s",
+                    Action = "append",
+                    Xml = note.ToString(System.Xml.Linq.SaveOptions.DisableFormatting)
+                });
+                noticeRefIds.Add(freshId);
+                anyFixup = true;
+            }
+        }
+
+        if (!anyFixup) return;
+
+        // Re-add the continuationNotice ref(s) to settings footnotePr at their
+        // fresh ids. EmitSettingsRaw kept only -1/0 (R58 strip); append the
+        // remapped notice refs after the kept separators via a targeted replace
+        // of the whole <w:footnotePr> block. Build it from the kept -1/0 refs
+        // plus the new notice refs so the order stays separator → contSep →
+        // notice (the order Word writes). When the source settings had no
+        // footnotePr the rebuild's blank one is empty — still emit, so the
+        // notice ref resolves against the appended note.
+        if (noticeRefIds.Count == 0) return;
+        var sb = new System.Text.StringBuilder();
+        sb.Append("<w:").Append(settingsNotePr)
+          .Append(" xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">");
+        sb.Append($"<w:{queryKind} w:id=\"-1\"/>");
+        sb.Append($"<w:{queryKind} w:id=\"0\"/>");
+        foreach (var rid in noticeRefIds)
+            sb.Append($"<w:{queryKind} w:id=\"{rid}\"/>");
+        sb.Append("</w:").Append(settingsNotePr).Append('>');
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = "/settings",
+            Xpath = $"/w:settings/w:{settingsNotePr}",
+            Action = "replace",
+            Xml = sb.ToString()
+        });
+    }
+
     // <w:numPicBullet> defines a picture (image) list bullet; a level opts into
     // it with <w:lvlPicBulletId>. The picture lives in word/media/* referenced
     // by numbering.xml.rels (r:id inside the numPicBullet's VML/drawing). The
