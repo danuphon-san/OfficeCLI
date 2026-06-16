@@ -37,6 +37,15 @@ public partial class WordHandler : IDocumentHandler
     // sidesteps that entirely. Keyed by zip entry name (no leading slash).
     private Dictionary<string, string>? _pendingWholeParts;
 
+    // Part root elements mutated by a raw-set during a DeferSave batch. The
+    // per-op rootElement.Save() (a whole-part re-serialize) and the four global
+    // id sweeps are skipped during defer — a document with thousands of raw-set
+    // replaces against one large part (e.g. a 4070-style styles.xml fixed up
+    // verbatim, 1224 raw-sets) otherwise pays O(raw-sets × part-size) in
+    // redundant serialization plus O(raw-sets × doc) in id scans. Each touched
+    // root is Saved once, and the id sweeps run once, at FinalizeDeferredIds.
+    private HashSet<OpenXmlPartRootElement>? _deferredRawSetRoots;
+
     /// <summary>
     /// Props that the most recent Add() call could not consume. Surfaced to
     /// the CLI layer so silent-drops on the curated surface (e.g.
@@ -995,6 +1004,23 @@ public partial class WordHandler : IDocumentHandler
         OpenXmlPartRootElement rootElement;
         var lowerPath = partPath.ToLowerInvariant();
 
+        // Fast-path: a raw-set that replaces ONE <w:style> by styleId on /styles.
+        // The dump emits one such op per verbatim-fidelity style (1223 of them in
+        // a 4070-style WPS doc). The generic path below re-serializes the whole
+        // styles part (rootElement.OuterXml + XDocument.Parse + InnerXml=) per op
+        // — O(part) each, which dominated a multi-minute batch. Swap the single
+        // element on the live SDK DOM instead (O(fragment)). Any deviation —
+        // different xpath shape, styleId absent, fragment the SDK won't parse —
+        // returns false and falls through to the proven generic path below, so
+        // this changes performance, not behavior.
+        if (lowerPath == "/styles"
+            && string.Equals(action, "replace", StringComparison.OrdinalIgnoreCase)
+            && xml != null
+            && TryReplaceSingleStyleFast(mainPart, xpath, xml))
+        {
+            return;
+        }
+
         if (lowerPath is "/document" or "/")
             rootElement = mainPart.Document ?? throw new InvalidOperationException("No document");
         else if (lowerPath is "/styles")
@@ -1167,6 +1193,18 @@ public partial class WordHandler : IDocumentHandler
             throw new ArgumentException($"Unknown part: {partPath}. Available: /document, /styles, /settings, /numbering, /header[n], /footer[n], /chart[n]");
 
         var affected = RawXmlHelper.Execute(rootElement, xpath, action, xml);
+        // During a DeferSave batch, defer the whole-part re-serialize and the
+        // four global id sweeps to FinalizeDeferredIds (one Save per touched
+        // root, one sweep total) instead of paying them per raw-set. The
+        // Execute above already applied the edit to the in-memory SDK DOM, so
+        // the deferred passes and the final _doc.Save() see the changes. Outside
+        // a batch (one-shot raw-set / resident mid-session) keep the eager path.
+        if (DeferSave)
+        {
+            (_deferredRawSetRoots ??= new HashSet<OpenXmlPartRootElement>()).Add(rootElement);
+            _ = affected;
+            return;
+        }
         rootElement.Save();
         // CONSISTENCY(paraid-global-uniqueness): RawSet may inject paragraphs
         // carrying paraIds the handler hasn't seen — without re-scanning,
@@ -1200,6 +1238,43 @@ public partial class WordHandler : IDocumentHandler
         // their own structured message. Writing here pollutes batch --json
         // output (extra stdout lines escaped into result.message strings).
         _ = affected;
+    }
+
+    // Compiled matcher for the dump's single-style raw-set xpath
+    // (/w:styles/w:style[@w:styleId='ID']). See the /styles fast-path in RawSet.
+    private static readonly System.Text.RegularExpressions.Regex _singleStyleByIdXpath =
+        new(@"^/w:styles/w:style\[@w:styleId='([^']*)'\]$",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    // Replace exactly one <w:style> (matched by styleId) on the live styles DOM,
+    // bypassing the generic whole-part serialize/parse round-trip. Returns false
+    // (caller falls through to the generic path) for any xpath that is not the
+    // exact single-style-by-id shape, a styleId not present, or a fragment the
+    // SDK cannot parse — so it is a pure optimization with no behavior change.
+    // A <w:style> carries no paraId / docPr / sdt / bookmark, so the post-replace
+    // global id sweeps the generic path runs are no-ops here and are skipped; the
+    // whole-part Save is deferred to FinalizeDeferredIds during a batch, mirroring
+    // the generic /styles raw-set under DeferSave.
+    private bool TryReplaceSingleStyleFast(MainDocumentPart mainPart, string xpath, string xml)
+    {
+        var m = _singleStyleByIdXpath.Match(xpath);
+        if (!m.Success) return false;
+        var styleId = m.Groups[1].Value;
+        var styles = mainPart.StyleDefinitionsPart?.Styles;
+        if (styles == null) return false;
+        var target = styles.Elements<Style>()
+            .FirstOrDefault(s => string.Equals(s.StyleId?.Value, styleId, StringComparison.Ordinal));
+        if (target == null) return false;
+        Style newStyle;
+        try { newStyle = new Style(xml); }
+        catch { return false; }
+        target.InsertBeforeSelf(newStyle);
+        target.Remove();
+        if (DeferSave)
+            (_deferredRawSetRoots ??= new HashSet<OpenXmlPartRootElement>()).Add(styles);
+        else
+            styles.Save();
+        return true;
     }
 
     // BUG-DUMP-R45-1 / BUG-DUMP-R45-2: apply an `embed-binary` companion op.
@@ -1383,6 +1458,21 @@ public partial class WordHandler : IDocumentHandler
     /// </summary>
     private void FinalizeDeferredIds()
     {
+        // Flush the whole-part re-serialize that each batch raw-set deferred:
+        // one Save per touched root, not one per op. Must run before the id
+        // sweeps so the sweeps (and the subsequent _doc.Save) see the persisted
+        // DOM. The edits already live in the in-memory SDK DOM via Execute's
+        // InnerXml set, so this is purely the serialization the per-op path
+        // would have done.
+        if (_deferredRawSetRoots != null)
+        {
+            foreach (var root in _deferredRawSetRoots)
+            {
+                try { root.Save(); }
+                catch { /* best-effort; a corrupt root must not block the flush */ }
+            }
+            _deferredRawSetRoots = null;
+        }
         try
         {
             EnsureAllParaIds();
