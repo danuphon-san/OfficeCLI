@@ -269,14 +269,27 @@ public static partial class WordBatchEmitter
             }
             else if (presentSides < 6 && !hasBorderAll)
             {
-                // Use the canonical "style;size" form: ApplyTableBorders'
-                // ParseBorderValue defaults size=4 for `none`, so writing
-                // `none;4` matches what the round-trip produces (six explicit
-                // <w:none w:sz="4"> elements collapsed by the all-same fold
-                // below). Without the `;4`, the FIRST dump emits `border=none`
-                // and the SECOND dump emits `border=none;4` — non-idempotent
-                // value shape.
-                tableProps["border"] = "none;4";
+                // BUG-BORDER-NONE-INJECT: source <w:tblBorders> defined only a
+                // SUBSET of the six sides (e.g. just insideH on a horizontal-
+                // rule table), or had no <w:tblBorders> at all. The absent
+                // sides emit no key — Word leaves them undefined, which on a
+                // style-less table renders as no line. The old fix prepended a
+                // `border=none;4` all-sides wipe so AddTable's default 6-single
+                // seed wouldn't paint a generic grid; but that FABRICATES five
+                // explicit <w:none> sides the source never had. Visually
+                // identical (none == absent on a style-less table), yet a
+                // re-dump reads the stamped none sides back as five extra
+                // per-side `border.*=none;4` rows the first dump didn't emit —
+                // a non-idempotent +5/+6 length asymmetry per table (frc tbl0:
+                // insideH-only → 5 spurious none rows on the second dump).
+                //
+                // Suppress AddTable's default-border seed instead, so the
+                // absent sides stay absent in the rebuilt XML, byte-matching
+                // the source. The real per-side keys still overlay via
+                // ApplyTableBorders. Same mechanism the styled-table branch
+                // above already uses — extended to the style-less subset case.
+                // CONSISTENCY(border-default-overlay).
+                tableProps["skipDefaultBorders"] = "true";
             }
             // Symmetric collapse: when all 6 sides carry the IDENTICAL folded
             // value (same style + sz + color + space), prefer the compact
