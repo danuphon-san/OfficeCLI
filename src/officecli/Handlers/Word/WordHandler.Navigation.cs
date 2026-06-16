@@ -1359,6 +1359,23 @@ public partial class WordHandler
                             }
                             return true;
                         })
+                        // BUG-DUMP-ALTCONTENT-DOUBLE: mirror GetAllRuns — skip runs
+                        // inside an <mc:AlternateContent> wrapper (round-tripped
+                        // verbatim via raw-set; the SDK parses it as unknown so the
+                        // typed TextBoxContent skip misses it). Keeps /…/r[K] path
+                        // indices aligned with the runs NodeBuilder surfaces.
+                        .Where(r =>
+                        {
+                            foreach (var anc in r.Ancestors())
+                            {
+                                if (ReferenceEquals(anc, current)) break;
+                                if (anc.LocalName == "AlternateContent"
+                                    || anc.LocalName == "Choice"
+                                    || anc.LocalName == "Fallback")
+                                    return false;
+                            }
+                            return true;
+                        })
                         .Cast<OpenXmlElement>(),
                     "tbl" => current.Elements<Table>().Cast<OpenXmlElement>(),
                     "tr" => current is Table trHostTable
@@ -5007,6 +5024,26 @@ public partial class WordHandler
                     if (anc == para) break;
                 }
                 if (inWrapper) wrapperRunOrdinal++;
+                // BUG-DUMP-ALTCONTENT-DOUBLE: a run inside an <mc:AlternateContent>
+                // (a WPS/DrawingML shape with a VML <mc:Fallback>) or inside a
+                // <w:txbxContent> is part of a textbox/drawing that is round-tripped
+                // VERBATIM via a raw-set (the textbox/drawing emit). The SDK parses
+                // the AlternateContent / VML Fallback subtree as OpenXmlUnknownElement,
+                // so its inner <w:r> reaches THIS synthesizer — and because both the
+                // mc:Choice and mc:Fallback branches hold the SAME text, synthesizing
+                // them as plain runs duplicated a shape's text ("AustraliaIndonesia")
+                // up to 4x in the body. Skip any run whose ancestor chain crosses an
+                // AlternateContent/Choice/Fallback wrapper or a txbxContent.
+                bool inDrawingWrapper = false;
+                for (var anc = unkRun.Parent; anc != null && anc != para; anc = anc.Parent)
+                {
+                    var ln = anc.LocalName;
+                    if (ln == "AlternateContent" || ln == "Choice" || ln == "Fallback"
+                        || ln == "txbxContent" || ln == "txbx" || ln == "pict"
+                        || ln == "textbox")
+                    { inDrawingWrapper = true; break; }
+                }
+                if (inDrawingWrapper) continue;
                 // Only surface runs whose direct parent is an unknown
                 // wrapper (ruby/rt/rubyBase/smartTag/customXml). Runs
                 // whose parent is a typed Paragraph would already be

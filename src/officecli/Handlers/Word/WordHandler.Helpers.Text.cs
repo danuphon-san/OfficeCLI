@@ -308,6 +308,30 @@ public partial class WordHandler
                 }
                 return true;
             })
+            // BUG-DUMP-ALTCONTENT-DOUBLE: a run inside an <mc:AlternateContent>
+            // (a WPS/DrawingML shape with a VML <mc:Fallback>) is NOT caught by
+            // the typed TextBoxContent skip above — the SDK parses the
+            // AlternateContent subtree as OpenXmlUnknownElement, so its inner
+            // <w:txbxContent> is not a typed TextBoxContent and Ancestors<>()
+            // misses it. The drawing run itself is round-tripped VERBATIM via a
+            // raw-set (textbox/drawing emit), so surfacing its inner runs as
+            // plain runs duplicated the text — and BOTH the mc:Choice and the
+            // mc:Fallback branch hold the SAME text, so a single shape's text
+            // ("Australia – Indonesia…") appeared up to FOUR times in the body.
+            // Drop every run whose ancestor chain (below `para`) crosses an
+            // AlternateContent wrapper; the verbatim raw-set carries it.
+            .Where(r =>
+            {
+                foreach (var anc in r.Ancestors())
+                {
+                    if (ReferenceEquals(anc, para)) break; // reached host para
+                    if (anc.LocalName == "AlternateContent"
+                        || anc.LocalName == "Choice"
+                        || anc.LocalName == "Fallback")
+                        return false;
+                }
+                return true;
+            })
             .ToList();
     }
 
