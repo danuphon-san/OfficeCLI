@@ -2207,6 +2207,44 @@ public partial class WordHandler
         {
             newRun.AppendChild(new AnnotationReferenceMark());
         }
+        // BUG-DUMP-HYPHEN-CELL: round-trip a STRUCTURAL hyphen element
+        // (<w:noBreakHyphen/> / <w:softHyphen/>) so it survives in ANY host —
+        // table cells, headers, footers — not just /body. The dump emits
+        // `hyphen=noBreak|soft`; the cached glyph (U+2011 / U+00AD) sits at its
+        // source position inside `text` (GetRunText surfaces it), so split `text`
+        // at that glyph and emit text-before, <element>, text-after in source
+        // order — mirroring the <w:sym> interleave handling above. A hyphen-only
+        // source run (the common case: <w:r><w:noBreakHyphen/></w:r>) carries no
+        // glyph in `text` and emits just the element. Replaces the lossy
+        // degrade-to-literal-glyph path for non-/body hyphen runs.
+        else if (properties.TryGetValue("hyphen", out var hyphenRaw) && !string.IsNullOrEmpty(hyphenRaw))
+        {
+            var hyphenKind = hyphenRaw.Trim().ToLowerInvariant();
+            OpenXmlElement MakeHyphen() => hyphenKind switch
+            {
+                "soft" or "softhyphen" or "00ad" => new SoftHyphen(),
+                _ => new NoBreakHyphen(), // "nobreak"/"nonbreaking"/"2011"/default
+            };
+            var glyph = hyphenKind is "soft" or "softhyphen" or "00ad" ? "­" : "‑";
+            var runText = properties.GetValueOrDefault("text", "");
+            int g = runText.IndexOf(glyph, StringComparison.Ordinal);
+            if (g >= 0)
+            {
+                var before = runText[..g];
+                var after = runText[(g + 1)..];
+                if (!string.IsNullOrEmpty(before)) AppendTextWithBreaks(newRun, before);
+                newRun.AppendChild(MakeHyphen());
+                if (!string.IsNullOrEmpty(after)) AppendTextWithBreaks(newRun, after);
+            }
+            else
+            {
+                // No cached glyph in `text` — hyphen-only run (or text carries no
+                // glyph): emit the element, then any literal text after it.
+                newRun.AppendChild(MakeHyphen());
+                if (!string.IsNullOrEmpty(runText))
+                    AppendTextWithBreaks(newRun, runText);
+            }
+        }
         else if (properties.TryGetValue("sym", out var symRaw) && !string.IsNullOrEmpty(symRaw))
         {
             var colon = symRaw.LastIndexOf(':');
@@ -2285,6 +2323,7 @@ public partial class WordHandler
             "shd", "shading",
             "rstyle", "rStyle",
             "annotationRef", "annotationref",
+            "hyphen",
             "textoutline", "textfill", "w14shadow", "w14glow", "w14reflection",
             // OpenType typographic toggles applied via ApplyW14Effects above.
             "ligatures", "numform", "numspacing",

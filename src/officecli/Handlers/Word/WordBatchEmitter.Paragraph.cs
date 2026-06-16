@@ -1553,11 +1553,31 @@ public static partial class WordBatchEmitter
         // runs' noMarkRPrInherit/font props and any hyperlink wrapper).
         if (parentPath != "/body")
         {
-            EmitPlainOrHyperlinkRun(run, paraTargetPath, items, ctx, hlBaseline);
-            ctx?.Warnings.Add(new DocxUnsupportedWarning(
-                Element: "hyphen",
-                Path: run.Path,
-                Reason: "structural soft/non-breaking hyphen (w:softHyphen/w:noBreakHyphen) inside a header/footer/table cell degrades to a literal hyphen glyph in the run text on round-trip; the run's visible text is preserved"));
+            // BUG-DUMP-HYPHEN-CELL: a header/footer/table-cell host has no body
+            // last() anchor for the raw-set append the /body path uses. Previously
+            // this degraded the structural hyphen to a literal U+2011/U+00AD glyph
+            // — but in a narrow table column the glyph wraps DIFFERENTLY than a
+            // <w:noBreakHyphen/> element, reflowing the cell and visibly diverging
+            // (frc QRP "Notes" column). Emit a typed `add r --prop hyphen=…` that
+            // routes through the normal parent resolution (works in any host);
+            // AddRun rebuilds the structural <w:noBreakHyphen/>/<w:softHyphen/>
+            // element, splitting `text` at the cached glyph in source order.
+            var hyRaw = word.RawElementXml(run.Path);
+            string hyKind = !string.IsNullOrEmpty(hyRaw) && hyRaw.Contains("softHyphen", StringComparison.Ordinal)
+                ? "soft" : "noBreak";
+            var hyProps = FilterEmittableProps(run.Format);
+            hyProps.Remove("_hasHyphen");
+            hyProps["hyphen"] = hyKind;
+            if (!string.IsNullOrEmpty(run.Text)) hyProps["text"] = run.Text!;
+            else hyProps.Remove("text");
+            var hyParent = ResolveHyperlinkParent(run, paraTargetPath, items);
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = hyParent,
+                Type = "r",
+                Props = hyProps
+            });
             return true;
         }
         var rawXml = word.RawElementXml(run.Path);
