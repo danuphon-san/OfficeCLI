@@ -6,6 +6,9 @@
     <RootNamespace>OfficeCli</RootNamespace>
     <AssemblyName>officecli</AssemblyName>
     <Version>1.0.113</Version>
+    <Authors>goworm</Authors>
+    <Company>OfficeCLI</Company>
+    <Copyright>Copyright © 2026 OfficeCLI (https://OfficeCLI.AI)</Copyright>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>

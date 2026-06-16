@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCLI (officecli.ai)
+// Copyright 2026 OfficeCLI (https://OfficeCLI.AI)
 // SPDX-License-Identifier: Apache-2.0
 //
 // Render embedded xlsx pictures (xdr:pic in the worksheet drawing) as

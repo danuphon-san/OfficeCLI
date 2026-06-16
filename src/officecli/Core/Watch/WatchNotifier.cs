@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCLI (officecli.ai)
+// Copyright 2026 OfficeCLI (https://OfficeCLI.AI)
 // SPDX-License-Identifier: Apache-2.0
 //
 // CONSISTENCY(watch-isolation): this file does not reference OfficeCli.Handlers, does not open files,
