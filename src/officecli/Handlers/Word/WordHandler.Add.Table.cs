@@ -489,32 +489,13 @@ public partial class WordHandler
                 case "shd" or "shading" or "cellshading":
                     {
                         // BUG-DUMP21-01: w:tblPr/w:shd table-level shading
-                        // round-trip. Mirrors paragraph/cell `shading` parsing
-                        // — accepts FILL, VAL;FILL, or VAL;FILL;COLOR.
-                        var shdParts = tv.Split(';');
-                        var tShd = new Shading();
-                        if (shdParts.Length == 1)
-                        {
-                            tShd.Val = ShadingPatternValues.Clear;
-                            tShd.Fill = SanitizeHex(shdParts[0]);
-                        }
-                        else if (shdParts.Length >= 2)
-                        {
-                            var pat = shdParts[0].TrimStart('#');
-                            if (pat.Length >= 6 && pat.All(char.IsAsciiHexDigit))
-                            {
-                                tShd.Val = ShadingPatternValues.Clear;
-                                tShd.Fill = SanitizeHex(shdParts[0]);
-                            }
-                            else
-                            {
-                                tShd.Val = new ShadingPatternValues(shdParts[0]);
-                                tShd.Fill = SanitizeHex(shdParts[1]);
-                                if (shdParts.Length >= 3)
-                                    tShd.Color = SanitizeHex(shdParts[2]);
-                            }
-                        }
-                        tblProps.Shading = tShd;
+                        // round-trip. Route through the shared ParseShadingValue
+                        // so the full form is honored — FILL, VAL;FILL,
+                        // VAL;FILL;COLOR, plus the themeFill=/themeFillTint=/
+                        // themeFillShade= theme-linkage tail the dump emits. The
+                        // old hand-rolled split dropped the theme tail, losing the
+                        // theme reference on round-trip.
+                        tblProps.Shading = ParseShadingValue(tv);
                     }
                     break;
                 case "overlap":
@@ -1277,30 +1258,10 @@ public partial class WordHandler
                 properties.ContainsKey(key);
                 var tcPrFill = newCell.GetFirstChild<TableCellProperties>()
                     ?? newCell.PrependChild(new TableCellProperties());
-                var shd = new Shading();
-                var shdParts = value.Split(';');
-                if (shdParts.Length == 1)
-                {
-                    shd.Val = ShadingPatternValues.Clear;
-                    shd.Fill = OfficeCli.Core.ParseHelpers.SanitizeColorForOoxml(shdParts[0]).Rgb;
-                }
-                else if (shdParts.Length >= 2)
-                {
-                    var pat = shdParts[0].TrimStart('#');
-                    if (pat.Length >= 6 && pat.All(char.IsAsciiHexDigit))
-                    {
-                        shd.Val = ShadingPatternValues.Clear;
-                        shd.Fill = OfficeCli.Core.ParseHelpers.SanitizeColorForOoxml(shdParts[0]).Rgb;
-                    }
-                    else
-                    {
-                        shd.Val = new ShadingPatternValues(shdParts[0]);
-                        shd.Fill = OfficeCli.Core.ParseHelpers.SanitizeColorForOoxml(shdParts[1]).Rgb;
-                        if (shdParts.Length >= 3)
-                            shd.Color = OfficeCli.Core.ParseHelpers.SanitizeColorForOoxml(shdParts[2]).Rgb;
-                    }
-                }
-                tcPrFill.Shading = shd;
+                // Route through the shared ParseShadingValue so a cell's
+                // themeFill=/themeFillTint=/themeFillShade= theme-linkage tail
+                // round-trips; the old hand-rolled split dropped it.
+                tcPrFill.Shading = ParseShadingValue(value);
             }
         }
 
