@@ -173,7 +173,7 @@
       "examples": [
         "--prop direction=rtl"
       ],
-      "readback": "rtl (ltr is the default and is suppressed; clearing direction removes the attribute)",
+      "readback": "rtl, or ltr. Set direction=ltr pins ltr explicitly by writing rtl=\"0\" so the paragraph overrides any inherited master/layout RTL; Add omits rtl when ltr (relies on the default). Clearing direction removes the attribute.",
       "enforcement": "report"
     },
     "margin": {
@@ -191,7 +191,7 @@
     },
     "textDirection": {
       "type": "string",
-      "description": "shape text rotation (a:bodyPr @vert) — works on shapes/textboxes, not just table cells. horizontal|vertical90|vertical270|eaVert|stacked. Round-trips through the same canonical vocabulary as table-cell textDirection.",
+      "description": "shape text rotation (a:bodyPr @vert) — works on shapes/textboxes, not just table cells. horizontal|vertical90|vertical270|eaVert|stacked. Round-trips through the same canonical vocabulary as table-cell textDirection. Note: the Get readback key is lowercase 'textdirection'.",
       "aliases": [
         "textdir",
         "vert"
@@ -895,7 +895,23 @@
         "--prop shadow=000000",
         "--prop shadow=true"
       ],
-      "readback": "compound '#RRGGBBAA-blurPt-angleDeg-distPt-opacityPct' (e.g. '#00000066-4-45-3-40'). Color is CSS-form 8-digit hex with leading # (alpha last); blur, distance in pt; angle in degrees; opacity in percent (0-100).",
+      "readback": "compound '#RRGGBB-blurPt-angleDeg-distPt-opacityPct' (e.g. '#000000-4-45-3-40'). Color is a '#'-prefixed 6-digit hex (the alpha is carried solely by the trailing opacity field, never double-encoded as an alpha byte); blur, distance in pt; angle in degrees; opacity in percent (0-100).",
+      "enforcement": "report"
+    },
+    "innerShadow": {
+      "type": "string",
+      "description": "inner shadow (a:innerShdw) as `color-blur-angle-dist-opacity` (mirrors `shadow`). Input color is hex (with or without `#`, 6- or 8-digit `RRGGBBAA`) or a scheme name (with optional +lumMod/+shade transforms); blur/dist in points; angle in degrees; opacity 0-100. Rendered as a CSS inset box-shadow in the HTML preview.",
+      "aliases": [
+        "innershadow"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop innerShadow=000000",
+        "--prop innerShadow=FF0000-4-45-3-60"
+      ],
+      "readback": "compound '#RRGGBB-blurPt-angleDeg-distPt-opacityPct' (e.g. '#FF0000-4-45-3-60'). Color is a '#'-prefixed 6-digit hex (alpha carried solely by the trailing opacity field); blur, distance in pt; angle in degrees; opacity in percent (0-100).",
       "enforcement": "report"
     },
     "glow": {
