@@ -439,6 +439,16 @@ public partial class PowerPointHandler
         var grpInnerPicMatch = Regex.Match(path, @"^/slide\[(\d+)\]((?:/group\[\d+\])+)/(?:picture|pic)\[(\d+)\]$");
         if (grpInnerPicMatch.Success) return SetGroupInnerPictureByPath(grpInnerPicMatch, properties);
 
+        // Try grouped table/chart path: /slide[N]/group[M](/group[L])*/table[K] or /chart[K].
+        // CONSISTENCY(group-inner-leaf): Query.cs nestedGroupMatch already resolves
+        // these for Get; Set had no branch and fell through to the XML fallback
+        // (LocalName "group" ≠ p:grpSp) → "Element not found" (R14-5). Walk the
+        // group chain, resolve the leaf GraphicFrame, and reuse the same prop cores.
+        var grpLeafFrameMatch = Regex.Match(path,
+            @"^/slide\[(\d+)\]/group\[(\d+)\]((?:/group\[\d+\])*)/(table|chart)\[(\d+)\]$");
+        if (grpLeafFrameMatch.Success)
+            return SetGroupInnerFrameByPath(grpLeafFrameMatch, properties);
+
         // Try group path: /slide[N]/group[M]
         var grpMatch = Regex.Match(path, @"^/slide\[(\d+)\]/group\[(\d+)\]$");
         if (grpMatch.Success) return SetGroupByPath(grpMatch, properties);

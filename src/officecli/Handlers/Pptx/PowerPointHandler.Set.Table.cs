@@ -217,6 +217,16 @@ public partial class PowerPointHandler
             throw new ArgumentException($"Table {tblIdx} not found (total: {graphicFrames.Count})");
 
         var gf = graphicFrames[tblIdx - 1];
+        return SetTablePropsCore(slidePart, gf, properties);
+    }
+
+    /// <summary>
+    /// Apply table-level properties to a resolved table GraphicFrame. Shared by the
+    /// top-level table path and the grouped-table path (R14-5
+    /// /slide[N]/group[M]/table[K]) so both routes accept the same props.
+    /// </summary>
+    private List<string> SetTablePropsCore(DocumentFormat.OpenXml.Packaging.SlidePart slidePart, GraphicFrame gf, Dictionary<string, string> properties)
+    {
         var unsupported = new List<string>();
         foreach (var (key, value) in properties)
         {

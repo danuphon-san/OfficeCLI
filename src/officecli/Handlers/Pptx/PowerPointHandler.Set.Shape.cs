@@ -1091,6 +1091,51 @@ public partial class PowerPointHandler
                         cxnDrawProps.RemoveAllChildren<Drawing.EndConnection>();
                         cxnDrawProps.AppendChild(new Drawing.EndConnection { Id = endpointId, Index = 0 });
                     }
+
+                    // R14-4: recompute the connector's xfrm bounding box from the
+                    // (possibly new) endpoint centers — mirror Add.Misc.cs connector
+                    // wiring. Without this the <a:xfrm> stays pinned to the old
+                    // endpoints, so a reconnect to a far-away shape leaves a stale
+                    // (often near-zero) connector box. Only adjust when no explicit
+                    // x/y/width/height is being set in the same call.
+                    bool hasExplicitBox = properties.ContainsKey("x") || properties.ContainsKey("left")
+                        || properties.ContainsKey("y") || properties.ContainsKey("top")
+                        || properties.ContainsKey("width") || properties.ContainsKey("height");
+                    if (!hasExplicitBox)
+                    {
+                        var startId = cxnDrawProps.GetFirstChild<Drawing.StartConnection>()?.Id?.Value;
+                        var endId = cxnDrawProps.GetFirstChild<Drawing.EndConnection>()?.Id?.Value;
+                        var startBox = startId.HasValue ? FrameBoundsById(endpointShapeTree, startId.Value) : null;
+                        var endBox = endId.HasValue ? FrameBoundsById(endpointShapeTree, endId.Value) : null;
+                        var pStart = startBox ?? endBox;
+                        var pEnd = endBox ?? startBox;
+                        if (pStart.HasValue && pEnd.HasValue)
+                        {
+                            var (sx, sy, scx, scy) = pStart.Value;
+                            var (ex, ey, ecx, ecy) = pEnd.Value;
+                            var p1x = sx + scx / 2;
+                            var p1y = sy + scy / 2;
+                            var p2x = ex + ecx / 2;
+                            var p2y = ey + ecy / 2;
+                            var xfrm = cxn.ShapeProperties?.Transform2D;
+                            if (cxn.ShapeProperties != null && xfrm == null)
+                            {
+                                xfrm = new Drawing.Transform2D();
+                                cxn.ShapeProperties.InsertAt(xfrm, 0);
+                            }
+                            if (xfrm != null)
+                            {
+                                xfrm.Offset ??= new Drawing.Offset();
+                                xfrm.Extents ??= new Drawing.Extents();
+                                xfrm.Offset.X = Math.Min(p1x, p2x);
+                                xfrm.Offset.Y = Math.Min(p1y, p2y);
+                                xfrm.Extents.Cx = Math.Abs(p2x - p1x);
+                                xfrm.Extents.Cy = Math.Abs(p2y - p1y);
+                                xfrm.HorizontalFlip = p2x < p1x;
+                                xfrm.VerticalFlip = p2y < p1y;
+                            }
+                        }
+                    }
                     break;
                 }
                 default:
@@ -1143,6 +1188,92 @@ public partial class PowerPointHandler
         if (shapeIdx < 1 || shapeIdx > innerShapes.Count)
             throw new ArgumentException($"Shape {shapeIdx} not found in group {grpIdx} (total: {innerShapes.Count})");
         return ApplyShapePropsCore(slidePart, innerShapes[shapeIdx - 1], properties);
+    }
+
+    /// <summary>
+    /// R14-5: Set on a table/chart GraphicFrame nested in a group:
+    /// /slide[N]/group[M](/group[L])*/(table|chart)[K]. Walks the group chain the
+    /// same way Query.cs nestedGroupMatch does, resolves the leaf GraphicFrame, then
+    /// reuses the table prop core (or the chart relationship + ChartHelper) so a
+    /// grouped table/chart accepts the same props as a top-level one.
+    /// </summary>
+    private List<string> SetGroupInnerFrameByPath(Match match, Dictionary<string, string> properties)
+    {
+        var slideIdx = int.Parse(match.Groups[1].Value);
+        var rootGrpIdx = int.Parse(match.Groups[2].Value);
+        var nestedSegs = match.Groups[3].Value;
+        var leafType = match.Groups[4].Value.ToLowerInvariant();
+        var leafIdx = int.Parse(match.Groups[5].Value);
+
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count)
+            throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+        var slidePart = slideParts[slideIdx - 1];
+        var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree
+            ?? throw new ArgumentException("Slide has no shape tree");
+        var rootGroups = shapeTree.Elements<GroupShape>().ToList();
+        if (rootGrpIdx < 1 || rootGrpIdx > rootGroups.Count)
+            throw new ArgumentException($"Group {rootGrpIdx} not found (total: {rootGroups.Count})");
+        var current = rootGroups[rootGrpIdx - 1];
+        foreach (Match seg in Regex.Matches(nestedSegs, @"/group\[(\d+)\]"))
+        {
+            var subIdx = int.Parse(seg.Groups[1].Value);
+            var subs = current.Elements<GroupShape>().ToList();
+            if (subIdx < 1 || subIdx > subs.Count)
+                throw new ArgumentException($"Nested group {subIdx} not found (total: {subs.Count})");
+            current = subs[subIdx - 1];
+        }
+
+        if (leafType == "table")
+        {
+            var inner = current.Elements<GraphicFrame>()
+                .Where(gf => gf.Descendants<Drawing.Table>().Any()).ToList();
+            if (leafIdx < 1 || leafIdx > inner.Count)
+                throw new ArgumentException($"Table {leafIdx} not found in group (total: {inner.Count})");
+            return SetTablePropsCore(slidePart, inner[leafIdx - 1], properties);
+        }
+        else // chart
+        {
+            var inner = current.Elements<GraphicFrame>()
+                .Where(gf => gf.Descendants<DocumentFormat.OpenXml.Drawing.Charts.ChartReference>().Any()
+                    || IsExtendedChartFrame(gf)).ToList();
+            if (leafIdx < 1 || leafIdx > inner.Count)
+                throw new ArgumentException($"Chart {leafIdx} not found in group (total: {inner.Count})");
+            var chartGf = inner[leafIdx - 1];
+            var unsupported = new List<string>();
+            var chartProps = new Dictionary<string, string>();
+            foreach (var (key, value) in properties)
+            {
+                switch (key.ToLowerInvariant())
+                {
+                    case "x" or "y" or "left" or "top" or "width" or "height":
+                    {
+                        var xfrm = chartGf.Transform ?? (chartGf.Transform = new Transform());
+                        TryApplyPositionSize(key.ToLowerInvariant(), value,
+                            xfrm.Offset ?? (xfrm.Offset = new Drawing.Offset()),
+                            xfrm.Extents ?? (xfrm.Extents = new Drawing.Extents()));
+                        break;
+                    }
+                    case "name":
+                        var nvPr = chartGf.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties;
+                        if (nvPr != null) { Core.XmlTextValidator.ValidateOrThrow(value, "name"); nvPr.Name = value; }
+                        break;
+                    default:
+                        chartProps[key] = value;
+                        break;
+                }
+            }
+            if (chartProps.Count > 0)
+            {
+                var chartRef = chartGf.Descendants<DocumentFormat.OpenXml.Drawing.Charts.ChartReference>().FirstOrDefault();
+                if (chartRef?.Id?.Value != null && slidePart.GetPartById(chartRef.Id.Value) is ChartPart cp)
+                    unsupported.AddRange(ChartHelper.SetChartProperties(cp, chartProps));
+                else
+                    unsupported.AddRange(chartProps.Keys);
+            }
+            GetSlide(slidePart).Save();
+            return unsupported;
+        }
     }
 
     /// <summary>

@@ -44,45 +44,7 @@ public partial class PowerPointHandler
                 // ConnectionShape, GroupShape) — same set ResolveShapeId+AddGroup
                 // accepts so connector from=/to= works against the full frame list.
                 static (long x, long y, long cx, long cy)? GetFrameBoundsById(ShapeTree tree, uint id)
-                {
-                    foreach (var el in tree.ChildElements)
-                    {
-                        Drawing.Transform2D? xf = null;
-                        uint? frameId = null;
-                        switch (el)
-                        {
-                            case Shape s:
-                                frameId = s.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
-                                xf = s.ShapeProperties?.Transform2D;
-                                break;
-                            case Picture p:
-                                frameId = p.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value;
-                                xf = p.ShapeProperties?.Transform2D;
-                                break;
-                            case ConnectionShape c:
-                                frameId = c.NonVisualConnectionShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
-                                xf = c.ShapeProperties?.Transform2D;
-                                break;
-                            case GraphicFrame gf:
-                                frameId = gf.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Id?.Value;
-                                if (frameId == id && gf.Transform != null)
-                                    return (gf.Transform.Offset?.X?.Value ?? 0, gf.Transform.Offset?.Y?.Value ?? 0,
-                                            gf.Transform.Extents?.Cx?.Value ?? 0, gf.Transform.Extents?.Cy?.Value ?? 0);
-                                break;
-                            case GroupShape g:
-                                frameId = g.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
-                                var gxf = g.GroupShapeProperties?.TransformGroup;
-                                if (frameId == id && gxf != null)
-                                    return (gxf.Offset?.X?.Value ?? 0, gxf.Offset?.Y?.Value ?? 0,
-                                            gxf.Extents?.Cx?.Value ?? 0, gxf.Extents?.Cy?.Value ?? 0);
-                                break;
-                        }
-                        if (frameId == id && xf != null)
-                            return (xf.Offset?.X?.Value ?? 0, xf.Offset?.Y?.Value ?? 0,
-                                    xf.Extents?.Cx?.Value ?? 0, xf.Extents?.Cy?.Value ?? 0);
-                    }
-                    return null;
-                }
+                    => FrameBoundsById(tree, id);
 
                 var hasFrom = properties.ContainsKey("from") || properties.ContainsKey("startshape") || properties.ContainsKey("startShape");
                 var hasTo = properties.ContainsKey("to") || properties.ContainsKey("endshape") || properties.ContainsKey("endShape");
@@ -523,6 +485,54 @@ public partial class PowerPointHandler
             new Drawing.ListStyle());
         cxn.AppendChild(fresh);
         return fresh;
+    }
+
+    /// <summary>
+    /// Returns the slide-absolute bounding box (EMU) of a shape-tree frame by its
+    /// NonVisualDrawingProperties Id, across all frame kinds (Shape, Picture,
+    /// ConnectionShape, GraphicFrame, GroupShape). Shared by connector Add and Set
+    /// (R14-4) so reconnecting endpoints recomputes the connector xfrm the same way
+    /// Add does. Returns null if no frame with that id has a transform.
+    /// </summary>
+    private static (long x, long y, long cx, long cy)? FrameBoundsById(ShapeTree tree, uint id)
+    {
+        foreach (var el in tree.ChildElements)
+        {
+            Drawing.Transform2D? xf = null;
+            uint? frameId = null;
+            switch (el)
+            {
+                case Shape s:
+                    frameId = s.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+                    xf = s.ShapeProperties?.Transform2D;
+                    break;
+                case Picture p:
+                    frameId = p.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value;
+                    xf = p.ShapeProperties?.Transform2D;
+                    break;
+                case ConnectionShape c:
+                    frameId = c.NonVisualConnectionShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+                    xf = c.ShapeProperties?.Transform2D;
+                    break;
+                case GraphicFrame gf:
+                    frameId = gf.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Id?.Value;
+                    if (frameId == id && gf.Transform != null)
+                        return (gf.Transform.Offset?.X?.Value ?? 0, gf.Transform.Offset?.Y?.Value ?? 0,
+                                gf.Transform.Extents?.Cx?.Value ?? 0, gf.Transform.Extents?.Cy?.Value ?? 0);
+                    break;
+                case GroupShape g:
+                    frameId = g.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+                    var gxf = g.GroupShapeProperties?.TransformGroup;
+                    if (frameId == id && gxf != null)
+                        return (gxf.Offset?.X?.Value ?? 0, gxf.Offset?.Y?.Value ?? 0,
+                                gxf.Extents?.Cx?.Value ?? 0, gxf.Extents?.Cy?.Value ?? 0);
+                    break;
+            }
+            if (frameId == id && xf != null)
+                return (xf.Offset?.X?.Value ?? 0, xf.Offset?.Y?.Value ?? 0,
+                        xf.Extents?.Cx?.Value ?? 0, xf.Extents?.Cy?.Value ?? 0);
+        }
+        return null;
     }
 
     /// <summary>
