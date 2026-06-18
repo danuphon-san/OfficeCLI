@@ -136,7 +136,9 @@ public partial class PowerPointHandler
         if ((properties.TryGetValue("fontScale", out var fs) || properties.TryGetValue("fontscale", out fs))
             && TryParseScalePerMille(fs, out var fsv))
             naf.FontScale = fsv;
-        if ((properties.TryGetValue("lnSpcReduction", out var lr) || properties.TryGetValue("lnspcreduction", out lr))
+        if ((properties.TryGetValue("lnSpcReduction", out var lr) || properties.TryGetValue("lnspcreduction", out lr)
+                || properties.TryGetValue("lineSpaceReduction", out lr) || properties.TryGetValue("linespacereduction", out lr)
+                || properties.TryGetValue("lineSpacingReduction", out lr) || properties.TryGetValue("linespacingreduction", out lr))
             && TryParseScalePerMille(lr, out var lrv))
             naf.LineSpaceReduction = lrv;
         return naf;
@@ -151,8 +153,13 @@ public partial class PowerPointHandler
             return double.TryParse(s.TrimEnd('%').Trim(), System.Globalization.NumberStyles.Float,
                        System.Globalization.CultureInfo.InvariantCulture, out var d)
                    && (val = (int)Math.Round(d * 1000)) >= 0;
-        return int.TryParse(s, System.Globalization.NumberStyles.Integer,
-            System.Globalization.CultureInfo.InvariantCulture, out val);
+        if (!int.TryParse(s, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out val)) return false;
+        // R10-3 (LEAD: Option B): a bare integer in 0..100 is a PERCENT (75 → 75000),
+        // matching the user-facing percent vocabulary. Values >100 are already raw
+        // OOXML thousandths-of-percent (e.g. dump→replay of fontScale="92500").
+        if (val >= 0 && val <= 100) val *= 1000;
+        return true;
     }
 
     private static List<string> SetRunOrShapeProperties(
@@ -1562,13 +1569,24 @@ public partial class PowerPointHandler
                     break;
                 }
 
-                case "fontscale" or "fontScale" or "lnspcreduction" or "lnSpcReduction":
+                case "fontscale" or "fontScale" or "lnspcreduction" or "lnSpcReduction"
+                    or "linespacereduction" or "lineSpaceReduction"
+                    or "linespacingreduction" or "lineSpacingReduction":
                 {
                     // Consumed as siblings of autofit= (ApplyNormalAutoFitScale).
-                    // Handle standalone too: patch an existing <a:normAutofit>.
+                    // Handle standalone too: patch the existing <a:normAutofit>, or
+                    // synthesize one when the body has no autofit child yet (fontScale/
+                    // lnSpcReduction are normAutofit attributes — setting them implies
+                    // shrink-to-fit mode). normAutofit is mutually exclusive with
+                    // spAutoFit/noAutofit, so a bare body needs one created.
                     var bodyPr = shape.TextBody?.Elements<Drawing.BodyProperties>().FirstOrDefault();
-                    var naf = bodyPr?.GetFirstChild<Drawing.NormalAutoFit>();
+                    if (bodyPr == null) { unsupported.Add(key); break; }
+                    var naf = bodyPr.GetFirstChild<Drawing.NormalAutoFit>();
+                    if (naf == null && bodyPr.GetFirstChild<Drawing.ShapeAutoFit>() == null
+                        && bodyPr.GetFirstChild<Drawing.NoAutoFit>() == null)
+                        naf = bodyPr.AppendChild(new Drawing.NormalAutoFit());
                     if (naf != null) ApplyNormalAutoFitScale(naf, properties);
+                    else unsupported.Add(key);
                     break;
                 }
                 case "autofit":
@@ -1580,20 +1598,14 @@ public partial class PowerPointHandler
                     bodyPr.RemoveAllChildren<Drawing.NoAutoFit>();
                     switch (value.ToLowerInvariant())
                     {
-                        case "true" or "normal" or "normautofit" or "auto": bodyPr.AppendChild(ApplyNormalAutoFitScale(new Drawing.NormalAutoFit(), properties)); break;
+                        // R10-4: 'shrink' and 'true' alias normAutofit. PowerPoint's
+                        // <a:normAutofit> IS the shrink-text-on-overflow mode; the
+                        // optional fontScale/lnSpcReduction attributes carry the
+                        // computed shrink ratio (callers may tune via fontScale=).
+                        case "true" or "shrink" or "normal" or "normautofit" or "auto": bodyPr.AppendChild(ApplyNormalAutoFitScale(new Drawing.NormalAutoFit(), properties)); break;
                         case "shape" or "spautofit" or "resize": bodyPr.AppendChild(new Drawing.ShapeAutoFit()); break;
                         case "false" or "none": bodyPr.AppendChild(new Drawing.NoAutoFit()); break;
-                        // 'shrink' previously aliased to 'normal' (same plain
-                        // <a:normAutofit/> with no fontScale/lnSpcReduction
-                        // attributes), so callers asking for shrink-on-overflow
-                        // got identical XML to autofit=normal. Reject the alias
-                        // instead of silently lying — implementing real shrink
-                        // requires picking fontScale/lnSpcReduction values per
-                        // overflow geometry, which is its own feature. Callers
-                        // wanting shrink-on-overflow today should use
-                        // autofit=normal and tune fontScale via raw-set.
-                        case "shrink": throw new ArgumentException($"Invalid autofit value: 'shrink'. PowerPoint's shrink-on-overflow requires fontScale/lnSpcReduction attributes that officecli does not synthesize; use autofit=normal (plain normAutofit) and tune via raw-set if needed. Valid values: true/normal, shape/resize, false/none.");
-                        default: throw new ArgumentException($"Invalid autofit value: '{value}'. Valid values: true/normal, shape/resize, false/none.");
+                        default: throw new ArgumentException($"Invalid autofit value: '{value}'. Valid values: true/shrink/normal, shape/resize, false/none.");
                     }
                     break;
                 }

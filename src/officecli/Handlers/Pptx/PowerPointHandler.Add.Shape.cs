@@ -540,7 +540,9 @@ public partial class PowerPointHandler
                     {
                         switch (afVal.ToLowerInvariant())
                         {
-                            case "true" or "normal": bodyPr.AppendChild(ApplyNormalAutoFitScale(new Drawing.NormalAutoFit(), properties)); break;
+                            // R10-4: 'shrink'/'true' alias normAutofit (PowerPoint's
+                            // shrink-text-on-overflow mode).
+                            case "true" or "shrink" or "normal": bodyPr.AppendChild(ApplyNormalAutoFitScale(new Drawing.NormalAutoFit(), properties)); break;
                             case "shape": bodyPr.AppendChild(new Drawing.ShapeAutoFit()); break;
                             case "false" or "none": bodyPr.AppendChild(new Drawing.NoAutoFit()); break;
                         }
