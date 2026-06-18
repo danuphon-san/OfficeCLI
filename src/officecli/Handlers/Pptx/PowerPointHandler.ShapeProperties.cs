@@ -867,6 +867,28 @@ public partial class PowerPointHandler
                     break;
                 }
 
+                case "columns" or "numcol":
+                {
+                    // <a:bodyPr numCol="N"/> lays the text body out in N columns.
+                    // Mirrors the valign/textdirection bodyPr-attr setters above.
+                    var bodyPr = shape.TextBody?.Elements<Drawing.BodyProperties>().FirstOrDefault();
+                    if (bodyPr == null) { unsupported.Add(key); break; }
+                    if (!int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var nCol) || nCol < 1 || nCol > 16)
+                        throw new ArgumentException($"Invalid columns: '{value}'. Use an integer 1-16.");
+                    bodyPr.ColumnCount = nCol;
+                    break;
+                }
+
+                case "columnspacing" or "spccol":
+                {
+                    // <a:bodyPr spcCol="EMU"/> — gap between columns. Bare numbers
+                    // are points (CONSISTENCY(pptx-bare-as-points)).
+                    var bodyPr = shape.TextBody?.Elements<Drawing.BodyProperties>().FirstOrDefault();
+                    if (bodyPr == null) { unsupported.Add(key); break; }
+                    bodyPr.ColumnSpacing = (int)Math.Round(SpacingConverter.ParsePointsSigned(value) * EmuConverter.EmuPerPointF);
+                    break;
+                }
+
                 case "textdirection" or "textdir":
                 {
                     // CONSISTENCY(textdir-shape): <a:bodyPr vert="…"/> is valid

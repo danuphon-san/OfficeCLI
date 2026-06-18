@@ -1864,6 +1864,16 @@ public partial class PowerPointHandler
                 };
             }
 
+            // Multi-column text (a:bodyPr @numCol / @spcCol). Set writes
+            // ColumnCount/ColumnSpacing; Get must surface them so dump→replay
+            // and the HTML preview round-trip the column layout.
+            if (bodyPr.ColumnCount?.HasValue == true && bodyPr.ColumnCount.Value > 1)
+            {
+                node.Format["columns"] = bodyPr.ColumnCount.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (bodyPr.ColumnSpacing?.HasValue == true)
+                    node.Format["columnSpacing"] = $"{Units.EmuToPt(bodyPr.ColumnSpacing.Value):0.##}pt";
+            }
+
             // TextWarp (WordArt)
             var prstTxWarp = bodyPr.GetFirstChild<Drawing.PresetTextWarp>();
             if (prstTxWarp?.Preset?.HasValue == true)
