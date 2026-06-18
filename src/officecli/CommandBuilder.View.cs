@@ -26,7 +26,7 @@ static partial class CommandBuilder
         var screenshotWidthOpt = new Option<int>("--screenshot-width") { Description = "Screenshot viewport width (default 1600)", DefaultValueFactory = _ => 1600 };
         var screenshotHeightOpt = new Option<int>("--screenshot-height") { Description = "Screenshot viewport height (default 1200)", DefaultValueFactory = _ => 1200 };
         var gridOpt = new Option<int>("--grid") { Description = "Tile slides into an N-column thumbnail grid (screenshot mode, pptx only; 0 = off)", DefaultValueFactory = _ => 0 };
-        var renderOpt = new Option<string>("--render") { Description = "Screenshot rendering path (docx only): auto (default; native on Windows w/ Word, html elsewhere), native (force OS-native, error if unavailable), html", DefaultValueFactory = _ => "auto" };
+        var renderOpt = new Option<string>("--render") { Description = "Screenshot rendering path (docx/pptx): auto (default; native on Windows w/ Word/PowerPoint, html elsewhere), native (force OS-native, error if unavailable), html", DefaultValueFactory = _ => "auto" };
         var withPagesOpt = new Option<bool>("--page-count") { Description = "stats mode (docx only): also report total page count via Word repagination (Win + Word required; slow on long docs)" };
 
         var viewCommand = new Command("view", "View document in different modes");
@@ -207,22 +207,50 @@ static partial class CommandBuilder
                     if (string.IsNullOrEmpty(effectiveFilter) && start is null && end is null && gridCols == 0)
                         effectiveFilter = "1";
                     var (pStart, pEnd) = ParsePptHtmlPage(effectiveFilter, start, end, pptHandler);
-                    html = pptHandler.ViewAsHtml(pStart, pEnd, gridCols, screenshotWidth);
 
-                    // The generic 4:3 viewport (1600×1200) letterboxes a single slide with
-                    // canvas padding. When capturing one slide (not a multi-slide range or
-                    // grid), size the viewport to the slide so the PNG is the slide,
-                    // padding-free (ViewAsHtml scales the slide to fill + zeroes the headless
-                    // page padding). Default dims -> the slide's 96-DPI native pixels;
-                    // a custom --screenshot-width -> that width with an aspect-matched height.
-                    // Multi-slide ranges stack vertically and keep the tall viewport.
-                    if (pStart == pEnd && gridCols == 0)
+                    // Native path (mirrors docx --render auto/native/html): on Windows
+                    // with the presentation app installed, export the slide(s) to PNG
+                    // with the OS-native engine. Grid mode is HTML-only, so native is
+                    // skipped when --grid is set. The slide's 96-DPI native pixels are
+                    // the default export size; a custom --screenshot-width overrides it
+                    // (aspect-matched height). A range stacks vertically.
+                    var (nativeW, nativeH) = pptHandler.GetSlideNativePixels();
+                    int exportW = nativeW, exportH = nativeH;
+                    if (!(screenshotWidth == 1600 && screenshotHeight == 1200))
                     {
-                        var (nativeW, nativeH) = pptHandler.GetSlideNativePixels();
-                        if (screenshotWidth == 1600 && screenshotHeight == 1200)
-                            (screenshotWidth, screenshotHeight) = (nativeW, nativeH);
-                        else if (screenshotHeight == 1200)
-                            screenshotHeight = Math.Max(1, (int)Math.Round(screenshotWidth * (double)nativeH / nativeW));
+                        exportW = screenshotWidth;
+                        exportH = screenshotHeight == 1200
+                            ? Math.Max(1, (int)Math.Round(screenshotWidth * (double)nativeH / nativeW))
+                            : screenshotHeight;
+                    }
+                    if (renderMode != "html" && gridCols == 0 && OperatingSystem.IsWindows())
+                    {
+                        var ps = pStart ?? 1; var pe = pEnd ?? ps;
+                        try { directPng = OfficeCli.Core.PowerPointPngBackend.Render(file.FullName, ps, pe, exportW, exportH); }
+                        catch { directPng = null; }
+                    }
+                    if (renderMode == "native" && directPng == null)
+                        throw new OfficeCli.Core.CliException("--render native requires Windows with Microsoft PowerPoint installed.")
+                        { Code = "native_unavailable", Suggestion = "Use --render html or --render auto." };
+
+                    if (directPng == null)
+                    {
+                        html = pptHandler.ViewAsHtml(pStart, pEnd, gridCols, screenshotWidth);
+
+                        // The generic 4:3 viewport (1600×1200) letterboxes a single slide with
+                        // canvas padding. When capturing one slide (not a multi-slide range or
+                        // grid), size the viewport to the slide so the PNG is the slide,
+                        // padding-free (ViewAsHtml scales the slide to fill + zeroes the headless
+                        // page padding). Default dims -> the slide's 96-DPI native pixels;
+                        // a custom --screenshot-width -> that width with an aspect-matched height.
+                        // Multi-slide ranges stack vertically and keep the tall viewport.
+                        if (pStart == pEnd && gridCols == 0)
+                        {
+                            if (screenshotWidth == 1600 && screenshotHeight == 1200)
+                                (screenshotWidth, screenshotHeight) = (nativeW, nativeH);
+                            else if (screenshotHeight == 1200)
+                                screenshotHeight = Math.Max(1, (int)Math.Round(screenshotWidth * (double)nativeH / nativeW));
+                        }
                     }
                 }
                 else if (handler is OfficeCli.Handlers.ExcelHandler excelHandler)

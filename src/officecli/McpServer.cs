@@ -282,7 +282,34 @@ public static class McpServer
         {
             var pStart = start ?? 1;
             var pEnd = end ?? pStart;
-            html = ppt.ViewAsHtml(pStart, pEnd, grid, width);
+
+            // Native-first (mirrors CLI --render auto/native/html): export the
+            // slide(s) to PNG with the OS-native engine on Windows; grid is
+            // HTML-only. Default export size is the slide's 96-DPI native pixels;
+            // a custom width overrides it (aspect-matched height).
+            var (nativeW, nativeH) = ppt.GetSlideNativePixels();
+            int exportW = nativeW, exportH = nativeH;
+            if (!(width == 1600 && height == 1200))
+            {
+                exportW = width;
+                exportH = height == 1200 ? Math.Max(1, (int)Math.Round(width * (double)nativeH / nativeW)) : height;
+            }
+            if (renderMode != "html" && grid == 0 && OperatingSystem.IsWindows())
+            {
+                try { directPng = OfficeCli.Core.PowerPointPngBackend.Render(file, pStart, pEnd, exportW, exportH); }
+                catch { directPng = null; }
+            }
+            if (renderMode == "native" && directPng == null)
+                throw new ArgumentException("render=native requires Windows with Microsoft PowerPoint installed.");
+            if (directPng == null)
+            {
+                html = ppt.ViewAsHtml(pStart, pEnd, grid, width);
+                if (pStart == pEnd && grid == 0)
+                {
+                    if (width == 1600 && height == 1200) { width = nativeW; height = nativeH; }
+                    else if (height == 1200) height = Math.Max(1, (int)Math.Round(width * (double)nativeH / nativeW));
+                }
+            }
         }
         else if (handler is Handlers.ExcelHandler ex) html = ex.ViewAsHtml();
         else if (handler is Handlers.WordHandler wh)
@@ -310,7 +337,7 @@ public static class McpServer
         if (directPng != null)
         {
             File.WriteAllBytes(pngPath, directPng);
-            backendName = "word";
+            backendName = handler is Handlers.PowerPointHandler ? "powerpoint" : "word";
         }
         else
         {

@@ -27,7 +27,7 @@ internal static class WordPdfBackend
     static extern void RoActivateInstance(IntPtr classId, out IntPtr instance);
 
     [DllImport("ole32.dll", PreserveSig = false)]
-    static extern void CoCreateInstance(ref Guid clsid, IntPtr unkOuter, int ctx, ref Guid iid, out IntPtr ppv);
+    internal static extern void CoCreateInstance(ref Guid clsid, IntPtr unkOuter, int ctx, ref Guid iid, out IntPtr ppv);
 
     [DllImport("ole32.dll", PreserveSig = false)]
     static extern void CreateStreamOnHGlobal(IntPtr hGlobal, [MarshalAs(UnmanagedType.Bool)] bool fDeleteOnRelease, out IntPtr ppstm);
@@ -80,7 +80,7 @@ internal static class WordPdfBackend
     static readonly Guid G_DataReaderFact = new("d7527847-57da-4e15-914c-06806699a098");
     static readonly Guid G_RAS            = new("905a0fe1-bc53-11df-8c49-001e4fc686da");
     static readonly Guid G_Word           = new("000209FF-0000-0000-C000-000000000046");
-    static readonly Guid G_IDispatch      = new("00020400-0000-0000-C000-000000000046");
+    internal static readonly Guid G_IDispatch      = new("00020400-0000-0000-C000-000000000046");
     static readonly Guid G_WICFactory_C   = new("CACAF262-9370-4615-A13B-9F5539DA4C0A");
     static readonly Guid G_WICFactory_I   = new("EC5EC8A9-C395-4314-9C77-54D7A935FF70");
     static readonly Guid G_PngContainer   = new("1B7CFAF4-713F-473C-BBCD-6137425FAEAF");
@@ -238,9 +238,9 @@ internal static class WordPdfBackend
         }
     }
 
-    static void DispSet(IntPtr d, string name, object? v) => DispCall(d, name, 4, [v], true);
-    static object? DispGet(IntPtr d, string name) => DispCall(d, name, 2, []);
-    static object? DispMethod(IntPtr d, string name, params object?[] args) => DispCall(d, name, 1, args);
+    internal static void DispSet(IntPtr d, string name, object? v) => DispCall(d, name, 4, [v], true);
+    internal static object? DispGet(IntPtr d, string name) => DispCall(d, name, 2, []);
+    internal static object? DispMethod(IntPtr d, string name, params object?[] args) => DispCall(d, name, 1, args);
 
     static byte[] RenderOne(IntPtr doc, uint i, IntPtr drFactory, int timeoutMs)
     {
@@ -383,7 +383,7 @@ internal static class WordPdfBackend
         }
     }
 
-    static byte[] Stitch(List<byte[]> pngs)
+    internal static byte[] Stitch(List<byte[]> pngs)
     {
         if (pngs.Count == 1) return pngs[0];
         var clsid = G_WICFactory_C; var iid = G_WICFactory_I;
