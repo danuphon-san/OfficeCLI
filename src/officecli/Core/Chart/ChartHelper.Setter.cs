@@ -1484,9 +1484,13 @@ internal static partial class ChartHelper
                             .Count(e => e.LocalName == "ser");
                         secondaryIndices = new HashSet<int>(Enumerable.Range(2, Math.Max(0, totalSeries - 1)));
                     }
-                    else if (value.Equals("false", StringComparison.OrdinalIgnoreCase)
+                    else if (string.IsNullOrWhiteSpace(value)
+                          || value.Equals("false", StringComparison.OrdinalIgnoreCase)
                           || value.Equals("none", StringComparison.OrdinalIgnoreCase))
                     {
+                        // R16-9: empty/blank is a no-op. Without this, "" fell to
+                        // the else-branch → SeriesIndicesForChartType(.., "") →
+                        // StartsWith("") matched every series → silent combo rebuild.
                         // No-op: a "no secondary axis" state is the default;
                         // demoting an already-split chart back to single-axis
                         // would require a full rebuild path that doesn't yet

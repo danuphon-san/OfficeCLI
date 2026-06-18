@@ -444,8 +444,11 @@ internal static partial class ChartHelper
         // "1,3" form (series indices); emitting bare "true" silently failed
         // parsing on replay because every comma-split token tried as int
         // produced [-1] then was filtered out.
+        // R16-8: scatter and bubble charts inherently use two value axes
+        // (X + Y), not a primary/secondary split. Reporting secondaryAxis for
+        // them is a phantom readback that corrupts dump→replay. Skip them.
         var valAxes = plotArea.Elements<C.ValueAxis>().ToList();
-        if (valAxes.Count > 1)
+        if (valAxes.Count > 1 && chartType is not ("scatter" or "bubble"))
         {
             // Map AxisId -> rank by document order; rank 0 = primary, 1 = secondary.
             var axisRank = new Dictionary<uint, int>();

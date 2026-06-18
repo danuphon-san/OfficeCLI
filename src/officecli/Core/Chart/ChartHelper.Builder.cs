@@ -237,7 +237,7 @@ internal static partial class ChartHelper
                 chartElement = BuildScatterChart(categories, seriesData, catAxisId, valAxisId, scatterStyle, colors);
                 break;
             case "bubble":
-                chartElement = BuildBubbleChart(categories, seriesData, catAxisId, valAxisId, colors);
+                chartElement = BuildBubbleChart(categories, seriesData, catAxisId, valAxisId, colors, properties);
                 break;
             case "radar":
             {
@@ -1028,9 +1028,16 @@ internal static partial class ChartHelper
 
     internal static C.BubbleChart BuildBubbleChart(
         string[]? categories, List<(string name, double[] values)> seriesData,
-        uint catAxisId, uint valAxisId, string[]? colors = null)
+        uint catAxisId, uint valAxisId, string[]? colors = null,
+        Dictionary<string, string>? properties = null)
     {
         var bubbleChart = new C.BubbleChart(new C.VaryColors { Val = false });
+
+        // R16-7: per-series literal bubble sizes (series{N}.bubbleSize=...). The
+        // default path below seeds size = y-values; consume the user-supplied
+        // literal sizes here so they're written verbatim, mirroring how the
+        // ref form (series{N}.bubbleSizeRef) is applied in PostProcessSeriesRefs.
+        var extSeries = properties != null ? ParseSeriesDataExtended(properties) : null;
 
         double[]? xValues = null;
         if (categories != null)
@@ -1110,10 +1117,14 @@ internal static partial class ChartHelper
                 yLit.AppendChild(new C.NumericPoint(new C.NumericValue(values[j].ToString("G"))) { Index = (uint)j });
             series.AppendChild(new C.YValues(yLit));
 
-            // Bubble sizes — use the values as sizes by default, or a third series if provided
-            var sizeLit = new C.NumberLiteral(new C.PointCount { Val = (uint)values.Length });
-            for (int j = 0; j < values.Length; j++)
-                sizeLit.AppendChild(new C.NumericPoint(new C.NumericValue(values[j].ToString("G"))) { Index = (uint)j });
+            // Bubble sizes — user-supplied literal sizes (R16-7) when present,
+            // otherwise default to the y-values.
+            var sizes = (extSeries != null && i < extSeries.Count && extSeries[i].BubbleSizeValues != null)
+                ? extSeries[i].BubbleSizeValues!
+                : values;
+            var sizeLit = new C.NumberLiteral(new C.PointCount { Val = (uint)sizes.Length });
+            for (int j = 0; j < sizes.Length; j++)
+                sizeLit.AppendChild(new C.NumericPoint(new C.NumericValue(sizes[j].ToString("G"))) { Index = (uint)j });
             series.AppendChild(new C.BubbleSize(sizeLit));
 
             bubbleChart.AppendChild(series);
