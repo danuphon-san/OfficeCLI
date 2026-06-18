@@ -90,8 +90,13 @@ public partial class PowerPointHandler
                     {
                         var slideMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]$");
                         if (!slideMatch.Success)
+                        {
+                            var hint = parentPath.StartsWith("-")
+                                ? " The parent is a positional argument, not a flag — run 'add <file> /slide[N] --type shape ...'."
+                                : "";
                             throw new ArgumentException(
-                                $"Shapes must be added to a slide, master, layout, or group: /slide[N], /slide[N]/group[K], /slidemaster[N], /slidelayout[N], or /slidemaster[N]/slidelayout[L]");
+                                $"Shapes must be added to a slide, master, layout, or group, but got parent '{parentPath}'. Expected /slide[N], /slide[N]/group[K], /slidemaster[N], /slidelayout[N], or /slidemaster[N]/slidelayout[L].{hint}");
+                        }
 
                         slideIdx = int.Parse(slideMatch.Groups[1].Value);
                         slideParts = GetSlideParts().ToList();
