@@ -283,7 +283,21 @@ public static partial class WordBatchEmitter
         // itself. Leaving the harvested keys on `add p` duplicates them onto
         // the ¶ mark on rebuild (<w:b/> count 2). Field entries are therefore
         // format-bearing hoist sources too.
-        bool hasFormatBearingRun = runs.Any(c => c.Type == "run" || c.Type == "r" || c.Type == "field");
+        // BUG-DUMP-MARKSZ-DEL: a paragraph whose only runs are tracked-revision
+        // runs (<w:del>/<w:ins>/<w:moveFrom>/<w:moveTo>) has NO direct hoist
+        // source — Navigation's firstRun (para.Elements<Run>()) skips revision-
+        // wrapped runs, so the paragraph's bare size/size.cs/font.* keys were
+        // read off the ¶-mark rPr, not off a run. Treating the del/ins run as
+        // the hoist source and stripping here dropped the mark's font size, so
+        // a deleted-content table cell collapsed to default line height on
+        // rebuild — pushing every later row down (cumulative drift, +1 page).
+        // Only a non-revision run is a genuine hoist source.
+        static bool IsRevisionWrappedRun(DocumentNode c) =>
+            c.Format.TryGetValue("revision.type", out var rvt)
+            && rvt?.ToString() is "del" or "ins" or "moveFrom" or "moveTo";
+        bool hasFormatBearingRun = runs.Any(c =>
+            (c.Type == "run" || c.Type == "r" || c.Type == "field")
+            && !IsRevisionWrappedRun(c));
         if (hasFormatBearingRun)
             StripRunCharacterPropsFromParagraph(props);
         if (autoPresent)
