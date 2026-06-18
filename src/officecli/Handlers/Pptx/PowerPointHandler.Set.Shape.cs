@@ -35,6 +35,14 @@ public partial class PowerPointHandler
             .ToDictionary(kv => kv.Key, kv => kv.Value);
         var unsupported = SetRunOrShapeProperties(runOnlyProps, new List<Drawing.Run> { targetRun }, shape, slidePart, runContext: true, unsupportedContextHint: RunPropsHint);
         if (linkValRun != null) ApplyRunHyperlink(slidePart, targetRun, linkValRun, tooltipValRun);
+        // R7-8: tooltip-only Set on a run that already has a hyperlink — update the
+        // existing hlinkClick's Tooltip attribute instead of silently no-oping (the
+        // link= branch above is the only place tooltips were applied previously).
+        else if (tooltipValRun != null)
+        {
+            var existingHlink = targetRun.RunProperties?.GetFirstChild<Drawing.HyperlinkOnClick>();
+            if (existingHlink != null) existingHlink.Tooltip = tooltipValRun;
+        }
         GetSlide(slidePart).Save();
         return unsupported;
     }
@@ -150,6 +158,13 @@ public partial class PowerPointHandler
             .ToDictionary(kv => kv.Key, kv => kv.Value);
         var unsupported = SetRunOrShapeProperties(runOnlyProps, new List<Drawing.Run> { targetRun }, shape, slidePart, runContext: true, unsupportedContextHint: RunPropsHint);
         if (linkVal != null) ApplyRunHyperlink(slidePart, targetRun, linkVal, tooltipVal);
+        // R7-8: tooltip-only Set on a run that already has a hyperlink — update the
+        // existing hlinkClick's Tooltip attribute instead of silently no-oping.
+        else if (tooltipVal != null)
+        {
+            var existingHlink = targetRun.RunProperties?.GetFirstChild<Drawing.HyperlinkOnClick>();
+            if (existingHlink != null) existingHlink.Tooltip = tooltipVal;
+        }
         GetSlide(slidePart).Save();
         return unsupported;
     }
