@@ -450,8 +450,21 @@ public partial class PowerPointHandler
         if (!string.IsNullOrWhiteSpace(GetShapeText(shape)))
             styles.Add($"padding:{Units.EmuToPt(tIns)}pt {Units.EmuToPt(rIns)}pt {Units.EmuToPt(bIns)}pt {Units.EmuToPt(lIns)}pt");
 
-        // Vertical alignment class
-        var valign = "top";
+        // Vertical alignment class.
+        //
+        // Default (no explicit anchor, nothing inherited) is shape-kind
+        // dependent in real PowerPoint:
+        //   - text box (<p:cNvSpPr txBox="1">)  → top
+        //   - placeholder (<p:ph>)              → inherits from layout/master
+        //                                          (leave at "top" here; the
+        //                                          inheritance path is unchanged)
+        //   - autoshape (prstGeom/custGeom, no txBox) → center
+        // An explicit <a:bodyPr anchor="t|ctr|b"> always wins.
+        var isPlaceholder = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+            ?.GetFirstChild<PlaceholderShape>() != null;
+        var isTextBox = shape.NonVisualShapeProperties?.NonVisualShapeDrawingProperties
+            ?.TextBox?.Value == true;
+        var valign = (!isPlaceholder && !isTextBox) ? "center" : "top";
         if (bodyPr?.Anchor?.HasValue == true)
         {
             valign = bodyPr.Anchor.InnerText switch
