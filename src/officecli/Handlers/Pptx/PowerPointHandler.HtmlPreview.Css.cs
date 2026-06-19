@@ -481,7 +481,13 @@ public partial class PowerPointHandler
             // out to its far corner, matching native's large color fill.
             var centered = Math.Abs(cx - 50) < 0.5 && Math.Abs(cy - 50) < 0.5;
             var sizeKeyword = centered ? "closest-side" : "farthest-corner";
-            return $"radial-gradient(circle {sizeKeyword} at {cx:0.##}% {cy:0.##}%, {string.Join(", ", cssStops)})";
+            // <a:path path="rect"> draws rectangular isocontours that reach all four
+            // edges of the shape simultaneously. CSS `ellipse` adapts its two radii to
+            // the element's aspect ratio, matching that on a non-square shape; `circle`
+            // keeps equal radii and only reaches the short edges. `circle`/`shape` paths
+            // stay on the CSS `circle` keyword (exact match / best available).
+            var shapeKeyword = pathGrad.Path?.Value == Drawing.PathShadeValues.Rectangle ? "ellipse" : "circle";
+            return $"radial-gradient({shapeKeyword} {sizeKeyword} at {cx:0.##}% {cy:0.##}%, {string.Join(", ", cssStops)})";
         }
 
         var linear = gradFill.GetFirstChild<Drawing.LinearGradientFill>();
