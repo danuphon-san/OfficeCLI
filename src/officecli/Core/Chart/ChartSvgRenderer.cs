@@ -65,6 +65,16 @@ internal partial class ChartSvgRenderer
     // Default true so paths that don't parse axis info keep prior behavior.
     public bool ShowValGridlines { get; set; } = true;
     public bool ShowCatGridlines { get; set; } = true;
+    // Fainter minor gridlines (<c:minorGridlines>). Drawn at majorUnit/N
+    // sub-intervals between major ticks; lighter stroke so they stay
+    // subordinate to the major gridlines. Synced from ChartInfo.
+    public bool ShowValMinorGridlines { get; set; }
+    // Number of minor sub-intervals per major interval (PowerPoint default 5).
+    public int MinorGridlineCount { get; set; } = 5;
+    // Axis visibility (<c:delete val="1"/> deletes the axis). When false the
+    // axis tick labels and its (major+minor) gridlines are suppressed.
+    public bool ValAxisVisible { get; set; } = true;
+    public bool CatAxisVisible { get; set; } = true;
     public string AxisLineColor { get; set; } = "#555";
     public int ValFontPx { get; set; } = 9;
     public int CatFontPx { get; set; } = 9;
@@ -177,7 +187,12 @@ internal partial class ChartSvgRenderer
                 var negMagnitude = ComputeNiceAxis(-dataMin).niceMax;
                 niceMin = -negMagnitude;
             }
-            if (niceMin < 0)
+            // BUG1(R25): when an explicit axisMin is applied after nTicks was
+            // computed against a zero floor, the tick count is stale and the
+            // loop overshoots axisMax (e.g. min=50/max=400/unit=100 emitted a
+            // 450 tick). Recompute for any non-zero niceMin so no tick exceeds
+            // niceMax. (The negative branch already relied on this.)
+            if (niceMin != 0)
                 nTicks = (int)Math.Ceiling((niceMax - niceMin) / tickStep);
         }
         else { niceMax = 100; nTicks = 5; tickStep = 20; }
@@ -210,7 +225,14 @@ internal partial class ChartSvgRenderer
 
             // Zero-baseline X coordinate within the plot (== plotOx when niceMin==0).
             var plotZeroX = plotOx + zeroFrac * plotPw;
-            if (ShowValGridlines)
+            if (ShowValMinorGridlines && ValAxisVisible)
+            for (int t = 0; t < nTicks; t++)
+                for (int m = 1; m < MinorGridlineCount; m++)
+                {
+                    var gx = plotOx + (double)plotPw * (t + (double)m / MinorGridlineCount) / nTicks;
+                    sb.AppendLine($"        <line x1=\"{gx:0.#}\" y1=\"{oy}\" x2=\"{gx:0.#}\" y2=\"{oy + ph}\" stroke=\"{GridColor}\" stroke-width=\"0.25\" opacity=\"0.5\"/>");
+                }
+            if (ShowValGridlines && ValAxisVisible)
             for (int t = 0; t <= nTicks; t++)
             {
                 var gx = plotOx + (double)plotPw * t / nTicks;
@@ -354,6 +376,7 @@ internal partial class ChartSvgRenderer
                     }
                 }
             }
+            if (CatAxisVisible)
             for (int c = 0; c < catCount; c++)
             {
                 var dataIdx = catCount - 1 - c;
@@ -361,9 +384,11 @@ internal partial class ChartSvgRenderer
                 var ly = oy + c * groupH + groupH / 2;
                 sb.AppendLine($"        <text x=\"{plotOx - 4}\" y=\"{ly:0.#}\" fill=\"{CatColor}\" font-size=\"{catFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
             }
+            if (ValAxisVisible)
             for (int t = 0; t <= nTicks; t++)
             {
                 var val = niceMin + tickStep * t;
+                if (val > niceMax + 1e-9) continue; // BUG1(R25): no label past axisMax
                 var label = percentStacked ? $"{(int)val}%" : FormatAxisValue(val, valNumFmt);
                 var tx = plotOx + (double)plotPw * t / nTicks;
                 sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{AxisColor}\" font-size=\"{valFontSize}\" text-anchor=\"middle\">{label}</text>");
@@ -391,12 +416,19 @@ internal partial class ChartSvgRenderer
 
             // Zero-baseline Y coordinate within the plot (== oy+ph when niceMin==0).
             var plotZeroY = oy + ph - zeroFrac * ph;
-            if (ShowValGridlines)
+            if (ShowValGridlines && ValAxisVisible)
             for (int t = 0; t <= nTicks; t++)
             {
                 var gy = oy + ph - (double)ph * t / nTicks;
                 sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
             }
+            if (ShowValMinorGridlines && ValAxisVisible)
+            for (int t = 0; t < nTicks; t++)
+                for (int m = 1; m < MinorGridlineCount; m++)
+                {
+                    var gy = oy + ph - (double)ph * (t + (double)m / MinorGridlineCount) / nTicks;
+                    sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.25\" opacity=\"0.5\"/>");
+                }
             sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
             sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy + ph}\" x2=\"{ox + pw}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
             // Zero baseline when the domain straddles zero (negative data present).
@@ -536,15 +568,21 @@ internal partial class ChartSvgRenderer
                     }
                 }
             }
+            if (CatAxisVisible)
             for (int c = 0; c < catCount; c++)
             {
                 var label = c < categories.Length ? categories[c] : "";
                 var lx = ox + c * groupW + groupW / 2;
                 sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{catFontSize}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
             }
+            if (ValAxisVisible)
             for (int t = 0; t <= nTicks; t++)
             {
                 var val = niceMin + tickStep * t;
+                // BUG1(R25): with an explicit axisMin/max/majorUnit the final
+                // tick can land above axisMax (e.g. 450 > 400); real PowerPoint
+                // omits any label past the axis top. Skip it.
+                if (val > niceMax + 1e-9) continue;
                 var label = percentStacked ? $"{(int)val}%" : FormatAxisValue(val, valNumFmt);
                 var ty = oy + ph - (double)ph * t / nTicks;
                 sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{valFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
@@ -804,7 +842,8 @@ internal partial class ChartSvgRenderer
         string? dropLineColor = null, double dropLineWidth = 0.7, string? dropLineDash = null,
         string? highLowLineColor = null, double highLowLineWidth = 1,
         List<TrendlineInfo?>? trendlines = null, List<ErrorBarInfo?>? errorBars = null,
-        bool scatterMarkersOnly = false, bool stacked = false, bool percent = false)
+        bool scatterMarkersOnly = false, bool stacked = false, bool percent = false,
+        string? dataLabelNumFmt = null)
     {
         bool isLog = logBase.HasValue && logBase.Value > 1;
 
@@ -1002,7 +1041,12 @@ internal partial class ChartSvgRenderer
                 if (showDataLabels)
                 {
                     var val = pts[p].val;
-                    var vlabel = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
+                    // BUG5(R25): honor <c:dLbls><c:numFmt> on the data labels
+                    // (e.g. "$#,##0"); fall back to the value-axis numFmt (mirrors
+                    // the bar LabelText path) then the bare-integer shortcut.
+                    var vlabel = !string.IsNullOrEmpty(dataLabelNumFmt) ? FormatAxisValue(val, dataLabelNumFmt)
+                        : !string.IsNullOrEmpty(valNumFmt) ? FormatAxisValue(val, valNumFmt)
+                        : val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
                     sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{pts[p].x:0.#}\" y=\"{pts[p].y - 6:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
                 }
             }
@@ -1286,7 +1330,8 @@ internal partial class ChartSvgRenderer
 
     public void RenderAreaChartSvg(StringBuilder sb, List<(string name, double[] values)> series,
         string[] categories, List<string> colors, int ox, int oy, int pw, int ph, bool stacked = false,
-        bool percent = false)
+        bool percent = false,
+        double? axisMin = null, double? axisMax = null, double? majorUnit = null, string? valNumFmt = null)
     {
         if (series.Count == 0) return;
         var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
@@ -1323,18 +1368,37 @@ internal partial class ChartSvgRenderer
             : ComputeNiceAxis(Math.Abs(maxVal) > Math.Abs(minVal) ? maxVal : -minVal);
         // For non-stacked charts with negative values, expand the axis to cover minVal
         var niceMin = minVal < 0 ? -ComputeNiceAxis(-minVal).niceMax : 0.0;
+        // BUG2(R25): honor explicit axis scaling (axisMin/axisMax/majorUnit) like
+        // the column renderer, so an area chart with set axisMax=… isn't ignored.
+        if (!percent)
+        {
+            if (axisMax.HasValue) niceMax = axisMax.Value;
+            if (axisMin.HasValue) niceMin = axisMin.Value;
+            if (majorUnit.HasValue && majorUnit.Value > 0)
+            {
+                tickInterval = majorUnit.Value;
+                tickCount = (int)Math.Ceiling((niceMax - niceMin) / tickInterval);
+            }
+        }
         var axisRange = niceMax - niceMin;
 
         // Helper: map a data value to a y-coordinate within [oy, oy+ph]
         double DataToY(double v) => oy + ph - (v - niceMin) / axisRange * ph;
         double ZeroY() => DataToY(0.0);
 
-        if (ShowValGridlines)
+        if (ShowValGridlines && ValAxisVisible)
         for (int t = 1; t <= tickCount; t++)
         {
             var gy = oy + ph - (double)ph * t / tickCount;
             sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
         }
+        if (ShowValMinorGridlines && ValAxisVisible)
+        for (int t = 0; t < tickCount; t++)
+            for (int m = 1; m < MinorGridlineCount; m++)
+            {
+                var gy = oy + ph - (double)ph * (t + (double)m / MinorGridlineCount) / tickCount;
+                sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.25\" opacity=\"0.5\"/>");
+            }
         sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
         sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy + ph}\" x2=\"{ox + pw}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
 
@@ -1375,16 +1439,22 @@ internal partial class ChartSvgRenderer
                 sb.AppendLine($"        <polygon points=\"{firstX:0.#},{baseY:0.#} {string.Join(" ", topPoints)} {lastX:0.#},{baseY:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"{FillOpacity(s)}\"/>");
             }
         }
+        if (CatAxisVisible)
         for (int c = 0; c < catCount; c++)
         {
             var label = c < categories.Length ? categories[c] : "";
             var lx = ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
             sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
         }
+        if (ValAxisVisible)
         for (int t = 0; t <= tickCount; t++)
         {
-            var val = tickInterval * t;
-            var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
+            // BUG2(R25): start at niceMin and format with the value-axis numFmt
+            // (e.g. "$#,##0") instead of hardcoded integer text.
+            var val = niceMin + tickInterval * t;
+            if (val > niceMax + 1e-9) continue; // BUG1(R25): no label past axisMax
+            var label = percent ? (val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}")
+                : FormatAxisValue(val, valNumFmt);
             var ty = oy + ph - (double)ph * t / tickCount;
             sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
@@ -2090,6 +2160,14 @@ internal partial class ChartSvgRenderer
         public bool ValMajorGridlines { get; set; }
         /// <summary>True when the category axis has &lt;c:majorGridlines&gt; (vertical gridlines).</summary>
         public bool CatMajorGridlines { get; set; }
+        /// <summary>True when the value axis has &lt;c:minorGridlines&gt; (fainter sub-interval gridlines).</summary>
+        public bool ValMinorGridlines { get; set; }
+        /// <summary>True when the category axis has &lt;c:minorGridlines&gt;.</summary>
+        public bool CatMinorGridlines { get; set; }
+        /// <summary>False when the value axis is deleted (&lt;c:delete val="1"/&gt;). Default true.</summary>
+        public bool ValAxisVisible { get; set; } = true;
+        /// <summary>False when the category axis is deleted (&lt;c:delete val="1"/&gt;). Default true.</summary>
+        public bool CatAxisVisible { get; set; } = true;
         public string? AxisLineColor { get; set; }
         public int DataLabelFontPx { get; set; } = 8;
         /// <summary>Reference-line overlays (horizontal dashed lines at constant values).
@@ -2392,8 +2470,14 @@ internal partial class ChartSvgRenderer
             // Gridline color
             var majorGridlines = valAxis.Elements().FirstOrDefault(e => e.LocalName == "majorGridlines");
             info.ValMajorGridlines = majorGridlines != null;
+            info.ValMinorGridlines = valAxis.Elements().Any(e => e.LocalName == "minorGridlines");
             var gridSpPr = majorGridlines?.Elements().FirstOrDefault(e => e.LocalName == "spPr");
             info.GridlineColor = ExtractLineColor(gridSpPr);
+
+            // BUG4(R25): <c:delete val="1"/> hides the axis (ticks + gridlines).
+            var valDeleteEl = valAxis.Elements().FirstOrDefault(e => e.LocalName == "delete");
+            var valDelVal = valDeleteEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+            info.ValAxisVisible = valDelVal != "1";
 
             // Axis line color
             var valSpPr = valAxis.Elements().FirstOrDefault(e => e.LocalName == "spPr");
@@ -2408,6 +2492,10 @@ internal partial class ChartSvgRenderer
         if (catAxis != null)
         {
             info.CatMajorGridlines = catAxis.Elements().Any(e => e.LocalName == "majorGridlines");
+            info.CatMinorGridlines = catAxis.Elements().Any(e => e.LocalName == "minorGridlines");
+            var catDeleteEl = catAxis.Elements().FirstOrDefault(e => e.LocalName == "delete");
+            var catDelVal = catDeleteEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+            info.CatAxisVisible = catDelVal != "1";
             var catTitleEl = catAxis.Elements().FirstOrDefault(e => e.LocalName == "title");
             info.CatAxisTitle = catTitleEl?.Descendants<Drawing.Text>().FirstOrDefault()?.Text;
             var catTitleRPr = catTitleEl?.Descendants<Drawing.RunProperties>().FirstOrDefault();
@@ -2876,6 +2964,9 @@ internal partial class ChartSvgRenderer
         if (info.GridlineColor != null) GridColor = CssHexColor(info.GridlineColor);
         ShowValGridlines = info.ValMajorGridlines;
         ShowCatGridlines = info.CatMajorGridlines;
+        ShowValMinorGridlines = info.ValMinorGridlines;
+        ValAxisVisible = info.ValAxisVisible;
+        CatAxisVisible = info.CatAxisVisible;
         if (info.AxisLineColor != null) AxisLineColor = CssHexColor(info.AxisLineColor);
         DataLabelFontPx = info.DataLabelFontPx;
         DataLabelPos = info.DataLabelPos;
@@ -2932,7 +3023,8 @@ internal partial class ChartSvgRenderer
                 RenderArea3DSvg(sb, info.Series, info.Categories, info.Colors, marginLeft, marginTop, areaW, plotH,
                     info.IsStacked, info.RotateX, info.RotateY);
             else
-                RenderAreaChartSvg(sb, info.Series, info.Categories, info.Colors, marginLeft, marginTop, areaW, plotH, info.IsStacked, info.IsPercent);
+                RenderAreaChartSvg(sb, info.Series, info.Categories, info.Colors, marginLeft, marginTop, areaW, plotH, info.IsStacked, info.IsPercent,
+                    info.AxisMin, info.AxisMax, info.MajorUnit, info.ValNumFmt);
         }
         else if (chartType == "combo")
         {
@@ -2974,7 +3066,7 @@ internal partial class ChartSvgRenderer
                     info.DropLineColor, info.DropLineWidth, info.DropLineDash,
                     info.HighLowLineColor, info.HighLowLineWidth,
                     info.Trendlines, info.ErrorBars, info.ScatterMarkersOnly,
-                    info.IsStacked, info.IsPercent);
+                    info.IsStacked, info.IsPercent, info.DataLabelsNumFmt);
         }
         else
         {
