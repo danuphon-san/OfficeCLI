@@ -1610,7 +1610,8 @@ public partial class PowerPointHandler
             // Polygons
             "pentagon" => "clip-path:polygon(50% 0,100% 38%,82% 100%,18% 100%,0 38%)",
             // hexagon handled above (parametric, honors avLst)
-            "heptagon" => "clip-path:polygon(50% 0,90% 20%,100% 60%,75% 100%,25% 100%,0 60%,10% 20%)",
+            // vertex-up regular heptagon, bbox-normalized (side vertices at y=64.3%, base 72.3%-27.7%)
+            "heptagon" => "clip-path:polygon(50% 0,90.1% 19.8%,100% 64.3%,72.3% 100%,27.7% 100%,0 64.3%,9.9% 19.8%)",
             "octagon" => "clip-path:polygon(29% 0,71% 0,100% 29%,100% 71%,71% 100%,29% 100%,0 71%,0 29%)",
             // edge-up regular decagon (10 vertices): flat top/bottom, pointed left/right
             "decagon" => "clip-path:polygon(35% 0,65% 0,90% 19%,100% 50%,90% 81%,65% 100%,35% 100%,10% 81%,0 50%,10% 19%)",
