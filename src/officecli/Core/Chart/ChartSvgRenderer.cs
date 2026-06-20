@@ -1988,7 +1988,7 @@ internal partial class ChartSvgRenderer
         if (useThousands)
             formatted = decimals > 0
                 ? val.ToString($"N{decimals}")
-                : ((long)val).ToString("N0");
+                : val.ToString("N0");  // round, don't truncate ((long) cast truncated 1234.6 -> 1234)
         else
             formatted = decimals > 0
                 ? val.ToString($"F{decimals}")
