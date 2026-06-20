@@ -904,7 +904,12 @@ public partial class WordHandler
             && st.AbsNumLevelCounters.TryGetValue(absId.Value, out var byIlvl)
             && byIlvl.TryGetValue(forIlvl, out var running) && running > 0)
             return running;
-        return (GetStartValue(numId, forIlvl) ?? 1) - 1;
+        var rawStart = GetStartValue(numId, forIlvl) ?? 1;
+        // Guard INT_MIN: rawStart - 1 would wrap to int.MaxValue, which then
+        // permanently triggers the saturation branch in AdvanceOrderedCounter
+        // and freezes every item at int.MaxValue. Seed at INT_MIN instead so
+        // the counter still advances upward (graceful for an absurd start).
+        return rawStart == int.MinValue ? int.MinValue : rawStart - 1;
     }
 
     /// <summary>
