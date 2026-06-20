@@ -577,7 +577,7 @@ public static partial class WordBatchEmitter
         // BUG-DUMP-EQDISPLAY-PPR: forward the wrapper paragraph's spacing so the
         // rebuilt display-equation paragraph keeps its line height (e.g. 1.5x);
         // dropping it collapsed the equation line and compressed the page.
-        foreach (var sk in new[] { "lineSpacing", "lineRule", "spaceBefore", "spaceAfter" })
+        foreach (var sk in new[] { "lineSpacing", "lineRule", "spaceBefore", "spaceAfter", "wrapperAlign", "wrapperPpr" })
             if (pNode.Format.TryGetValue(sk, out var sv)
                 && sv != null && sv.ToString() is { Length: > 0 } svs)
                 eqProps[sk] = svs;

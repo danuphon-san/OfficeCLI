@@ -1787,6 +1787,26 @@ public partial class WordHandler
             void ApplyEqWrapperSpacing(Paragraph wp)
             {
                 if (properties == null) return;
+                // CONSISTENCY(verbatim-ppr-supersede): when the dump carried the
+                // whole wrapper <w:pPr> verbatim, restore it intact (spacing, jc,
+                // pStyle AND the paragraph-mark <w:rPr> that sets the equation
+                // line height). Re-applying only the granular spacing/jc keys
+                // dropped the mark rPr and shifted the line box. The verbatim
+                // pPr already contains bidi when the source had it, so the RTL
+                // cascade below only ever adds a missing one.
+                if (properties.TryGetValue("wrapperPpr", out var wpprXml)
+                    && !string.IsNullOrWhiteSpace(wpprXml)
+                    && wpprXml.Contains("pPr", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        var restored = new ParagraphProperties(wpprXml);
+                        if (wp.ParagraphProperties != null) wp.ParagraphProperties.Remove();
+                        wp.PrependChild(restored);
+                        return;
+                    }
+                    catch { /* fall through to granular re-apply on malformed XML */ }
+                }
                 SpacingBetweenLines? EnsureSp()
                 {
                     var sp = wp.ParagraphProperties ??= new ParagraphProperties();
@@ -1805,6 +1825,24 @@ public partial class WordHandler
                     EnsureSp()!.Before = SpacingConverter.ParseWordSpacing(sbE).ToString();
                 if (properties.TryGetValue("spaceAfter", out var saE) || properties.TryGetValue("spaceafter", out saE))
                     EnsureSp()!.After = SpacingConverter.ParseWordSpacing(saE).ToString();
+                // BUG-DUMP-EQWRAP-JC: re-apply the wrapper paragraph's own
+                // justification (distinct from the math align). Schema order in
+                // CT_PPr is spacing < jc, and this runs before bidi/mark-rPr, so
+                // appending jc here is order-safe.
+                if (properties.TryGetValue("wrapperAlign", out var waE) && !string.IsNullOrWhiteSpace(waE))
+                {
+                    var jc = waE.Trim().ToLowerInvariant() switch
+                    {
+                        "justify" or "both" => "both",
+                        "center" => "center",
+                        "right" or "end" => "right",
+                        "left" or "start" => "left",
+                        _ => waE.Trim()
+                    };
+                    var pp = wp.ParagraphProperties ??= new ParagraphProperties();
+                    pp.Justification = new Justification { Val = new EnumValue<JustificationValues>(
+                        new JustificationValues(jc)) };
+                }
             }
 
             // BUG-DUMP19-02: apply m:oMathParaPr/m:jc when caller passes `align`
@@ -1933,6 +1971,14 @@ public partial class WordHandler
             }
             else
             {
+                // Cell display equation: the m:oMathPara is appended INTO the
+                // existing host paragraph (the cell paragraph), so that paragraph
+                // IS the wrapper. Re-apply its spacing/justification here — the
+                // new-wrapPara branches above never run for this case, so without
+                // this a cell equation lost its line height + jc, collapsing the
+                // line and drifting later content across page boundaries.
+                if (parent is Paragraph cellWrapPara)
+                    ApplyEqWrapperSpacing(cellWrapPara);
                 AppendToParent(parent, mathPara);
                 resultPath = $"{parentPath}/oMathPara[1]";
             }

@@ -1032,9 +1032,27 @@ public static partial class WordBatchEmitter
         };
         if (!string.IsNullOrEmpty(eqNode.Text))
             eqProps["formula"] = eqNode.Text!;
+        // BUG-DUMP-CELLEQ-VERBATIM: forward the verbatim <m:oMath> so a cell
+        // display equation keeps its math-run rPr (Cambria Math, sizes) instead
+        // of being reparsed from the lossy LaTeX string. Without this the
+        // equation rendered in the body font at the wrong metrics, shifting the
+        // surrounding lines and drifting later content across page boundaries.
+        // Mirrors TryEmitDisplayEquation (WordBatchEmitter.Paragraph.cs); the
+        // body path was fixed in c0b0f015 but this cell path was missed.
+        if (eqNode.Format.TryGetValue("xml", out var eqXml)
+            && eqXml != null && eqXml.ToString() is { Length: > 0 } eqXmlS
+            && eqXmlS.Contains("oMath", StringComparison.Ordinal))
+            eqProps["xml"] = eqXmlS;
         if (eqNode.Format.TryGetValue("align", out var eqAlign)
             && eqAlign != null && !string.IsNullOrEmpty(eqAlign.ToString()))
             eqProps["align"] = eqAlign.ToString()!;
+        // BUG-DUMP-CELLEQ-PPR: forward the wrapper paragraph's spacing/justification
+        // so the rebuilt cell equation keeps its line height and alignment. Mirrors
+        // TryEmitDisplayEquation.
+        foreach (var sk in new[] { "lineSpacing", "lineRule", "spaceBefore", "spaceAfter", "wrapperAlign", "wrapperPpr" })
+            if (eqNode.Format.TryGetValue(sk, out var sv)
+                && sv != null && sv.ToString() is { Length: > 0 } svs)
+                eqProps[sk] = svs;
         items.Add(new BatchItem
         {
             Command = "add",

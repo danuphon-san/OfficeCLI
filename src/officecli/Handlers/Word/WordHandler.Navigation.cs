@@ -5418,18 +5418,32 @@ public partial class WordHandler
             // compressing the page and drifting later content across boundaries.
             // Forward the wrapper pPr spacing so TryEmitDisplayEquation + AddEquation
             // can re-apply it to the rebuilt wrapper paragraph.
-            if (element.Parent is Paragraph eqWrapP
-                && eqWrapP.ParagraphProperties?.SpacingBetweenLines is { } eqSp)
+            if (element.Parent is Paragraph eqWrapP && eqWrapP.ParagraphProperties is { } eqWrapPpr)
             {
-                if (eqSp.Before?.Value != null)
-                    node.Format["spaceBefore"] = SpacingConverter.FormatWordSpacing(eqSp.Before.Value);
-                if (eqSp.After?.Value != null)
-                    node.Format["spaceAfter"] = SpacingConverter.FormatWordSpacing(eqSp.After.Value);
-                if (eqSp.Line?.Value != null)
-                    node.Format["lineSpacing"] = SpacingConverter.FormatWordLineSpacing(
-                        eqSp.Line.Value, eqSp.LineRule?.InnerText);
-                if (eqSp.LineRule?.HasValue == true)
-                    node.Format["lineRule"] = eqSp.LineRule.InnerText;
+                // Granular spacing keys are kept for human-readable round-trips
+                // and back-compat, but the wrapper paragraph also carries a
+                // paragraph-mark <w:rPr> (font on the ¶ mark) and pStyle that
+                // co-determine the equation line's height. Re-applying only
+                // spacing+jc while dropping the mark rPr changed the line box and
+                // drifted pagination WORSE than dropping pPr entirely. Carry the
+                // whole pPr verbatim so AddEquation can restore it intact
+                // (CONSISTENCY(verbatim-ppr-supersede): same pattern as chart
+                // spPr / paragraph pPr verbatim round-trips).
+                node.Format["wrapperPpr"] = eqWrapPpr.OuterXml;
+                if (eqWrapPpr.SpacingBetweenLines is { } eqSp)
+                {
+                    if (eqSp.Before?.Value != null)
+                        node.Format["spaceBefore"] = SpacingConverter.FormatWordSpacing(eqSp.Before.Value);
+                    if (eqSp.After?.Value != null)
+                        node.Format["spaceAfter"] = SpacingConverter.FormatWordSpacing(eqSp.After.Value);
+                    if (eqSp.Line?.Value != null)
+                        node.Format["lineSpacing"] = SpacingConverter.FormatWordLineSpacing(
+                            eqSp.Line.Value, eqSp.LineRule?.InnerText);
+                    if (eqSp.LineRule?.HasValue == true)
+                        node.Format["lineRule"] = eqSp.LineRule.InnerText;
+                }
+                if (eqWrapPpr.Justification?.Val?.InnerText is { Length: > 0 } eqWrapJc)
+                    node.Format["wrapperAlign"] = eqWrapJc == "both" ? "justify" : eqWrapJc;
             }
             // Extract LaTeX via FormulaParser
             var oMath = element.Descendants<M.OfficeMath>().FirstOrDefault();
