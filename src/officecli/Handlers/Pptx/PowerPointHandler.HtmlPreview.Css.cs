@@ -1242,8 +1242,8 @@ public partial class PowerPointHandler
             switch (dir)
             {
                 case "left": nx = 100 - x; ny = y; break;
-                case "up":   nx = y; ny = x; break;       // transpose
-                case "down": nx = y; ny = 100 - x; break; // transpose + flip Y
+                case "up":   nx = y; ny = 100 - x; break;  // rotate rightArrow 90deg CCW -> tip at top
+                case "down": nx = 100 - y; ny = x; break;  // rotate rightArrow 90deg CW -> tip at bottom
                 default:     nx = x; ny = y; break;
             }
             outPts.Add($"{nx:0.##}% {ny:0.##}%");
