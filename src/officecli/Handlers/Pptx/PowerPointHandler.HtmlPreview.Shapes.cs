@@ -659,6 +659,29 @@ public partial class PowerPointHandler
                     break;
             }
 
+            // Text-body rotation: <a:bodyPr rot="..."/> rotates the whole text body
+            // about the text-box center (units = 60000ths of a degree). This is an
+            // ADDITIONAL rotation on top of any shape-container rotation (xfrm rot),
+            // and does NOT change the shape box rectangle — only the text rotates,
+            // overflowing the box like PowerPoint. `vert` (writing-mode) and `rot`
+            // are normally mutually exclusive; if `vert270` already set a transform
+            // we append the bodyPr rotation rather than overwrite it.
+            string rotStyle = "";
+            if (bodyPr?.Rotation?.HasValue == true && bodyPr.Rotation.Value != 0)
+            {
+                var rotDeg = bodyPr.Rotation.Value / 60000.0;
+                if (vertStyle.Contains("transform:rotate("))
+                {
+                    // vert270 path: compose with its existing rotate(180deg)
+                    vertStyle = vertStyle.Replace("transform:rotate(180deg);",
+                        $"transform:rotate({(180 + rotDeg):0.##}deg);transform-origin:center center;");
+                }
+                else
+                {
+                    rotStyle = $"transform:rotate({rotDeg:0.##}deg);transform-origin:center center;";
+                }
+            }
+
             // Horizontal block centering: <a:bodyPr anchorCtr="1"/> centers the
             // text BLOCK horizontally within the text frame, independent of each
             // paragraph's algn. PowerPoint centers short left-aligned text in a wide
@@ -699,8 +722,8 @@ public partial class PowerPointHandler
                     columnStyle += $"height:{Units.EmuToPt(contentHeightEmu):0.##}pt;";
             }
 
-            var textStyle = !string.IsNullOrEmpty(flipStyle) || !string.IsNullOrEmpty(clipPathCss) || !string.IsNullOrEmpty(rtlColStyle) || !string.IsNullOrEmpty(wrapNoneStyle) || !string.IsNullOrEmpty(vertStyle) || !string.IsNullOrEmpty(anchorCtrStyle)
-                ? $" style=\"{flipStyle}{rtlColStyle}{vertStyle}{wrapNoneStyle}{anchorCtrStyle}{(string.IsNullOrEmpty(clipPathCss) ? "" : "position:relative;")}\""
+            var textStyle = !string.IsNullOrEmpty(flipStyle) || !string.IsNullOrEmpty(clipPathCss) || !string.IsNullOrEmpty(rtlColStyle) || !string.IsNullOrEmpty(wrapNoneStyle) || !string.IsNullOrEmpty(vertStyle) || !string.IsNullOrEmpty(rotStyle) || !string.IsNullOrEmpty(anchorCtrStyle)
+                ? $" style=\"{flipStyle}{rtlColStyle}{vertStyle}{rotStyle}{wrapNoneStyle}{anchorCtrStyle}{(string.IsNullOrEmpty(clipPathCss) ? "" : "position:relative;")}\""
                 : "";
             var anchorCtrClass = anchorCtr ? " anchor-ctr" : "";
             sb.Append($"<div class=\"shape-text valign-{valign}{anchorCtrClass}\"{textStyle}>");
