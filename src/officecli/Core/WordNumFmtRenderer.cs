@@ -48,8 +48,14 @@ public static class WordNumFmtRenderer
             case "japanesedigitaltenthousand":
                 return ToIdeographDigital(n);
             case "koreandigital":
-            case "koreandigital2":
                 return ToKoreanDigital(n);
+            // koreanDigital2 renders CJK numerals (一二三 …, positional) in real
+            // Word — NOT sino-korean Hangul digits. Verified via officeshot
+            // (fams.docx): koreanDigital2 items show 一/二/三, identical to the
+            // ideographDigital family. Despite the "korean" name the glyphs are
+            // han ideographs.
+            case "koreandigital2":
+                return ToIdeographDigital(n);
             case "koreancounting":
                 return ToKoreanCounting(n);
             case "koreanlegal":
@@ -64,7 +70,7 @@ public static class WordNumFmtRenderer
             case "decimalenclosedcirclechinese":
                 return ToEnclosedCircle(n);
             case "decimalenclosedfullstop":
-                return $"{n}．";
+                return ToEnclosedFullStop(n);
             case "decimalenclosedparen":
                 return $"({n})";
             case "decimalfullwidth":
@@ -88,6 +94,11 @@ public static class WordNumFmtRenderer
             case "hindicounting":
             case "hindicardinaltext":
                 return ToDevanagariDigits(n);
+            // ECMA-376 §17.18.59 ST_NumberFormat: the canonical value is
+            // "hindiConsonants" (Devanagari consonants क ख ग …); there is no
+            // "hindiLetters" in the schema. Keep "hindiletters" as a tolerant
+            // alias so legacy/typo'd files still render glyphs, not decimal.
+            case "hindiconsonants":
             case "hindiletters":
                 return ToHindiLetters(n);
             case "hindivowels":
@@ -350,9 +361,35 @@ public static class WordNumFmtRenderer
     private static string ToKoreanCounting(int n)
         => ToKoreanDigital(n);
 
-    /// <summary>Korean legal (formal) numerals share the Chinese formal hanzi set.</summary>
+    // Native Korean counting words (고유어 수사): 하나 둘 셋 … up to 열아홉,
+    // then 스물… Real Word renders koreanLegal with these, NOT the Chinese
+    // formal hanzi (壹貳參). Verified via officeshot (fams.docx) — koreanLegal
+    // items show 하나/둘/셋. Word's enumeration practically tops out in the low
+    // tens; beyond the table we fall back to decimal.
+    private static readonly string[] KoreanNativeOnes =
+        { "", "하나", "둘", "셋", "넷", "다섯", "여섯", "일곱", "여덟", "아홉" };
+    private static readonly string[] KoreanNativeTens =
+        { "", "열", "스물", "서른", "마흔", "쉰", "예순", "일흔", "여든", "아흔" };
+
+    /// <summary>Korean legal renders native Korean counting words (하나/둘/셋).</summary>
     private static string ToKoreanLegal(int n)
-        => ToChineseCounting(n, formal: true);
+    {
+        if (n < 1 || n > 99) return n.ToString(CultureInfo.InvariantCulture);
+        var tens = n / 10;
+        var ones = n % 10;
+        return KoreanNativeTens[tens] + KoreanNativeOnes[ones];
+    }
+
+    // Enclosed digit-with-full-stop glyphs ⒈⒉⒊ … U+2488..U+249B cover 1..20
+    // (U+2488 is literally named "DIGIT ONE FULL STOP"). Real Word renders
+    // decimalEnclosedFullstop with these single glyphs (the trailing literal
+    // "." some lists show comes from the level's lvlText, not the marker).
+    // Verified via officeshot (fams.docx). Beyond 20 fall back to "n.".
+    private static string ToEnclosedFullStop(int n)
+    {
+        if (n >= 1 && n <= 20) return ((char)(0x2487 + n)).ToString();
+        return $"{n}.";
+    }
 
     /// <summary>Japanese legal uses modern formal kanji 壱弐参肆伍陸漆捌玖拾.</summary>
     private static readonly char[] JpFormalDigits =
