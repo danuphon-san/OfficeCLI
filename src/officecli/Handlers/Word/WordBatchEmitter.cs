@@ -725,7 +725,23 @@ public static partial class WordBatchEmitter
                         // position rather than relocated by paragraph count.
                         if (child.Format.TryGetValue("_spanOpen", out var so)
                             && so is bool bso && bso)
+                        {
                             bmProps["open"] = "true";
+                            // BUG-DUMP-BMSDT-ID: a content-wrapping bookmark whose
+                            // matching <w:bookmarkEnd> lives INSIDE a following
+                            // <w:sdt> (e.g. a TOC heading bookmark before the TOC's
+                            // docPartObj SDT) keeps that end verbatim with its SOURCE
+                            // id when the SDT block is raw-set as one unit. The
+                            // open=true start is added separately, so it MUST reuse
+                            // the source id to pair with the verbatim end —
+                            // AddBookmark's BUG-DUMP-R47-5 branch honors `id` only for
+                            // open=true. Without it the start got a fresh id, left the
+                            // bookmark unclosed, and every PAGEREF/TOC entry to it
+                            // rendered "Error! Bookmark not defined."
+                            if (child.Format.TryGetValue("id", out var bkId)
+                                && bkId?.ToString() is { Length: > 0 } bkIdS)
+                                bmProps["id"] = bkIdS;
+                        }
                         else if (child.Format.TryGetValue("endPara", out var ep)
                             && ep != null && ep.ToString() is { Length: > 0 } eps && eps != "0")
                             bmProps["endPara"] = eps;

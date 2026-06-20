@@ -1672,6 +1672,15 @@ public partial class WordHandler
             node.Format["colFirst"] = bkStart.ColumnFirst.Value.ToString();
         if (bkStart.ColumnLast?.Value != null)
             node.Format["colLast"] = bkStart.ColumnLast.Value.ToString();
+        // BUG-DUMP-BMDISPLACED: a bookmark adjacent to a custom-XML / SDT
+        // boundary (e.g. a TOC heading bookmark sitting just before the TOC's
+        // <w:sdt>) carries w:displacedByCustomXml ("next"/"prev") — it tells
+        // Word which side of the structured-tag the marker resolves to. Dropped
+        // on dump, the bookmark's position shifted across the SDT boundary and
+        // every PAGEREF/TOC entry referencing it rendered "Error! Bookmark not
+        // defined." Surface it so AddBookmark re-stamps the attribute.
+        if (bkStart.DisplacedByCustomXml is { InnerText: { Length: > 0 } dbcx })
+            node.Format["displacedByCustomXml"] = dbcx;
         var bkText = GetBookmarkText(bkStart);
         if (!string.IsNullOrEmpty(bkText))
             node.Text = bkText;

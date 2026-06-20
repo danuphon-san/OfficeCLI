@@ -1353,6 +1353,13 @@ public static partial class WordBatchEmitter
         if (format.TryGetValue("colLast", out var cl)
             && cl?.ToString() is { Length: > 0 } cls)
             bmProps["colLast"] = cls;
+        // BUG-DUMP-BMDISPLACED: forward w:displacedByCustomXml ("next"/"prev")
+        // so a bookmark adjacent to an SDT/custom-XML boundary keeps it — losing
+        // it shifts the marker across the boundary and PAGEREF/TOC entries to the
+        // bookmark render "Error! Bookmark not defined."
+        if (format.TryGetValue("displacedByCustomXml", out var dbcx)
+            && dbcx?.ToString() is { Length: > 0 } dbcxs)
+            bmProps["displacedByCustomXml"] = dbcxs;
     }
 
     // BUG-DUMP-PERM: emit a ranged editing-permission marker (<w:permStart>/

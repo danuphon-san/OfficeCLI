@@ -464,6 +464,20 @@ public partial class WordHandler
             && int.TryParse(colLastStr, out var colLastN))
             bookmarkStart.ColumnLast = colLastN;
 
+        // BUG-DUMP-BMDISPLACED: re-stamp w:displacedByCustomXml ("next"/"prev")
+        // on a bookmark adjacent to a custom-XML / SDT boundary. Dropping it
+        // (e.g. a TOC heading bookmark before the TOC <w:sdt>) shifted the
+        // bookmark across the boundary so PAGEREF/TOC entries to it rendered
+        // "Error! Bookmark not defined." BookmarkStartToNode surfaces it.
+        if (properties.TryGetValue("displacedByCustomXml", out var dbcxStr)
+            && !string.IsNullOrEmpty(dbcxStr))
+        {
+            if (dbcxStr.Equals("next", StringComparison.OrdinalIgnoreCase))
+                bookmarkStart.DisplacedByCustomXml = DisplacedByCustomXmlValues.Next;
+            else if (dbcxStr.Equals("prev", StringComparison.OrdinalIgnoreCase))
+                bookmarkStart.DisplacedByCustomXml = DisplacedByCustomXmlValues.Previous;
+        }
+
         // BUG-DUMP10-04: optional endPara offset (>0) defers BookmarkEnd
         // placement to a later paragraph in the same body so multi-
         // paragraph bookmark spans round-trip through dump→batch. Default
