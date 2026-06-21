@@ -5317,6 +5317,24 @@ public partial class WordHandler
                 node.Children.Add(ElementToNode(sdtR, $"{path}/sdt[{sdtRunIdx + 1}]", depth - 1));
                 sdtRunIdx++;
             }
+            // BUG-DUMP-BARE-BR: a <w:br/> / <w:cr/> that is a DIRECT child of
+            // <w:p> (not wrapped in a <w:r>) is schema-invalid, so the SDK loads
+            // it as an OpenXmlUnknownElement rather than a typed Break — and Word
+            // still renders the line break. The run walk above only enumerates
+            // <w:r> children, so these bare breaks were dropped, merging the lines
+            // on round-trip. Surface each as a typed break node (mirroring the
+            // smartTag-wrapped bare-break path) so the emitter replays it.
+            foreach (var bareBr in para.ChildElements)
+            {
+                if (bareBr.NamespaceUri != wNs ||
+                    (bareBr.LocalName != "br" && bareBr.LocalName != "cr"))
+                    continue;
+                var bareBrNode = new DocumentNode { Type = "break", Path = $"{path}/r[{node.Children.Count + 1}]" };
+                var bbType = bareBr.GetAttributes()
+                    .FirstOrDefault(a => a.LocalName == "type" && a.NamespaceUri == wNs).Value;
+                bareBrNode.Format["breakType"] = string.IsNullOrEmpty(bbType) ? "line" : bbType;
+                node.Children.Add(bareBrNode);
+            }
             // BUG-DUMP7-03 / BUG-DUMP8-03 / BUG-DUMP9-04: inline <m:oMath>
             // children (including those nested inside w:ins/w:del/w:hyperlink
             // wrappers) are now interleaved with runs at the top of this
