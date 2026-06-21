@@ -166,7 +166,8 @@ internal partial class ChartSvgRenderer
         bool isWaterfall = false, List<ErrorBarInfo?>? errorBars = null,
         bool labelAsPercent = false, string? dataLabelNumFmt = null, int? ooxmlOverlap = null,
         bool isReversed = false, List<Dictionary<int, string>>? perPointColors = null,
-        int? catLabelRotationDeg = null, int? valLabelRotationDeg = null)
+        int? catLabelRotationDeg = null, int? valLabelRotationDeg = null,
+        List<TrendlineInfo?>? trendlines = null)
     {
         // Per-data-point fill override (c:dPt): for series s, category idx c,
         // return the explicit dPt color when present, else the per-series color.
@@ -774,6 +775,25 @@ internal partial class ChartSvgRenderer
                         if (showMinus && !eb.NoEndCap)
                             sb.AppendLine($"        <line x1=\"{bx - capW:0.#}\" y1=\"{yBot:0.#}\" x2=\"{bx + capW:0.#}\" y2=\"{yBot:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
                     }
+                }
+            }
+            // Trendlines on vertical (column) bar charts. PowerPoint regresses over
+            // the 1-based category index and draws the fitted curve across the plot,
+            // each category anchored at its group center (ox + (i+0.5)*groupW).
+            if (trendlines != null && !stacked)
+            {
+                for (int s = 0; s < serCount; s++)
+                {
+                    var tl = s < trendlines.Count ? trendlines[s] : null;
+                    if (tl == null) continue;
+                    var vals = series[s].values;
+                    if (vals.Length < 2) continue;
+                    var lineColor = tl.Color ?? colors[s % colors.Count];
+                    var xData = new double[vals.Length];
+                    var yData = new double[vals.Length];
+                    for (int i = 0; i < vals.Length; i++) { xData[i] = i + 1; yData[i] = vals[i]; }
+                    Func<double, double> tlMapX = xv => ox + (xv - 0.5) * groupW;
+                    AppendTrendline(sb, tl, xData, yData, tlMapX, ValToY, lineColor, ox + pw, oy + 12);
                 }
             }
             if (CatAxisVisible)
@@ -3783,7 +3803,7 @@ internal partial class ChartSvgRenderer
                     info.IsWaterfall, info.ErrorBars,
                     info.IsPercent && info.ShowDataLabelPercent && !info.ShowDataLabelVal,
                     info.DataLabelsNumFmt, info.Overlap, info.IsReversed, info.PerPointColors,
-                    info.CatAxisLabelRotationDeg, info.ValAxisLabelRotationDeg);
+                    info.CatAxisLabelRotationDeg, info.ValAxisLabelRotationDeg, info.Trendlines);
         }
 
         // Plot-area border (<c:plotArea><c:spPr><a:ln>). Drawn AFTER the plot
