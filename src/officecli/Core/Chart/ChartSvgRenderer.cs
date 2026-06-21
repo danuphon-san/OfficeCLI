@@ -1914,17 +1914,56 @@ internal partial class ChartSvgRenderer
             }
         }
         if (allY.Count == 0) return;
-        var minX = allX.Min(); var maxX = allX.Max(); if (maxX <= minX) maxX = minX + 1;
-        var minY = allY.Min(); var maxY = allY.Max(); if (maxY <= minY) maxY = minY + 1;
         var maxSz = allSize.Count > 0 ? allSize.Max() : 1; if (maxSz <= 0) maxSz = 1;
         var bubbleScaleEl = plotArea.Descendants<BubbleScale>().FirstOrDefault();
         var bubbleScale = bubbleScaleEl?.Val?.HasValue == true ? bubbleScaleEl.Val.Value / 100.0 : 1.0;
         var maxRadius = Math.Min(pw, ph) * 0.12 * bubbleScale;
 
-        if (ShowValGridlines)
-        for (int t = 1; t <= 4; t++)
+        // Nice axes (round, evenly-spaced ticks) — same approach the scatter
+        // renderer uses, so the bubble axes match PowerPoint instead of a raw
+        // (max-min)/4 linear division producing fractional ticks. Both X and Y
+        // are numeric value axes. The bubble point positions below are mapped
+        // through the SAME min/max/step used for the ticks, so bubbles stay
+        // aligned with their gridlines.
+        double dataMinX = allX.Min(); double dataMaxX = allX.Max();
+        bool xIsSmallInteger = allX.All(v => v % 1 == 0) && dataMaxX - dataMinX <= 10;
+        double minX; double maxX; double xStep; int xTicks;
+        if (xIsSmallInteger && dataMinX > 0)
         {
-            var gy = oy + ph - (double)ph * t / 4;
+            // X data is a small positive integer sequence (the common
+            // category-index case 1..n). PowerPoint draws integer ticks pinned to
+            // the data range with no headroom: 1,2,3,4 for a 1..4 domain.
+            minX = dataMinX; maxX = dataMaxX; xStep = 1;
+            xTicks = (int)Math.Round(maxX - minX);
+            if (xTicks < 1) xTicks = 1;
+        }
+        else if (dataMinX > 0)
+        {
+            // Positive non-trivial X: zero-free nice range so ticks stay round
+            // rather than spanning 0..max; mirror PowerPoint.
+            var (nMaxX, stepX, nX) = ComputeNiceAxisFromMin(Math.Floor(dataMinX), dataMaxX);
+            minX = Math.Floor(dataMinX); maxX = nMaxX; xStep = stepX; xTicks = nX;
+        }
+        else
+        {
+            var (nMaxX, stepX, nX) = ComputeNiceAxis(dataMaxX);
+            minX = 0; maxX = nMaxX; xStep = stepX; xTicks = nX;
+        }
+        if (maxX <= minX) { maxX = minX + 1; xStep = 1; xTicks = 1; }
+
+        double minY = Math.Min(0, allY.Min());
+        var (niceMaxY, tickStepY, nTicksY) = ComputeNiceAxis(allY.Max());
+        double maxY = minY >= 0 ? niceMaxY : niceMaxY;
+        if (minY >= 0) minY = 0;
+        if (maxY <= minY) maxY = minY + 1;
+
+        double MapX(double v) => ox + ((v - minX) / (maxX - minX)) * pw;
+        double MapY(double v) => oy + ph - ((v - minY) / (maxY - minY)) * ph;
+
+        if (ShowValGridlines)
+        for (int t = 0; t <= nTicksY; t++)
+        {
+            var gy = MapY(minY + tickStepY * t);
             sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
         }
         sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
@@ -1936,24 +1975,24 @@ internal partial class ChartSvgRenderer
             var count = Math.Min(xVals.Length, yVals.Length);
             for (int i = 0; i < count; i++)
             {
-                var bx = ox + ((xVals[i] - minX) / (maxX - minX)) * pw;
-                var by = oy + ph - ((yVals[i] - minY) / (maxY - minY)) * ph;
+                var bx = MapX(xVals[i]);
+                var by = MapY(yVals[i]);
                 var sz = i < sizeVals.Length ? sizeVals[i] : yVals[i];
                 var r = Math.Sqrt(Math.Max(0, sz) / maxSz) * maxRadius + maxRadius * 0.15;
                 sb.AppendLine($"        <circle cx=\"{bx:0.#}\" cy=\"{by:0.#}\" r=\"{r:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.6\"/>");
             }
         }
-        for (int t = 0; t <= 4; t++)
+        for (int t = 0; t <= xTicks; t++)
         {
-            var val = minX + (maxX - minX) * t / 4;
+            var val = minX + xStep * t;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
-            sb.AppendLine($"        <text x=\"{ox + (double)pw * t / 4:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{MapX(val):0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{label}</text>");
         }
-        for (int t = 0; t <= 4; t++)
+        for (int t = 0; t <= nTicksY; t++)
         {
-            var val = minY + (maxY - minY) * t / 4;
+            var val = minY + tickStepY * t;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{oy + ph - (double)ph * t / 4:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{MapY(val):0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
 
