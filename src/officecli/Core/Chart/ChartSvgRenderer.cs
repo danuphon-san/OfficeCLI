@@ -1997,6 +1997,12 @@ internal partial class ChartSvgRenderer
         var bubbleScaleEl = plotArea.Descendants<BubbleScale>().FirstOrDefault();
         var bubbleScale = bubbleScaleEl?.Val?.HasValue == true ? bubbleScaleEl.Val.Value / 100.0 : 1.0;
         var maxRadius = Math.Min(pw, ph) * 0.12 * bubbleScale;
+        // c:sizeRepresents — "area" (default): bubble AREA ∝ size (r ∝ √size);
+        // "w": bubble WIDTH/diameter ∝ size (r ∝ size, linear). PowerPoint renders the
+        // two very differently (in width mode the smallest bubble is a near-invisible
+        // dot); the renderer previously always used the area formula.
+        var sizeRepEl = plotArea.Descendants<SizeRepresents>().FirstOrDefault();
+        var widthMode = sizeRepEl?.Val?.HasValue == true && sizeRepEl.Val.InnerText == "w";
 
         // Nice axes (round, evenly-spaced ticks) — same approach the scatter
         // renderer uses, so the bubble axes match PowerPoint instead of a raw
@@ -2057,7 +2063,8 @@ internal partial class ChartSvgRenderer
                 var bx = MapX(xVals[i]);
                 var by = MapY(yVals[i]);
                 var sz = i < sizeVals.Length ? sizeVals[i] : yVals[i];
-                var r = Math.Sqrt(Math.Max(0, sz) / maxSz) * maxRadius + maxRadius * 0.15;
+                var frac = Math.Max(0, sz) / maxSz;
+                var r = widthMode ? frac * maxRadius : Math.Sqrt(frac) * maxRadius + maxRadius * 0.15;
                 sb.AppendLine($"        <circle cx=\"{bx:0.#}\" cy=\"{by:0.#}\" r=\"{r:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.6\"/>");
             }
         }
