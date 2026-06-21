@@ -3273,14 +3273,22 @@ public static partial class WordBatchEmitter
     }
 
     // STYLE-RAW-FALLBACK helper: parse the source styles.xml once and return a
-    // map from styleId → verbatim <w:style> XML, restricted to TABLE styles
-    // (w:type="table"). Only table styles need this fallback today: their
-    // <w:tblPr>/<w:tblStylePr>/<w:shd>/<w:trPr>/<w:tcPr> formatting has no
-    // scalar Format representation, unlike paragraph/character styles whose
-    // pPr/rPr round-trips through the scalar emit path. Keeping the scope to
-    // table styles avoids re-clobbering the (correct) scalar emit for the far
-    // more numerous paragraph/character styles. The keying id is each style's
-    // own w:styleId — callers match it against the id the `add` step used.
+    // map from styleId → verbatim <w:style> XML, for ALL styles.
+    //
+    // Originally restricted to TABLE styles (whose tblPr/tblStylePr/shd/trPr/
+    // tcPr have no scalar Format representation). But the scalar emit also
+    // silently drops rPr/pPr children it has no key for — e.g. a paragraph
+    // style whose rPr carries <w:bdr> (a run border box): the dump emitted
+    // `shading=` from the sibling <w:shd> but no border key, so a Heading with
+    // a colored border box round-tripped as a plain filled heading, reflowing
+    // the whole document (SSIM 0.69). Rather than chase every missing rPr/pPr
+    // child key (the same hardcoded-allowlist class fixed verbatim for the ¶
+    // mark and docDefaults), round-trip EVERY style's <w:style> element
+    // verbatim. The scalar `add style` still runs first (creating the style +
+    // built-in id upsert / collision suffix); the raw-set then swaps it for the
+    // source's exact copy, so no scalar/raw drift and no dropped children. The
+    // keying id is each style's own w:styleId — callers match it against the id
+    // the `add` step used.
     private static Dictionary<string, string> BuildRawTableStyleMap(WordHandler word)
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -3294,8 +3302,6 @@ public static partial class WordBatchEmitter
             var wNs = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
             foreach (var styleEl in doc.Root?.Elements(wNs + "style") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
             {
-                var type = styleEl.Attribute(wNs + "type")?.Value;
-                if (!string.Equals(type, "table", StringComparison.Ordinal)) continue;
                 var idAttr = styleEl.Attribute(wNs + "styleId");
                 var styleId = idAttr?.Value;
                 if (string.IsNullOrEmpty(styleId)) continue;
