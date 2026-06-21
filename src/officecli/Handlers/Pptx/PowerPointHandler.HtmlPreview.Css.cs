@@ -1665,6 +1665,23 @@ public partial class PowerPointHandler
         return "clip-path:polygon(" + string.Join(",", pts) + ")";
     }
 
+    // mathMinus: a centered horizontal minus bar. adj1 (default 23520) is the bar's
+    // full height as a fraction of the shape height (dy1 = adj1/200000 is the half
+    // height). The horizontal extent is FIXED by ECMA at 73490/200000 (=36.745%)
+    // either side of center, so the bar spans 13.26%-86.74% of width with white
+    // gutters. The old literal spanned the full width and used a fixed 30% height,
+    // ignoring adj1. Geometry verified empirically against real PowerPoint (R169).
+    private static string MathMinusCss(Drawing.PresetGeometry? presetGeom)
+    {
+        var a1 = Math.Clamp(ReadAdjValueCss(presetGeom, 0, 23520), 0, 100000);
+        var dy = a1 / 200000.0 * 100.0;                 // half bar height, % of h
+        const double dx = 73490.0 / 200000.0 * 100.0;   // 36.745% half-width, % of w
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        string P(double d) => d.ToString("0.##", ci);
+        double x1 = 50 - dx, x2 = 50 + dx, y1 = 50 - dy, y2 = 50 + dy;
+        return $"clip-path:polygon({P(x1)}% {P(y1)}%,{P(x2)}% {P(y1)}%,{P(x2)}% {P(y2)}%,{P(x1)}% {P(y2)}%)";
+    }
+
     private static string PresetGeometryToCss(string preset, long widthEmu, long heightEmu,
         Drawing.PresetGeometry? presetGeom)
     {
@@ -1954,7 +1971,7 @@ public partial class PowerPointHandler
 
             // Math
             "mathPlus" => "clip-path:polygon(33% 0,67% 0,67% 33%,100% 33%,100% 67%,67% 67%,67% 100%,33% 100%,33% 67%,0 67%,0 33%,33% 33%)",
-            "mathMinus" => "clip-path:polygon(0 35%,100% 35%,100% 65%,0 65%)",
+            "mathMinus" => MathMinusCss(presetGeom),
             "mathMultiply" => "clip-path:polygon(20% 0,50% 30%,80% 0,100% 20%,70% 50%,100% 80%,80% 100%,50% 70%,20% 100%,0 80%,30% 50%,0 20%)",
             "mathDivide" => "",
             "mathEqual" => "clip-path:polygon(0 25%,100% 25%,100% 40%,0 40%,0 60%,100% 60%,100% 75%,0 75%)",
