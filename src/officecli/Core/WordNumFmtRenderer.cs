@@ -31,8 +31,11 @@ public static class WordNumFmtRenderer
             case "upperletter": return ToAlpha(n, uppercase: true);
             case "lowerletter": return ToAlpha(n, uppercase: false);
             case "ordinal": return ToOrdinal(n);
-            case "cardinaltext": return ToEnglishCardinal(n);
-            case "ordinaltext": return ToEnglishOrdinal(n);
+            // Word capitalizes only the FIRST letter of the whole spelled-out
+            // phrase: "Twenty-one", "One hundred", "Twenty-first" — not the
+            // title-cased "Twenty-One" / "One Hundred" the builders produce.
+            case "cardinaltext": return CapitalizeFirst(ToEnglishCardinal(n));
+            case "ordinaltext": return CapitalizeFirst(ToEnglishOrdinal(n));
             // Ordinary chinese/taiwanese counting: 十-grouped for 1-99, then
             // digit-by-digit with 〇 for >=100 (100 → 一〇〇). Identical between
             // the two (the only simplified/traditional split, 万 vs 萬, lives at
@@ -222,6 +225,12 @@ public static class WordNumFmtRenderer
         (1_000_000L, "Million"),
         (1_000L, "Thousand"),
     };
+
+    // Sentence-case a spelled-out number: first letter upper, the rest lower
+    // (the cardinal/ordinal builders title-case every component for internal
+    // assembly; Word renders only the leading capital).
+    private static string CapitalizeFirst(string s) =>
+        string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..].ToLowerInvariant();
 
     private static string ToEnglishCardinal(int n) => ToEnglishCardinal((long)n);
 
