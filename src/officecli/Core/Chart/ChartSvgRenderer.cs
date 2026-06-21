@@ -1984,6 +1984,15 @@ internal partial class ChartSvgRenderer
                 var gy = MapY(minY + tickStepY * t);
                 sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
             }
+        // Gridlines (vertical, on the X value axis). Scatter has no catAx, so the
+        // X-axis majorGridlines are routed into ShowCatGridlines by ExtractChartInfo.
+        // Draw at the same X tick positions used for the X labels below.
+        if (ShowCatGridlines)
+            for (int t = 0; t <= xTicks; t++)
+            {
+                var gx = MapX(minX + xStep * t);
+                sb.AppendLine($"        <line x1=\"{gx:0.#}\" y1=\"{oy}\" x2=\"{gx:0.#}\" y2=\"{oy + ph}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
+            }
         sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
         sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy + ph}\" x2=\"{ox + pw}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
 
@@ -2836,6 +2845,25 @@ internal partial class ChartSvgRenderer
             var fmtCode = numFmtEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "formatCode").Value;
             if (!string.IsNullOrEmpty(fmtCode) && fmtCode != "General")
                 info.ValNumFmt = fmtCode;
+        }
+        // Scatter/bubble charts have NO catAx — they use two valAx (axPos="b" = X
+        // axis, axPos="l" = Y axis). The bottom valAx carries the X-axis
+        // majorGridlines (vertical gridlines). PowerPoint draws them; mirror that
+        // by routing the bottom valAx's majorGridlines into CatMajorGridlines.
+        if (catAxis == null && valAxes.Count >= 2)
+        {
+            var bottomValAx = valAxes.FirstOrDefault(va =>
+                va.Elements().FirstOrDefault(e => e.LocalName == "axPos")
+                    ?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value == "b");
+            if (bottomValAx != null)
+            {
+                info.CatMajorGridlines = bottomValAx.Elements().Any(e => e.LocalName == "majorGridlines");
+                info.CatMinorGridlines = bottomValAx.Elements().Any(e => e.LocalName == "minorGridlines");
+                var bTickEl = bottomValAx.Elements().FirstOrDefault(e => e.LocalName == "majorTickMark");
+                info.CatMajorTickMark = bTickEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+                var bDeleteEl = bottomValAx.Elements().FirstOrDefault(e => e.LocalName == "delete");
+                info.CatAxisVisible = bDeleteEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value != "1";
+            }
         }
         if (catAxis != null)
         {
