@@ -1131,19 +1131,31 @@ public partial class PowerPointHandler
         var opacity = alpha / 100000.0;
         var radiusPt = glow.Radius?.HasValue == true ? glow.Radius.Value / EmuConverter.EmuPerPointF : 5;
 
-        var rgb = glow.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+        // Resolve the glow color WITH its lumMod/lumOff/tint/shade/satMod transforms —
+        // every built-in glow preset uses e.g. <a:schemeClr val="accent1"><a:lumMod
+        // val="75000"/>, and ignoring the transform renders the raw (too-bright) accent.
+        // Mirrors ResolveShadowColor (which already applies them); the glow path didn't.
+        var rgbEl = glow.GetFirstChild<Drawing.RgbColorModelHex>();
+        var rgb = rgbEl?.Val?.Value;
         (int r, int g, int b)? rgbTuple = null;
-        if (rgb != null)
+        if (rgb != null && rgb.Length >= 6 && rgb[..6].All(char.IsAsciiHexDigit))
         {
-            rgbTuple = ColorMath.HexToRgb(rgb);
+            var t = ApplyRgbColorTransforms(rgb[..6], rgbEl!);
+            rgbTuple = ColorMath.HexToRgb(t.StartsWith('#') ? t[1..] : t);
         }
         else
         {
-            var schemeColor = glow.GetFirstChild<Drawing.SchemeColor>()?.Val?.InnerText;
-            var resolved = schemeColor != null && themeColors.TryGetValue(schemeColor, out var sc) ? sc : null;
-            if (resolved != null)
+            var schemeEl = glow.GetFirstChild<Drawing.SchemeColor>();
+            var schemeName = schemeEl?.Val?.InnerText;
+            if (schemeName != null && themeColors.TryGetValue(schemeName, out var sc))
             {
-                rgbTuple = ColorMath.HexToRgb(resolved);
+                var t = ColorMath.ApplyTransforms(sc,
+                    tint: ReadTransformVal(schemeEl!, "tint"),
+                    shade: ReadTransformVal(schemeEl!, "shade"),
+                    lumMod: ReadTransformVal(schemeEl!, "lumMod"),
+                    lumOff: ReadTransformVal(schemeEl!, "lumOff"),
+                    satMod: ReadTransformVal(schemeEl!, "satMod"));
+                rgbTuple = ColorMath.HexToRgb(t.StartsWith('#') ? t[1..] : t);
             }
             else
             {
