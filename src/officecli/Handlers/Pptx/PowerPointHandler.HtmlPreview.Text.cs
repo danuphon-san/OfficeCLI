@@ -384,9 +384,12 @@ public partial class PowerPointHandler
                 // Bullet size: explicit buSzPts/buSzPct > first run size > default size
                 var buSzPts = bulletSource?.GetFirstChild<Drawing.BulletSizePoints>();
                 var buSzPct = bulletSource?.GetFirstChild<Drawing.BulletSizePercentage>();
+                // normAutofit fontScale scales every run's font-size; the bullet glyph
+                // must scale with it too, else an auto-shrunk paragraph shows an
+                // oversized bullet next to small text (PowerPoint scales both).
                 if (buSzPts?.Val?.HasValue == true)
                 {
-                    buStyles.Add($"font-size:{buSzPts.Val.Value / 100.0:0.##}pt");
+                    buStyles.Add($"font-size:{buSzPts.Val.Value / 100.0 * fontScale:0.##}pt");
                 }
                 else
                 {
@@ -398,7 +401,7 @@ public partial class PowerPointHandler
                     var baseSizeHundredths = firstRun?.RunProperties?.FontSize?.Value ?? defaultFontSizeHundredths ?? 1800;
                     {
                         var pct = buSzPct?.Val?.HasValue == true ? buSzPct.Val.Value / 100000.0 : 1.0;
-                        buStyles.Add($"font-size:{baseSizeHundredths / 100.0 * pct:0.##}pt");
+                        buStyles.Add($"font-size:{baseSizeHundredths / 100.0 * pct * fontScale:0.##}pt");
                     }
                 }
 
