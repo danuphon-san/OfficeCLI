@@ -877,6 +877,12 @@ public partial class PowerPointHandler
                 }
             }
 
+            // A hyperlinked run is underlined by default (unless it sets u= explicitly).
+            // Fold that into decoLines so it joins any strikethrough in ONE
+            // text-decoration declaration — a separate `text-decoration:underline` later
+            // would, by CSS last-one-wins, silently drop a line-through emitted here.
+            if (hlinkClick != null && !hasExplicitUnderline && !decoLines.Contains("underline"))
+                decoLines.Add("underline");
             if (decoLines.Count > 0)
             {
                 styles.Add($"text-decoration:{string.Join(" ", decoLines)}");
@@ -1071,7 +1077,8 @@ public partial class PowerPointHandler
                 styles.Add(themeColors.TryGetValue("hlink", out var hlinkHex) && !string.IsNullOrEmpty(hlinkHex)
                     ? $"color:#{hlinkHex}"
                     : "color:#0563C1");
-            if (!hasExplicitUnderline) styles.Add("text-decoration:underline");
+            // (underline is folded into the text-decoration declaration above so it
+            // composites with any strikethrough instead of overriding it)
         }
 
         // Tab chars (literal U+0009 inside <a:t>, the form the Add path writes)
