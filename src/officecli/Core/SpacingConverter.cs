@@ -293,6 +293,23 @@ internal static class SpacingConverter
     }
 
     /// <summary>
+    /// Like <see cref="FormatWordSpacing"/> but clamps a negative value to 0.
+    /// For w:spacing before/after ONLY — those are non-negative in OOXML, yet
+    /// real-world docs carry a schema-invalid -1 ("auto" sentinel) that Word
+    /// tolerates as ~0. Emitting "-0.05pt" would be rejected by the add path on
+    /// replay, breaking the round-trip. Do NOT use for indents (firstLine /
+    /// hanging / left / right legitimately go negative).
+    /// </summary>
+    public static string FormatWordSpacingNonNegative(string twipsStr)
+    {
+        if (!double.TryParse(twipsStr, CultureInfo.InvariantCulture, out var twips))
+            return twipsStr;
+        if (twips < 0) twips = 0;
+        var points = twips / TwipsPerPoint;
+        return $"{points:0.##}pt";
+    }
+
+    /// <summary>
     /// Format PPT spaceBefore/spaceAfter hundredths-of-a-point to "Xpt".
     /// </summary>
     public static string FormatPptSpacing(int hundredths)

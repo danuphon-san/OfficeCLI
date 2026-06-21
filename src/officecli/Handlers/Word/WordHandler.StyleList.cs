@@ -551,12 +551,12 @@ public partial class WordHandler
             }
             if (ppr.SpacingBetweenLines?.Before?.Value != null)
             {
-                spaceBefore = SpacingConverter.FormatWordSpacing(ppr.SpacingBetweenLines.Before.Value);
+                spaceBefore = SpacingConverter.FormatWordSpacingNonNegative(ppr.SpacingBetweenLines.Before.Value);
                 spaceBeforeSrc = layer;
             }
             if (ppr.SpacingBetweenLines?.After?.Value != null)
             {
-                spaceAfter = SpacingConverter.FormatWordSpacing(ppr.SpacingBetweenLines.After.Value);
+                spaceAfter = SpacingConverter.FormatWordSpacingNonNegative(ppr.SpacingBetweenLines.After.Value);
                 spaceAfterSrc = layer;
             }
             if (ppr.SpacingBetweenLines?.Line?.Value != null)
@@ -887,6 +887,13 @@ public partial class WordHandler
         public readonly Dictionary<int, int> OlCountPerLevel = new();
         public readonly Dictionary<int, int> MultiLevelCounters = new();
         public readonly Dictionary<int, Dictionary<int, int>> AbsNumLevelCounters = new();
+        // Levels of the active num that carry an un-consumed per-instance
+        // <w:startOverride> (or override-embedded <w:lvl><w:start>). Re-armed on
+        // every numId switch; a level fires its override the FIRST time it is
+        // directly advanced under that num, then is removed. This lets the
+        // override win over abstractNum continuation even when a deeper item
+        // appeared first and carried the level over (ECMA-376 §17.9.7).
+        public readonly HashSet<int> PendingInstanceOverride = new();
     }
 
     /// <summary>
@@ -904,13 +911,19 @@ public partial class WordHandler
     {
         if (st.OlCountPerLevel.TryGetValue(forIlvl, out var prev) && prev > 0)
             return prev;
-        // <w:startOverride> is a restart marker that applies only when the level
-        // is explicitly visited. When a deeper level auto-initializes a skipped
-        // shallower level (autoInit), Word ignores startOverride and uses the
-        // level's intrinsic <w:start> — verified vs real Word.
+        // A per-num-instance level override (a <w:lvlOverride> carrying a
+        // <w:startOverride> OR an embedded <w:lvl> with its own <w:start>) means
+        // "this num restarts its numbering at that value" and takes precedence
+        // over continuation from a sibling num sharing the abstractNum. Without
+        // checking it BEFORE the continuation branch below, an overridden num
+        // sharing an abstractNum continued the sibling's count (e.g. 4,5,6)
+        // instead of starting fresh at the override (5,6,7). This is a restart
+        // marker, so it applies only on explicit visitation — autoInit (a deeper
+        // level implicitly initializing this skipped level) ignores it and uses
+        // the level's intrinsic <w:start>, matching Word.
         if (!autoInit)
         {
-            var ovr = GetNumStartOverride(numId, forIlvl);
+            var ovr = GetNumInstanceOverrideStart(numId, forIlvl);
             if (ovr.HasValue) return SeedBelow(ovr.Value);
         }
         if (absId.HasValue
@@ -944,6 +957,24 @@ public partial class WordHandler
         return lvl?.StartNumberingValue?.Val?.Value ?? 1;
     }
 
+    // The per-num-instance override start for a level, or null when this num has
+    // no <w:lvlOverride> for it. An embedded <w:lvl> replaces the level (its own
+    // <w:start> governs, ECMA-376 §17.9.7 — startOverride is then ignored);
+    // otherwise the bare <w:startOverride> value. Non-null signals "this num
+    // restarts here", which outranks shared-abstractNum continuation.
+    private int? GetNumInstanceOverrideStart(int numId, int ilvl)
+    {
+        var numbering = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+        var inst = numbering?.Elements<NumberingInstance>()
+            .FirstOrDefault(n => n.NumberID?.Value == numId);
+        var ovr = inst?.Elements<LevelOverride>()
+            .FirstOrDefault(o => o.LevelIndex?.Value == ilvl);
+        if (ovr == null) return null;
+        if (ovr.GetFirstChild<Level>() is Level emb)
+            return emb.StartNumberingValue?.Val?.Value ?? 1;
+        return ovr.StartOverrideNumberingValue?.Val?.Value;
+    }
+
     /// <summary>
     /// Advance the counter for an ordered item at (numId, ilvl): increment this
     /// level, then reset deeper levels per each deeper level's
@@ -962,7 +993,29 @@ public partial class WordHandler
         for (int j = 0; j < ilvl; j++)
         {
             if (st.OlCountPerLevel.ContainsKey(j)) continue;
-            var sj = SeedOrderedStart(st, numId, absId, j, autoInit: true) + 1;
+            int sj;
+            // A shallower level missing from OlCountPerLevel is one of two things:
+            //   (a) never visited at all (jump-to-deeper within a list) → it must
+            //       APPEAR as its start value, so seed-below + 1 = start.
+            //   (b) already visited under a sibling num sharing this abstractNum,
+            //       then dropped when the numId switch cleared the in-run counters
+            //       (GetListPrefix). Its running count survives in
+            //       AbsNumLevelCounters; the parent did NOT advance merely because
+            //       a deeper item appeared first under the new num, so RESTORE that
+            //       value verbatim (no +1). Adding +1 here over-counted every
+            //       subsequent marker (parent shown one level too high) — e.g. a
+            //       0,0,0,1 / switch / 1,0,0,1,0 walk rendered the post-switch
+            //       parent as d,e,f instead of Word's c,d,e.
+            if (absId.HasValue
+                && st.AbsNumLevelCounters.TryGetValue(absId.Value, out var carried)
+                && carried.TryGetValue(j, out var run) && run > 0)
+            {
+                sj = run;
+            }
+            else
+            {
+                sj = SeedOrderedStart(st, numId, absId, j, autoInit: true) + 1;
+            }
             st.OlCountPerLevel[j] = sj;
             st.MultiLevelCounters[j] = sj;
             if (absId.HasValue)
@@ -976,9 +1029,21 @@ public partial class WordHandler
             }
         }
         var seed = SeedOrderedStart(st, numId, absId, ilvl);
-        var prev = st.OlCountPerLevel.GetValueOrDefault(ilvl, seed);
-        // Saturate at int.MaxValue to avoid overflow when w:start is INT_MAX.
-        st.OlCountPerLevel[ilvl] = prev == int.MaxValue ? int.MaxValue : prev + 1;
+        // A per-instance startOverride fires on the FIRST direct advance of its
+        // level under the new num — taking the override value verbatim (a
+        // restart), not continuing from the carried-over count. The override is
+        // consumed once; later advances of the same level continue normally.
+        if (st.PendingInstanceOverride.Remove(ilvl)
+            && GetNumInstanceOverrideStart(numId, ilvl) is int ovrStart)
+        {
+            st.OlCountPerLevel[ilvl] = ovrStart;
+        }
+        else
+        {
+            var prev = st.OlCountPerLevel.GetValueOrDefault(ilvl, seed);
+            // Saturate at int.MaxValue to avoid overflow when w:start is INT_MAX.
+            st.OlCountPerLevel[ilvl] = prev == int.MaxValue ? int.MaxValue : prev + 1;
+        }
         st.MultiLevelCounters[ilvl] = st.OlCountPerLevel[ilvl];
         for (int lk = ilvl + 1; lk <= 8; lk++)
         {
@@ -1009,24 +1074,26 @@ public partial class WordHandler
     }
 
     /// <summary>
-    /// ECMA-376 §17.9.6 &lt;w:lvlRestart&gt;: a deeper level restarts its counter
-    /// whenever a level numbered R (1-based) <em>or any shallower (lower-numbered)
-    /// level</em> increments. So when the level at <paramref name="ilvl"/> (0-based)
-    /// increments, deeper level <paramref name="deeperIlvl"/> restarts iff its
-    /// lvlRestart value R satisfies (ilvl+1) &gt;= R.
-    ///   • R absent → default R = 1: any shallower level increment restarts it
-    ///     (preserves the historic always-restart-on-parent-tick outline default).
+    /// ECMA-376 §17.9.6 &lt;w:lvlRestart&gt;: the current level restarts whenever the
+    /// level numbered R (1-based) <em>or any level above it (lower index = shallower)</em>
+    /// is used. So when the level at <paramref name="ilvl"/> (0-based) increments,
+    /// deeper level <paramref name="deeperIlvl"/> restarts iff its lvlRestart value
+    /// R satisfies (ilvl+1) &lt;= R — i.e. the incrementing level is R or shallower.
+    ///   • R absent → default R = deeperIlvl (its own 0-based index): restarts on
+    ///     every STRICTLY shallower level (the standard outline default). This is
+    ///     mathematically identical to the historic "(ilvl+1) &gt;= 1" default, so
+    ///     plain multi-level lists are unaffected; only explicit lvlRestart values
+    ///     change behavior.
     ///   • R == 0   → never restart.
-    /// Verified against real Word: lvlRestart="2" on a 3rd level + sequence
-    /// 0,2,2,0,2 (the 2nd level never used) yields 1,1,2,2,3 — the deepest level
-    /// continues because only level 1 (1-based) ever incremented and 1 &lt; 2.
+    /// (lvlRestart="1" therefore restarts ONLY when the top level (ilvl=0) ticks,
+    /// NOT when an intermediate level ticks — matching real Word.)
     /// </summary>
     private bool ShouldRestartDeeperLevel(int numId, int ilvl, int deeperIlvl)
     {
         var restart = GetLevel(numId, deeperIlvl)?.GetFirstChild<LevelRestart>()?.Val?.Value;
-        var r = restart ?? 1;
-        if (r == 0) return false;               // val="0": never restart
-        return (ilvl + 1) >= r;
+        if (restart == 0) return false;          // val="0": never restart
+        var r = restart ?? deeperIlvl;           // default: restart on any strictly shallower level
+        return (ilvl + 1) <= r;
     }
 
     /// <summary>
@@ -1136,6 +1203,13 @@ public partial class WordHandler
             st.OlCountPerLevel.Clear();
             st.MultiLevelCounters.Clear();
             st.CurrentNumId = numId.Value;
+            // Re-arm per-instance startOverrides for the new num: each overridden
+            // level fires its override the next time it is DIRECTLY advanced,
+            // even if a deeper item carried the level over first.
+            st.PendingInstanceOverride.Clear();
+            for (int lv = 0; lv <= 8; lv++)
+                if (GetNumInstanceOverrideStart(numId.Value, lv).HasValue)
+                    st.PendingInstanceOverride.Add(lv);
         }
 
         var absId = GetAbstractNumId(numId.Value);

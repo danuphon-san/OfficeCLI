@@ -805,8 +805,8 @@ public partial class WordHandler
                 if (pPr.SpacingBetweenLines != null)
                 {
                     var sp = pPr.SpacingBetweenLines;
-                    if (sp.Before?.Value != null) styleNode.Format["spaceBefore"] = SpacingConverter.FormatWordSpacing(sp.Before.Value);
-                    if (sp.After?.Value != null) styleNode.Format["spaceAfter"] = SpacingConverter.FormatWordSpacing(sp.After.Value);
+                    if (sp.Before?.Value != null) styleNode.Format["spaceBefore"] = SpacingConverter.FormatWordSpacingNonNegative(sp.Before.Value);
+                    if (sp.After?.Value != null) styleNode.Format["spaceAfter"] = SpacingConverter.FormatWordSpacingNonNegative(sp.After.Value);
                     // BUG-DUMP-R46-1: style-level auto-spacing toggles (mirror BUG-DUMP-R44-4 paragraph path)
                     if (sp.BeforeAutoSpacing?.Value != null) styleNode.Format["spaceBeforeAuto"] = sp.BeforeAutoSpacing.Value;
                     if (sp.AfterAutoSpacing?.Value != null) styleNode.Format["spaceAfterAuto"] = sp.AfterAutoSpacing.Value;

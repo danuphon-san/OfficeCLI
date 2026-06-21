@@ -104,6 +104,18 @@ public partial class WordHandler
         // via Set inherit the run-level direction without a separate flag).
         // CONSISTENCY(rtl-cascade): mirrors SetElementParagraph — direction
         // is a paragraph-scope shorthand for "this paragraph is fully RTL".
+        // BUG-DUMP-MARKRPR-RTL-OVERSTAMP: when the dump forwards the whole ¶-mark
+        // <w:rPr> verbatim (markRPr.xml), that subtree is the authoritative mark —
+        // it already carries the source's exact mark-rtl state (present or absent).
+        // The direction=rtl / rtl=true convenience cascade below must NOT also
+        // inject <w:rtl/> into the mark, or a bidi paragraph whose source mark had
+        // no <w:rtl/> (only <w:lang w:bidi=…/>) gains a spurious mark rtl that
+        // changes the empty paragraph's line metrics and reflows the page. pPr
+        // <w:bidi/> is still set (it is the paragraph direction, separate from the
+        // mark and not carried in markRPr.xml). Mirrors the markRPrVerbatimApplied
+        // guard on the dotted markRPr.* keys further down.
+        bool hasVerbatimMarkRPr = properties.ContainsKey("markRPr.xml")
+            || properties.ContainsKey("markrpr.xml");
         bool? paraRtl = null;
         if (properties.TryGetValue("direction", out var dirRaw)
             || properties.TryGetValue("dir", out dirRaw)
@@ -112,9 +124,18 @@ public partial class WordHandler
             paraRtl = ParseDirectionRtl(dirRaw);
             if (paraRtl.Value)
             {
+                // direction/dir/bidi sets ONLY the paragraph-direction flag
+                // (pPr <w:bidi/>) — it must NOT inject <w:rtl/> into the ¶-mark
+                // rPr. The mark glyph's rtl is an independent property: a bidi
+                // paragraph whose source mark legitimately lacks <w:rtl/> (only
+                // <w:lang w:bidi=…/>) otherwise gained a spurious mark rtl on
+                // dump→batch replay, changing the empty paragraph's line metrics
+                // and reflowing the page below it. The dump always carries the
+                // mark's true rtl state explicitly (a dotted markRPr.rtl key or
+                // the verbatim markRPr.xml subtree), so the mark round-trips
+                // faithfully without this coupling. `rtl=true` below stays the
+                // explicit "make the mark rtl too" request.
                 pProps.BiDi = new BiDi();
-                var markRPr = pProps.ParagraphMarkRunProperties ?? pProps.AppendChild(new ParagraphMarkRunProperties());
-                ApplyRunFormatting(markRPr, "rtl", "true");
             }
             else
             {
@@ -149,8 +170,11 @@ public partial class WordHandler
         {
             paraRtl = true;
             pProps.BiDi = new BiDi();
-            var markRPr = pProps.ParagraphMarkRunProperties ?? pProps.AppendChild(new ParagraphMarkRunProperties());
-            ApplyRunFormatting(markRPr, "rtl", "true");
+            if (!hasVerbatimMarkRPr)
+            {
+                var markRPr = pProps.ParagraphMarkRunProperties ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+                ApplyRunFormatting(markRPr, "rtl", "true");
+            }
         }
         // Complex-script run flags (bCs/iCs/szCs) hoisted above the text
         // block so an `add p --prop bold.cs=true` without explicit text
@@ -2628,6 +2652,12 @@ public partial class WordHandler
             if (Core.TypedAttributeFallback.TrySet(newRProps, key, value)) continue;
             LastAddUnsupportedProps.Add(key);
         }
+
+        // BUG-DUMP-R71-RPR-ORDER: the run rPr was built across mixed paths
+        // (SDK setters, ApplyRunFormatting, raw AppendChild for rFonts/sz, and
+        // TypedAttributeFallback tail-appends), any of which can leave a child
+        // out of CT_RPr order. Normalize once now so the emitted run validates.
+        NormalizeRunPropsSchemaOrder(newRProps);
 
         // Use ChildElements for index lookup so ResolveAnchorPosition's
         // childElement-indexed result lines up. If index points at

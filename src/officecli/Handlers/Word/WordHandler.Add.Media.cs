@@ -1376,6 +1376,18 @@ public partial class WordHandler
         // 8. Wrap in a Run and insert it, mirroring the AddPicture positional logic.
         var oleRun = new Run(oleObject);
 
+        // BUG-DUMP-OLERPR: re-apply the source OLE run's <w:rPr> (forwarded by
+        // TryEmitOleRun). The run wrapping <w:object> can carry run typography —
+        // most visibly a <w:bdr> border box, also rFonts/sz that set the host
+        // line height — and a bare rebuilt run dropped it, nudging following
+        // lines and reflowing the page. Mirrors the breakRunRpr re-apply.
+        if (properties.TryGetValue("runRpr", out var oleRpr)
+            && !string.IsNullOrWhiteSpace(oleRpr)
+            && oleRpr.Contains("rPr", StringComparison.Ordinal))
+        {
+            try { oleRun.PrependChild(new RunProperties(oleRpr)); } catch { /* malformed: skip */ }
+        }
+
         // If the parent is a block-level SDT, insert into its SdtContentBlock
         // (creating it if missing) instead of appending directly to the SdtBlock.
         // Direct SdtBlock child paragraphs violate the schema and get silently

@@ -3714,6 +3714,26 @@ public static partial class WordBatchEmitter
                     props[rk] = rvs;
             if (data.IconBytes is { Length: > 0 })
                 props["icon"] = $"data:{data.IconContentType ?? "image/png"};base64,{Convert.ToBase64String(data.IconBytes)}";
+            // BUG-DUMP-OLERPR: forward the OLE run's <w:rPr> so AddOle re-applies
+            // it. The run wrapping <w:object> can carry run typography that affects
+            // layout — most visibly a <w:bdr> border box around the object, but
+            // also rFonts/sz that set the host line height. AddOle otherwise builds
+            // a bare <w:r> and the lost border/line-height nudged every following
+            // line, reflowing the page. Mirrors the break-run rPr forwarding above;
+            // extract from raw XML since Navigation strips typography off ole nodes.
+            var oleRawXml = word.RawElementXml(run.Path);
+            if (!string.IsNullOrEmpty(oleRawXml))
+            {
+                try
+                {
+                    var oleRunEl = System.Xml.Linq.XElement.Parse(oleRawXml!);
+                    var wNsOle = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+                    var oleRPrEl = oleRunEl.Element(wNsOle + "rPr");
+                    if (oleRPrEl != null)
+                        props["runRpr"] = oleRPrEl.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+                }
+                catch { /* no rPr to forward */ }
+            }
             items.Add(new BatchItem
             {
                 Command = "add",
