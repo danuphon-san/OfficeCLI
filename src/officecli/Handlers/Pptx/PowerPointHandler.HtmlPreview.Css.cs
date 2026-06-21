@@ -1615,6 +1615,23 @@ public partial class PowerPointHandler
              + $"{P(armLeftW)}% {P(miterBottomY)}%,0 100%)";
     }
 
+    /// <summary>
+    /// octagon clip-path honoring avLst. adj = corner-cut size as a fraction of the
+    /// SHORTER side (default 29289 ≈ the regular octagon's 29.29%). For a square,
+    /// corner% = adj/1000; adj=50000 collapses to a diamond. The old hardcoded 29%
+    /// happened to match the default but ignored adj. Verified empirically.
+    /// </summary>
+    private static string OctagonPolygon(long widthEmu, long heightEmu, Drawing.PresetGeometry? presetGeom)
+    {
+        var adj = Math.Clamp(ReadAdjValueCss(presetGeom, 0, 29289), 0, 50000);
+        var minSide = Math.Min(widthEmu, heightEmu);
+        var cx = Math.Clamp((double)adj / 100000.0 * minSide / widthEmu * 100.0, 0, 50);
+        var cy = Math.Clamp((double)adj / 100000.0 * minSide / heightEmu * 100.0, 0, 50);
+        string P(double d) => d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        return $"clip-path:polygon({P(cx)}% 0,{P(100 - cx)}% 0,100% {P(cy)}%,100% {P(100 - cy)}%,"
+             + $"{P(100 - cx)}% 100%,{P(cx)}% 100%,0 {P(100 - cy)}%,0 {P(cy)}%)";
+    }
+
     private static string PresetGeometryToCss(string preset, long widthEmu, long heightEmu,
         Drawing.PresetGeometry? presetGeom)
     {
@@ -1674,6 +1691,8 @@ public partial class PowerPointHandler
             return LeftRightArrowPolygon(widthEmu, heightEmu, presetGeom);
         if (preset == "halfFrame" && widthEmu > 0 && heightEmu > 0)
             return HalfFramePolygon(widthEmu, heightEmu, presetGeom);
+        if (preset == "octagon" && widthEmu > 0 && heightEmu > 0)
+            return OctagonPolygon(widthEmu, heightEmu, presetGeom);
         // corner (L-shape): adj1 = bottom (horizontal) arm height %, adj2 = left
         // (vertical) arm width %; both default 50000. Inner corner at (adj2, 100-adj1).
         // The old hardcoded 50/50 ignored both, so a thin-armed L looked fat.
@@ -1795,7 +1814,6 @@ public partial class PowerPointHandler
             // hexagon handled above (parametric, honors avLst)
             // vertex-up regular heptagon, bbox-normalized (side vertices at y=64.3%, base 72.3%-27.7%)
             "heptagon" => "clip-path:polygon(50% 0,90.1% 19.8%,100% 64.3%,72.3% 100%,27.7% 100%,0 64.3%,9.9% 19.8%)",
-            "octagon" => "clip-path:polygon(29% 0,71% 0,100% 29%,100% 71%,71% 100%,29% 100%,0 71%,0 29%)",
             // edge-up regular decagon (10 vertices): flat top/bottom, pointed left/right
             "decagon" => "clip-path:polygon(35% 0,65% 0,90% 19%,100% 50%,90% 81%,65% 100%,35% 100%,10% 81%,0 50%,10% 19%)",
             "dodecagon" => "clip-path:polygon(37% 0,63% 0,87% 13%,100% 37%,100% 63%,87% 87%,63% 100%,37% 100%,13% 87%,0 63%,0 37%,13% 13%)",
