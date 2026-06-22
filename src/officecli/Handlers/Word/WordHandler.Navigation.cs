@@ -1521,6 +1521,16 @@ public partial class WordHandler
                 {
                     AbstractNum an => an.AbstractNumberId?.Value.ToString() == targetId,
                     NumberingInstance ni => ni.NumberID?.Value.ToString() == targetId,
+                    // BUG-DUMP-BMEND-IDPATH: a bookmarkEnd/bookmarkStart addressed by
+                    // w:id must resolve by id, NOT positionally. The dump emits a
+                    // bookmarkEnd's path as bookmarkEnd[@id=N]; without this, the
+                    // numeric form bookmarkEnd[N] was treated as a positional ordinal,
+                    // so an end whose id != its document-order position (e.g. the
+                    // first bookmarkEnd in a stack whose id is 4 but the 4th end has
+                    // id 7) re-read the WRONG element, producing a duplicate bookmark
+                    // id on round-trip.
+                    BookmarkEnd be => be.Id?.Value.ToString() == targetId,
+                    BookmarkStart bs => bs.Id?.Value.ToString() == targetId,
                     _ => false,
                 });
             }
@@ -5049,7 +5059,12 @@ public partial class WordHandler
                     var beNode = new DocumentNode
                     {
                         Type = "bookmarkEnd",
-                        Path = $"{path}/bookmarkEnd[{be.Id?.Value}]",
+                        // BUG-DUMP-BMEND-IDPATH: address by w:id explicitly. A bare
+                        // numeric bracket is resolved positionally, but a bookmarkEnd's
+                        // id need not equal its document-order position (stacked TOC
+                        // anchors where one closes inside a field result), which
+                        // re-read the wrong end and duplicated a bookmark id.
+                        Path = $"{path}/bookmarkEnd[@id={be.Id?.Value}]",
                     };
                     var matchName = ResolveBookmarkEndName(be);
                     if (!string.IsNullOrEmpty(matchName))
