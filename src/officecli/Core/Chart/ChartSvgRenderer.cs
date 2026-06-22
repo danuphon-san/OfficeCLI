@@ -1654,12 +1654,25 @@ internal partial class ChartSvgRenderer
     /// bar stack (barOfPie), joined to the aggregate slice by connector lines.
     /// </summary>
     public void RenderOfPieChartSvg(StringBuilder sb, List<(string name, double[] values)> series,
-        string[] categories, List<string> colors, int ox, int oy, int pw, int ph, bool isBar)
+        string[] categories, List<string> colors, int ox, int oy, int pw, int ph, bool isBar,
+        bool showDataLabels = false, bool showVal = true, bool showPercent = false,
+        string? dataLabelNumFmt = null)
     {
         var values = series.FirstOrDefault().values ?? [];
         if (values.Length == 0) return;
         var total = values.Sum();
         if (total <= 0) return;
+
+        // Format a single slice value as a data label, honoring showVal/showPercent
+        // and the dLbls numFmt (mirrors the standard pie renderer's label content).
+        string SliceLabel(double v, double tot)
+        {
+            var pct = tot > 0 ? v / tot * 100 : 0;
+            var valTxt = !string.IsNullOrEmpty(dataLabelNumFmt) ? FormatAxisValue(v, dataLabelNumFmt) : $"{v:0.##}";
+            if (showVal && showPercent) return $"{valTxt} ({pct:0}%)";
+            if (showPercent) return $"{pct:0}%";
+            return valTxt;
+        }
 
         // Split: trailing `secCount` points go to the secondary plot.
         int secCount = Math.Min(3, Math.Max(1, values.Length - 1));
@@ -1686,6 +1699,13 @@ internal partial class ChartSvgRenderer
             var x2 = mcx + mr * Math.Cos(endAngle); var y2 = mcy + mr * Math.Sin(endAngle);
             var largeArc = sliceAngle > Math.PI ? 1 : 0;
             sb.AppendLine($"        <path d=\"M {mcx:0.#},{mcy:0.#} L {x1:0.#},{y1:0.#} A {mr:0.#},{mr:0.#} 0 {largeArc},1 {x2:0.#},{y2:0.#} Z\" fill=\"{color}\" opacity=\"{FillOpacity(i)}\"/>");
+            if (showDataLabels)
+            {
+                var midAngle = startAngle + sliceAngle / 2;
+                var lx = mcx + mr * 0.65 * Math.Cos(midAngle);
+                var ly = mcy + mr * 0.65 * Math.Sin(midAngle);
+                sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"#fff\" font-size=\"{DataLabelFontPx}\" font-weight=\"bold\" text-anchor=\"middle\" dominant-baseline=\"central\">{HtmlEncode(SliceLabel(mainSlices[i], total))}</text>");
+            }
             if (i == mainSlices.Count - 1) aggMidAngle = startAngle + sliceAngle / 2;
             startAngle = endAngle;
         }
@@ -1714,6 +1734,8 @@ internal partial class ChartSvgRenderer
                 var color = (mainCount + i) < colors.Count ? colors[mainCount + i]
                     : DefaultColors[(mainCount + i) % DefaultColors.Length];
                 sb.AppendLine($"        <rect x=\"{barX:0.#}\" y=\"{yCursor - h:0.#}\" width=\"{barW:0.#}\" height=\"{h:0.#}\" fill=\"{color}\" opacity=\"{FillOpacity(mainCount + i)}\"/>");
+                if (showDataLabels)
+                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{barX + barW / 2:0.#}\" y=\"{yCursor - h / 2:0.#}\" fill=\"#fff\" font-size=\"{DataLabelFontPx}\" font-weight=\"bold\" text-anchor=\"middle\" dominant-baseline=\"central\">{HtmlEncode(SliceLabel(secVals[i], secSum))}</text>");
                 yCursor -= h;
             }
         }
@@ -1734,6 +1756,13 @@ internal partial class ChartSvgRenderer
                 var x2 = scx + sr * Math.Cos(endAngle); var y2 = scy + sr * Math.Sin(endAngle);
                 var largeArc = sliceAngle > Math.PI ? 1 : 0;
                 sb.AppendLine($"        <path d=\"M {scx:0.#},{scy:0.#} L {x1:0.#},{y1:0.#} A {sr:0.#},{sr:0.#} 0 {largeArc},1 {x2:0.#},{y2:0.#} Z\" fill=\"{color}\" opacity=\"{FillOpacity(mainCount + i)}\"/>");
+                if (showDataLabels)
+                {
+                    var midAngle = sStart + sliceAngle / 2;
+                    var lx = scx + sr * 0.65 * Math.Cos(midAngle);
+                    var ly = scy + sr * 0.65 * Math.Sin(midAngle);
+                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"#fff\" font-size=\"{DataLabelFontPx}\" font-weight=\"bold\" text-anchor=\"middle\" dominant-baseline=\"central\">{HtmlEncode(SliceLabel(secVals[i], secSum))}</text>");
+                }
                 sStart = endAngle;
             }
         }
@@ -3929,7 +3958,9 @@ internal partial class ChartSvgRenderer
             // by connector lines. Must branch before the generic Contains("pie")
             // test, which would otherwise render a plain single pie.
             RenderOfPieChartSvg(sb, info.Series, info.Categories, info.Colors,
-                marginLeft, marginTop, plotW, plotH, chartType == "barOfPie");
+                marginLeft, marginTop, plotW, plotH, chartType == "barOfPie",
+                info.ShowDataLabels, info.ShowDataLabelVal, info.ShowDataLabelPercent,
+                info.DataLabelsNumFmt);
         }
         else if (chartType.Contains("pie") || chartType.Contains("doughnut"))
         {
