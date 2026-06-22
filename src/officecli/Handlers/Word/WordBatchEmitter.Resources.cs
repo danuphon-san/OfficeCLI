@@ -1641,7 +1641,11 @@ public static partial class WordBatchEmitter
             // the structural body-run pass below. Mirror EmitNoteReference.
             int commentSeedSkip = 0;
             if (firstParaRuns.Count > 0
-                && (firstParaRuns[0].Type == "run" || firstParaRuns[0].Type == "r"))
+                && (firstParaRuns[0].Type == "run" || firstParaRuns[0].Type == "r")
+                // BUG-DUMP-NOTE-HYPHEN: don't flatten a structural-hyphen first run
+                // into the `add comment text=` seed — let EmitContainerBodyRuns emit
+                // it as `add r hyphen=` so <w:softHyphen/>/<w:noBreakHyphen/> survive.
+                && !firstParaRuns[0].Format.ContainsKey("_hasHyphen"))
             {
                 var firstRun = firstParaRuns[0];
                 props["text"] = firstRun.Text ?? string.Empty;
@@ -1889,6 +1893,30 @@ public static partial class WordBatchEmitter
                 Parent = paraTargetPath,
                 Type = "r",
                 Props = tabProps
+            });
+            return;
+        }
+        // BUG-DUMP-NOTE-HYPHEN: a run carrying a structural <w:softHyphen/> /
+        // <w:noBreakHyphen/> (RunToNode stamps _hasHyphen) must emit a typed
+        // `add r --prop hyphen=soft|noBreak` — the generic path below persists
+        // GetRunText's cached U+00AD/U+2011 glyph as literal <w:t> text and drops
+        // the structural hyphen element. The body walk handles this via
+        // TryEmitHyphenRun; mirror it here so footnote/endnote/comment runs do too.
+        if (run.Format.ContainsKey("_hasHyphen"))
+        {
+            var hyProps = FilterEmittableProps(run.Format);
+            hyProps.Remove("_hasHyphen");
+            hyProps["hyphen"] = run.Format.TryGetValue("_hasHyphen", out var hk)
+                && string.Equals(hk?.ToString(), "soft", StringComparison.OrdinalIgnoreCase)
+                ? "soft" : "noBreak";
+            if (!string.IsNullOrEmpty(run.Text)) hyProps["text"] = run.Text!;
+            else hyProps.Remove("text");
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = paraTargetPath,
+                Type = "r",
+                Props = hyProps
             });
             return;
         }
@@ -2183,7 +2211,12 @@ public static partial class WordBatchEmitter
         // body-run pass below.
         int noteSeedSkip = 0;
         if (firstParaRuns.Count > 0
-            && (firstParaRuns[0].Type == "run" || firstParaRuns[0].Type == "r"))
+            && (firstParaRuns[0].Type == "run" || firstParaRuns[0].Type == "r")
+            // BUG-DUMP-NOTE-HYPHEN: a first content run carrying a structural
+            // hyphen must NOT be flattened into the `add <kind> text=` seed (which
+            // persists the cached U+00AD/U+2011 glyph and drops the element). Seed
+            // empty and let EmitContainerBodyRuns emit it as `add r hyphen=`.
+            && !firstParaRuns[0].Format.ContainsKey("_hasHyphen"))
         {
             var firstRun = firstParaRuns[0];
             // Emit the FIRST content run's text VERBATIM. AddFootnote/AddEndnote
