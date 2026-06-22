@@ -1482,7 +1482,15 @@ public partial class WordHandler
             properties.TryGetValue("revision.date", out pTcDate);
             properties.TryGetValue("revision.id", out pTcId);
             var pprChange = new ParagraphPropertiesChange();
-            if (!string.IsNullOrEmpty(pTcAuthor)) pprChange.Author = pTcAuthor;
+            // BUG-DUMP-PPRCHANGE-AUTHOR: w:author is a REQUIRED attribute on
+            // CT_TrackChange (pPrChange) — omitting it makes the file schema-invalid
+            // and Word repairs-on-open. A source pPrChange authored with an EMPTY
+            // name (w:author="") is common; Navigation's readback skips an empty
+            // author so revision.author never arrives here, and the old
+            // `if (!IsNullOrEmpty)` guard then dropped the attribute entirely.
+            // Always stamp author (empty string when unknown) so the marker stays
+            // schema-valid and the empty-author source round-trips faithfully.
+            pprChange.Author = pTcAuthor ?? "";
             if (!string.IsNullOrEmpty(pTcDate) && DateTime.TryParse(pTcDate, out var pTcDt))
                 pprChange.Date = pTcDt;
             pprChange.Id = !string.IsNullOrEmpty(pTcId)
@@ -2054,6 +2062,17 @@ public partial class WordHandler
         properties.TryGetValue("revision.author", out trackChangeAuthor);
         properties.TryGetValue("revision.date", out trackChangeDate);
         properties.TryGetValue("revision.id", out trackChangeId);
+        // BUG-DUMP-DELININS: a run that is BOTH inserted and deleted
+        // (<w:ins><w:del><w:r><w:delText>) — one reviewer inserts text, another
+        // deletes that insertion. The dump captures the outer ins as
+        // revision.* and the inner del as revision.nested.*. Without rebuilding
+        // both wrappers the deletion is lost and the text un-deletes.
+        string? nestedTcKind = null, nestedTcAuthor = null, nestedTcDate = null, nestedTcId = null;
+        if (properties.TryGetValue("revision.nested.type", out var nTcKindRaw))
+            nestedTcKind = nTcKindRaw?.Trim().ToLowerInvariant();
+        properties.TryGetValue("revision.nested.author", out nestedTcAuthor);
+        properties.TryGetValue("revision.nested.date", out nestedTcDate);
+        properties.TryGetValue("revision.nested.id", out nestedTcId);
 
         // High-level inference: if a revision.* sub-key is present
         // (author/date/id) without an explicit `revision.type=<kind>` literal,
@@ -2781,8 +2800,12 @@ public partial class WordHandler
             var rPr = newRun.GetFirstChild<RunProperties>()
                    ?? newRun.PrependChild(new RunProperties());
             var rprChange = new RunPropertiesChange();
-            if (!string.IsNullOrEmpty(trackChangeAuthor))
-                rprChange.Author = trackChangeAuthor;
+            // BUG-DUMP-PPRCHANGE-AUTHOR (run side): w:author is REQUIRED on
+            // CT_TrackChange (rPrChange) — same schema rule as pPrChange above.
+            // An empty-author source marker (w:author="") must round-trip as an
+            // empty attribute, not a dropped one (which fails validation and
+            // triggers Word repair-on-open).
+            rprChange.Author = trackChangeAuthor ?? "";
             // BUG-R4F-03: RoundtripKind keeps a …Z date in Utc (see above).
             if (!string.IsNullOrEmpty(trackChangeDate)
                 && DateTime.TryParse(trackChangeDate, null, System.Globalization.DateTimeStyles.RoundtripKind, out var tcfDate))
@@ -2847,8 +2870,37 @@ public partial class WordHandler
                         t.Parent?.ReplaceChild(dt, t);
                     }
                 }
-                parentEl.ReplaceChild(wrapper, newRun);
-                wrapper.AppendChild(newRun);
+                // BUG-DUMP-DELININS: rebuild the <w:ins><w:del> stack for a run
+                // that is both inserted and deleted. The wrapper above is the
+                // OUTER ins; insert an INNER del between it and the run so the
+                // shape is <w:ins><w:del><w:r><w:delText>. ECMA-376 permits only
+                // ins⊃del nesting, so this fires only for revision.type=ins +
+                // revision.nested.type=del.
+                if (trackChangeKind == "ins" && nestedTcKind == "del")
+                {
+                    var innerDel = new DeletedRun();
+                    if (!string.IsNullOrEmpty(nestedTcAuthor)) innerDel.Author = nestedTcAuthor;
+                    if (!string.IsNullOrEmpty(nestedTcDate)
+                        && DateTime.TryParse(nestedTcDate, null, System.Globalization.DateTimeStyles.RoundtripKind, out var ndDate))
+                        innerDel.Date = ndDate;
+                    innerDel.Id = !string.IsNullOrEmpty(nestedTcId) ? nestedTcId : GenerateRevisionId();
+                    // The deleted run's text must ride in <w:delText>.
+                    foreach (var t in newRun.Elements<Text>().ToList())
+                    {
+                        var dt = new DeletedText(t.Text ?? "") { Space = t.Space };
+                        t.Parent?.ReplaceChild(dt, t);
+                    }
+                    // newRun is still a child of parentEl here — swap in the
+                    // outer ins, then nest del then the run: <w:ins><w:del><w:r>.
+                    parentEl.ReplaceChild(wrapper, newRun);
+                    wrapper.AppendChild(innerDel);
+                    innerDel.AppendChild(newRun);
+                }
+                else
+                {
+                    parentEl.ReplaceChild(wrapper, newRun);
+                    wrapper.AppendChild(newRun);
+                }
             }
         }
         // moveFrom / moveTo: low-level OOXML synthesis primitives for

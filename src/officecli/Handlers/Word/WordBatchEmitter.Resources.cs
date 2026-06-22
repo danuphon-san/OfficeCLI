@@ -385,6 +385,46 @@ public static partial class WordBatchEmitter
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return;
         xml = CanonicalizeRawXml(xml);
 
+        // BUG-DUMP-NOTE-RAWREF-WONTOPEN: the per-reference `add footnote`/`add
+        // endnote` body walk only fires for references the walk actually visits.
+        // When EVERY reference to a body note lives inside a raw-emitted region
+        // — an SDT content-control carrier, a verbatim field/textbox block —
+        // the walk never sees it, so NO `add <kind>` is emitted and the rebuild
+        // never creates the FootnotesPart/EndnotesPart. The raw region still
+        // carries the verbatim `<w:footnoteReference w:id="N"/>`, so the rebuilt
+        // body references a note id that does not exist → Word reports the file
+        // is corrupt and refuses to open. (The targeted per-note raw-sets below
+        // would also fail: their child XPath matches nothing in the missing
+        // part.) Recover by emitting the WHOLE notes part verbatim: RawSet on
+        // "/w:footnotes" lazily creates the part with the source's exact note
+        // bodies. Because nothing was added, no body renumbering happened, so
+        // every raw reference keeps its original id and resolves cleanly.
+        int emittedAdds = items.Count(it =>
+            it.Command == "add"
+            && string.Equals(it.Type, queryKind, StringComparison.OrdinalIgnoreCase));
+        if (emittedAdds == 0)
+        {
+            bool rawHasRef = items.Any(it =>
+                it.Command == "raw-set"
+                && it.Xml != null
+                && it.Xml.Contains($"{queryKind}Reference", StringComparison.Ordinal));
+            if (rawHasRef)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = semanticPart,
+                    Xpath = $"/w:{queryKind}s",
+                    Action = "replace",
+                    Xml = xml
+                });
+            }
+            // No `add <kind>` AND no raw reference → genuine orphan note bodies;
+            // WarnOrphanNotes already surfaced the drop. Either way the targeted
+            // per-note fixup below cannot run (no part to patch), so stop here.
+            return;
+        }
+
         System.Xml.Linq.XDocument doc;
         try { doc = System.Xml.Linq.XDocument.Parse(xml); }
         catch { return; }
@@ -3233,14 +3273,22 @@ public static partial class WordBatchEmitter
     }
 
     // STYLE-RAW-FALLBACK helper: parse the source styles.xml once and return a
-    // map from styleId → verbatim <w:style> XML, restricted to TABLE styles
-    // (w:type="table"). Only table styles need this fallback today: their
-    // <w:tblPr>/<w:tblStylePr>/<w:shd>/<w:trPr>/<w:tcPr> formatting has no
-    // scalar Format representation, unlike paragraph/character styles whose
-    // pPr/rPr round-trips through the scalar emit path. Keeping the scope to
-    // table styles avoids re-clobbering the (correct) scalar emit for the far
-    // more numerous paragraph/character styles. The keying id is each style's
-    // own w:styleId — callers match it against the id the `add` step used.
+    // map from styleId → verbatim <w:style> XML, for ALL styles.
+    //
+    // Originally restricted to TABLE styles (whose tblPr/tblStylePr/shd/trPr/
+    // tcPr have no scalar Format representation). But the scalar emit also
+    // silently drops rPr/pPr children it has no key for — e.g. a paragraph
+    // style whose rPr carries <w:bdr> (a run border box): the dump emitted
+    // `shading=` from the sibling <w:shd> but no border key, so a Heading with
+    // a colored border box round-tripped as a plain filled heading, reflowing
+    // the whole document (SSIM 0.69). Rather than chase every missing rPr/pPr
+    // child key (the same hardcoded-allowlist class fixed verbatim for the ¶
+    // mark and docDefaults), round-trip EVERY style's <w:style> element
+    // verbatim. The scalar `add style` still runs first (creating the style +
+    // built-in id upsert / collision suffix); the raw-set then swaps it for the
+    // source's exact copy, so no scalar/raw drift and no dropped children. The
+    // keying id is each style's own w:styleId — callers match it against the id
+    // the `add` step used.
     private static Dictionary<string, string> BuildRawTableStyleMap(WordHandler word)
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -3254,8 +3302,6 @@ public static partial class WordBatchEmitter
             var wNs = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
             foreach (var styleEl in doc.Root?.Elements(wNs + "style") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
             {
-                var type = styleEl.Attribute(wNs + "type")?.Value;
-                if (!string.Equals(type, "table", StringComparison.Ordinal)) continue;
                 var idAttr = styleEl.Attribute(wNs + "styleId");
                 var styleId = idAttr?.Value;
                 if (string.IsNullOrEmpty(styleId)) continue;

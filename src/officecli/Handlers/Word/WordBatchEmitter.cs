@@ -318,6 +318,17 @@ public static partial class WordBatchEmitter
             && string.Equals(it.Type, kind, StringComparison.OrdinalIgnoreCase));
         if (emitted >= notes.Count) return;
 
+        // BUG-DUMP-NOTE-RAWREF-WONTOPEN: a note whose only reference lives inside
+        // a raw-emitted region (SDT carrier, verbatim field/textbox) is NOT an
+        // orphan — EmitNoteSpecialNotesFixup recovers it by emitting the whole
+        // notes part verbatim (fires only when no `add <kind>` ran, i.e.
+        // emitted == 0). Don't warn "dropped" for notes that path restores.
+        if (emitted == 0
+            && items.Any(it => it.Command == "raw-set"
+                && it.Xml != null
+                && it.Xml.Contains($"{kind}Reference", StringComparison.Ordinal)))
+            return;
+
         // The first `emitted` notes are the ones a reference recovered (Query
         // and the body walk both run in document order); the remainder are
         // orphans. Report each so its lost text is visible.
@@ -555,6 +566,33 @@ public static partial class WordBatchEmitter
         // (the same-paragraph name filter can't see it), so any bookmark row
         // carrying one of these names is skipped document-wide.
         public HashSet<string> FormFieldBookmarkNames { get; } = new(StringComparer.Ordinal);
+
+        // BUG-DUMP-FF-ROWLEVEL-BOOKMARK: lazily-cached set of EVERY bookmark name
+        // in the source body, so the form-field noBookmark decision can recognise
+        // a wrapping bookmark that sits at ROW level (between table cells) and is
+        // therefore invisible to the same-paragraph sibling check. Cached because
+        // the scan walks the whole body once per document, not per paragraph.
+        private HashSet<string>? _allSourceBookmarkNames;
+        public HashSet<string> AllSourceBookmarkNames(WordHandler word)
+            => _allSourceBookmarkNames ??= word.GetAllBookmarkNames();
+
+        // BUG-DUMP-R72-FF-BOOKMARK-COUNT: mutable per-name budget of how many
+        // source bookmarks of each name remain to be claimed by a form field.
+        // Each field that keeps its wrapping bookmark consumes one unit; once a
+        // name's budget hits zero, every further same-named field is pinned
+        // noBookmark so the rebuilt bookmark count matches the source instead of
+        // fabricating one bookmark per field. Lazily seeded from the source body.
+        private Dictionary<string, int>? _bookmarkBudget;
+        public bool ConsumeBookmarkBudget(WordHandler word, string name)
+        {
+            _bookmarkBudget ??= word.GetAllBookmarkNameCounts();
+            if (_bookmarkBudget.TryGetValue(name, out var c) && c > 0)
+            {
+                _bookmarkBudget[name] = c - 1;
+                return true;
+            }
+            return false;
+        }
     }
 
     private static void EmitBody(WordHandler word, List<BatchItem> items,

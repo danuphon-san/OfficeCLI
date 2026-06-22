@@ -31,49 +31,50 @@ public static class WordNumFmtRenderer
             case "upperletter": return ToAlpha(n, uppercase: true);
             case "lowerletter": return ToAlpha(n, uppercase: false);
             case "ordinal": return ToOrdinal(n);
-            case "cardinaltext": return ToEnglishCardinal(n);
-            case "ordinaltext": return ToEnglishOrdinal(n);
+            // Word capitalizes only the FIRST letter of the whole spelled-out
+            // phrase: "Twenty-one", "One hundred", "Twenty-first" — not the
+            // title-cased "Twenty-One" / "One Hundred" the builders produce.
+            case "cardinaltext": return CapitalizeFirst(ToEnglishCardinal(n));
+            case "ordinaltext": return CapitalizeFirst(ToEnglishOrdinal(n));
+            // Ordinary chinese/taiwanese counting: 十-grouped for 1-99, then
+            // digit-by-digit with 〇 for >=100 (100 → 一〇〇). Identical between
+            // the two (the only simplified/traditional split, 万 vs 萬, lives at
+            // the 10000 place, which is rendered digit-by-digit here).
             case "chinesecounting":
-            case "japanesecounting":
-            case "chinesecountingthousand":
-                // "Counting" / "CountingThousand" render ordinary hanzi
-                // (一二三, 萬 at 10000) in real Word — verified via officeshot.
-                // Only the "Legal" formats are the financial/capital glyphs
-                // (壹貳參); see chineseLegalSimplified / koreanLegal below.
-                return ToChineseCounting(n, formal: false);
             case "taiwanesecounting":
+                return ToChineseCountingHybrid(n);
+            // *CountingThousand fully spell the 百/千/万 grouping with 〇 internal
+            // zeros (101 → 一百〇一); traditional uses 萬 at the 10000 place.
+            case "chinesecountingthousand":
+                return BuildCjkGrouped(n, CnDigits, '十', '百', '千', '万', '〇', dropZeros: false, OneStyle.Chinese);
             case "taiwanesecountingthousand":
-                // Traditional ordinary hanzi (一二三 … 十百千) — identical to
-                // simplified except 10000 uses traditional 萬 (vs simplified
-                // 万). Verified ordinary (not financial) via officeshot.
-                return ToTraditionalCounting(n);
+                return BuildCjkGrouped(n, CnDigits, '十', '百', '千', '萬', '〇', dropZeros: false, OneStyle.Chinese);
+            // japaneseCounting: grouped, drops the leading 一 before 十/百/千 and
+            // drops internal zeros, but keeps 一 before 万 (二千二十五, 一万).
+            case "japanesecounting":
+                return BuildCjkGrouped(n, CnDigits, '十', '百', '千', '万', '\0', dropZeros: true, OneStyle.Japanese);
+            // Simplified/traditional legal grouping: keep the leading digit before
+            // every unit (壹拾/壹佰/壹仟/壹萬), keep 零 zeros. Both use 萬 at 10000.
             case "chineselegalsimplified":
-                return ToChineseLegalSimplified(n);
+                return BuildCjkGrouped(n, CnLegalSimplDigits, '拾', '佰', '仟', '萬', '零', dropZeros: false, OneStyle.KeepAll);
+            case "ideographlegaltraditional":
+                return BuildCjkGrouped(n, CnFormalDigits, '拾', '佰', '仟', '萬', '零', dropZeros: false, OneStyle.KeepAll);
+            // Digit-by-digit ideograph numerals with 〇 zero (100 → 一〇〇).
+            // koreanDigital2 renders these han ideographs despite the "korean"
+            // name — NOT sino-Hangul digits.
             case "ideographdigital":
             case "taiwanesedigital":
             case "japanesedigitaltenthousand":
-                return ToIdeographDigital(n);
+            case "koreandigital2":
+                return ToDigitByDigit(n, CnDigits, '〇');
             case "koreandigital":
                 return ToKoreanDigital(n);
-            // koreanDigital2 renders CJK numerals (一二三 …, positional) in real
-            // Word — NOT sino-korean Hangul digits. Verified via officeshot
-            // (fams.docx): koreanDigital2 items show 一/二/三, identical to the
-            // ideographDigital family. Despite the "korean" name the glyphs are
-            // han ideographs.
-            case "koreandigital2":
-                return ToIdeographDigital(n);
             case "koreancounting":
                 return ToKoreanCounting(n);
             case "koreanlegal":
                 return ToKoreanLegal(n);
             case "japaneselegal":
                 return ToJapaneseLegal(n);
-            case "ideographlegaltraditional":
-                // Traditional Chinese financial/capital glyphs 壹貳參…拾佰仟萬.
-                // Identical to ToChineseCounting(formal:true) — same digit and
-                // unit tables Word uses for the traditional legal format.
-                // (ECMA-376 §17.18.59 "ideographLegalTraditional".)
-                return ToChineseCounting(n, formal: true);
             // Japanese kana enumeration. Word renders aiueo/aiueoFullWidth as
             // full-width katakana in gojūon order, and iroha/irohaFullWidth as
             // full-width katakana in iroha order. The bare and *FullWidth
@@ -124,15 +125,18 @@ public static class WordNumFmtRenderer
             case "hindicounting":
             case "hindicardinaltext":
                 return ToDevanagariDigits(n);
-            // ECMA-376 §17.18.59 ST_NumberFormat: the canonical value is
-            // "hindiConsonants" (Devanagari consonants क ख ग …); there is no
-            // "hindiLetters" in the schema. Keep "hindiletters" as a tolerant
-            // alias so legacy/typo'd files still render glyphs, not decimal.
+            // Word INVERTS these two relative to their ECMA-376 names (the same
+            // name-vs-glyph mismatch as the korean* formats): the "hindiConsonants"
+            // format actually enumerates the Devanagari VOWELS (अ आ इ …) and
+            // "hindiVowels" enumerates the CONSONANTS (क ख ग …). Map by what Word
+            // renders, not by the literal name. ("hindiLetters" stays a tolerant
+            // alias of hindiConsonants.) Past the glyph set Word doubles — the
+            // exact overflow set is unverified, so the table recycles (deferred).
             case "hindiconsonants":
             case "hindiletters":
-                return ToHindiLetters(n);
-            case "hindivowels":
                 return ToHindiVowels(n);
+            case "hindivowels":
+                return ToHindiLetters(n);
             case "russianlower":
                 return ToRussianAlpha(n, uppercase: false);
             case "russianupper":
@@ -225,6 +229,12 @@ public static class WordNumFmtRenderer
         (1_000L, "Thousand"),
     };
 
+    // Sentence-case a spelled-out number: first letter upper, the rest lower
+    // (the cardinal/ordinal builders title-case every component for internal
+    // assembly; Word renders only the leading capital).
+    private static string CapitalizeFirst(string s) =>
+        string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..].ToLowerInvariant();
+
     private static string ToEnglishCardinal(int n) => ToEnglishCardinal((long)n);
 
     private static string ToEnglishCardinal(long n)
@@ -273,74 +283,79 @@ public static class WordNumFmtRenderer
     private static readonly char[] CnFormalDigits = { '零', '壹', '貳', '參', '肆', '伍', '陸', '柒', '捌', '玖' };
     private static readonly char[] CnLegalSimplDigits = { '零', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖' };
 
-    private static string ToChineseCounting(int n, bool formal)
+    // CJK numeric counting. Real Word uses several DISTINCT algorithms that must
+    // not be conflated:
+    //  • ordinary chinese/taiwanese counting: grouped (十/二十) for 1-99, then
+    //    pure digit-by-digit with 〇 for >=100 (100 → 一〇〇, 2025 → 二〇二五).
+    //  • *CountingThousand: fully grouped (一百/一千/一万) with 〇 internal zeros
+    //    (101 → 一百〇一).
+    //  • japaneseCounting: grouped, drops the leading 一 before 十/百/千 (百, 千)
+    //    but keeps it before 万 (一万), and drops internal zeros (二千二十五).
+    //  • koreanCounting: grouped sino-Hangul (백/천/만), drops the leading 일
+    //    before every unit (만, not 일만), drops internal zeros (이천이십오).
+    //  • legal/financial: grouped, KEEPS the leading digit before every unit
+    //    (壹拾/壹佰/壹仟/壹萬); the ordinary legals keep 零 zeros, japaneseLegal
+    //    drops them.
+    // OneStyle captures how the leading "1" before a unit is handled.
+    private enum OneStyle { Chinese, Japanese, Korean, KeepAll }
+
+    private static string ToDigitByDigit(int n, char[] digits, char zero)
     {
-        var digits = formal ? CnFormalDigits : CnDigits;
-        char shi = formal ? '拾' : '十';
-        char bai = formal ? '佰' : '百';
-        char qian = formal ? '仟' : '千';
-        char wan = formal ? '萬' : '万';
-        return BuildCjkPositional(n, digits, shi, bai, qian, wan);
-    }
-
-    private static string ToChineseLegalSimplified(int n)
-        => BuildCjkPositional(n, CnLegalSimplDigits, '拾', '佰', '仟', '万');
-
-    /// <summary>Traditional ordinary counting: ordinary hanzi digits/units but
-    /// traditional 萬 for the 10000 place (taiwaneseCounting family).</summary>
-    private static string ToTraditionalCounting(int n)
-        => BuildCjkPositional(n, CnDigits, '十', '百', '千', '萬');
-
-    private static string BuildCjkPositional(int n, char[] digits, char shi, char bai, char qian, char wan)
-    {
-        if (n == 0) return digits[0].ToString();
-        if (n < 0) return "-" + BuildCjkPositional(-n, digits, shi, bai, qian, wan);
-        if (n >= 10000)
-        {
-            var hi = n / 10000;
-            var lo = n % 10000;
-            var s = BuildCjkPositional(hi, digits, shi, bai, qian, wan) + wan;
-            if (lo == 0) return s;
-            if (lo < 1000) s += digits[0];
-            return s + BuildCjkPositional(lo, digits, shi, bai, qian, wan);
-        }
-        // 0..9999
-        var sb = new StringBuilder();
-        int q = n / 1000, b = (n / 100) % 10, sh = (n / 10) % 10, u = n % 10;
-        bool emittedNonZero = false;
-        bool pendingZero = false;
-        void emitDigit(int d, char? unit)
-        {
-            if (d == 0)
-            {
-                if (emittedNonZero) pendingZero = true;
-                return;
-            }
-            if (pendingZero) { sb.Append(digits[0]); pendingZero = false; }
-            // Special case: leading "一十" → "十" in informal spelling when n<20.
-            if (unit == shi && d == 1 && !emittedNonZero)
-                sb.Append(unit);
-            else
-            {
-                sb.Append(digits[d]);
-                if (unit.HasValue) sb.Append(unit.Value);
-            }
-            emittedNonZero = true;
-        }
-        emitDigit(q, qian);
-        emitDigit(b, bai);
-        emitDigit(sh, shi);
-        emitDigit(u, null);
+        if (n == 0) return zero.ToString();
+        var s = Math.Abs((long)n).ToString(CultureInfo.InvariantCulture);
+        var sb = new StringBuilder(s.Length + 1);
+        if (n < 0) sb.Append('-');
+        foreach (var c in s) sb.Append(c == '0' ? zero : digits[c - '0']);
         return sb.ToString();
     }
 
-    private static string ToIdeographDigital(int n)
+    /// <summary>Ordinary chinese/taiwanese counting: 1-99 grouped (十/二十), but
+    /// >=100 switches to digit-by-digit with 〇 (一〇〇) — Word does not spell the
+    /// 百/千 grouping for the plain "counting" formats (that is *CountingThousand).</summary>
+    private static string ToChineseCountingHybrid(int n)
+        => n is >= 1 and < 100
+            ? BuildCjkGrouped(n, CnDigits, '十', '百', '千', '万', '〇', dropZeros: false, OneStyle.Chinese)
+            : ToDigitByDigit(n, CnDigits, '〇');
+
+    private static string BuildCjkGrouped(int n, char[] digits, char shi, char bai,
+        char qian, char wan, char zero, bool dropZeros, OneStyle one)
     {
-        // 〇一二三四五六七八九, positional: 25 → 二五, 100 → 一〇〇
-        var s = n.ToString(CultureInfo.InvariantCulture);
-        var sb = new StringBuilder(s.Length);
-        foreach (var c in s)
-            sb.Append(c == '0' ? '〇' : CnDigits[c - '0']);
+        if (n == 0) return dropZeros ? "" : zero.ToString();
+        if (n < 0) return "-" + BuildCjkGrouped(-n, digits, shi, bai, qian, wan, zero, dropZeros, one);
+        if (n >= 10000)
+        {
+            int hi = n / 10000, lo = n % 10000;
+            // Korean drops the leading 일 before 만 (10000 → 만); the others keep
+            // it (一万 / 壱萬).
+            string s = hi == 1 && one == OneStyle.Korean
+                ? wan.ToString()
+                : BuildCjkGrouped(hi, digits, shi, bai, qian, wan, zero, dropZeros, one) + wan;
+            if (lo == 0) return s;
+            if (lo < 1000 && !dropZeros) s += zero;
+            return s + BuildCjkGrouped(lo, digits, shi, bai, qian, wan, zero, dropZeros, one);
+        }
+        var sb = new StringBuilder();
+        int q = n / 1000, b = (n / 100) % 10, sh = (n / 10) % 10, u = n % 10;
+        bool emitted = false, pendingZero = false;
+        void unit(int dig, char? unitCh)
+        {
+            if (dig == 0) { if (emitted) pendingZero = true; return; }
+            if (pendingZero) { if (!dropZeros) sb.Append(zero); pendingZero = false; }
+            bool dropOne = unitCh.HasValue && dig == 1 && one switch
+            {
+                OneStyle.Chinese => unitCh.Value == shi && !emitted, // 一十→十 only when leading
+                OneStyle.Japanese => true,                           // 百/千 (万 handled above)
+                OneStyle.Korean => true,
+                _ => false,                                          // KeepAll: never drop
+            };
+            if (dropOne) sb.Append(unitCh!.Value);
+            else { sb.Append(digits[dig]); if (unitCh.HasValue) sb.Append(unitCh.Value); }
+            emitted = true;
+        }
+        unit(q, qian);
+        unit(b, bai);
+        unit(sh, shi);
+        unit(u, null);
         return sb.ToString();
     }
 
@@ -349,8 +364,14 @@ public static class WordNumFmtRenderer
     private static readonly string[] EarthlyBranches =
         { "子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥" };
 
-    private static string ToHeavenlyStems(int n) => HeavenlyStems[(n - 1) % 10];
-    private static string ToEarthlyBranches(int n) => EarthlyBranches[(n - 1) % 12];
+    // Finite glyph sets: the 10 heavenly stems / 12 earthly branches enumerate
+    // 甲..癸 / 子..亥 then fall back to plain decimal once the value exceeds the
+    // set — Word does NOT cycle the glyphs back to 甲/子. Matches the decimal
+    // fallback of ToParenthesizedIdeograph and the enclosed-glyph renderers.
+    private static string ToHeavenlyStems(int n) =>
+        n >= 1 && n <= 10 ? HeavenlyStems[n - 1] : n.ToString(CultureInfo.InvariantCulture);
+    private static string ToEarthlyBranches(int n) =>
+        n >= 1 && n <= 12 ? EarthlyBranches[n - 1] : n.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>Sexagenary 干支 pair: heavenly-stem (10-cycle) + earthly-branch
     /// (12-cycle), e.g. 甲子 乙丑 … — a 60-element cycle.</summary>
@@ -383,22 +404,22 @@ public static class WordNumFmtRenderer
 
     private static string ToEnclosedCircle(int n)
     {
-        // ① .. ⑳ = U+2460..U+2473 (1..20)
+        // ① .. ⑳ = U+2460..U+2473 (1..20). Word's circled-number glyph set stops
+        // at 20; beyond it the marker is plain decimal (not the U+325x/U+32Bx
+        // extended enclosed glyphs, and not "(n)").
         if (n >= 1 && n <= 20) return ((char)(0x2460 + n - 1)).ToString();
-        // 21..35 at U+3251..U+325F (Word uses similar enclosed glyphs); fallback to (n)
-        if (n >= 21 && n <= 35) return ((char)(0x3251 + n - 21)).ToString();
-        if (n >= 36 && n <= 50) return ((char)(0x32B1 + n - 36)).ToString();
-        return $"({n})";
+        return n.ToString(CultureInfo.InvariantCulture);
     }
 
     // Parenthesized digit glyphs ⑴⑵⑶ … U+2474..U+2487 cover 1..20 (U+2474 is
-    // "PARENTHESIZED DIGIT ONE"). Real Word renders decimalEnclosedParen with
-    // these single glyphs, consistent with decimalEnclosedCircle (①) and
-    // decimalEnclosedFullstop (⒈). Beyond 20 fall back to "(n)".
+    // "PARENTHESIZED DIGIT ONE"). Word renders decimalEnclosedParen with these
+    // single glyphs, consistent with decimalEnclosedCircle (①) and
+    // decimalEnclosedFullstop (⒈). Beyond 20 the marker is plain decimal — any
+    // trailing punctuation seen in a list comes from the level's lvlText.
     private static string ToEnclosedParen(int n)
     {
         if (n >= 1 && n <= 20) return ((char)(0x2473 + n)).ToString();
-        return $"({n})";
+        return n.ToString(CultureInfo.InvariantCulture);
     }
 
     private static string ToFullWidthDigits(int n)
@@ -450,32 +471,31 @@ public static class WordNumFmtRenderer
         return sb.ToString();
     }
 
+    // Word's Cyrillic enumeration set is 29 letters: the full 33-letter alphabet
+    // minus ё, й, ъ and ь. ы IS included (between щ and э) — only the soft/hard
+    // signs and ё/й are dropped. (26 → ы, 27 → э, 28 → ю, 29 → я.)
     private static readonly string[] RussianAlphaLower =
     {
         "а", "б", "в", "г", "д", "е", "ж", "з", "и", "к",
         "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
-        "х", "ц", "ч", "ш", "щ", "э", "ю", "я"
+        "х", "ц", "ч", "ш", "щ", "ы", "э", "ю", "я"
     };
     // Korean numerals ------------------------------------------------------
 
     private static readonly char[] KoreanSinoDigits = // 〇일이삼사오육칠팔구
         { '〇', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구' };
 
-    /// <summary>Positional sino-korean digits: 1 → 일, 25 → 이오, 100 → 일〇〇.</summary>
+    /// <summary>koreanDigital is digit-by-digit sino-Hangul with 영 as the zero
+    /// glyph (10 → 일영, 100 → 일영영, 2025 → 이영이오). Distinct from the
+    /// ideograph digital family, which uses 〇.</summary>
     private static string ToKoreanDigital(int n)
-    {
-        var s = n.ToString(CultureInfo.InvariantCulture);
-        var sb = new StringBuilder(s.Length);
-        foreach (var c in s)
-            sb.Append(c == '0' ? '〇' : KoreanSinoDigits[c - '0']);
-        return sb.ToString();
-    }
+        => ToDigitByDigit(n, KoreanSinoDigits, '영');
 
-    /// <summary>Korean counting renders sino-korean digits (일이삼 …) — the
-    /// same glyphs as koreanDigital — in real Word, NOT native counting words
-    /// (하나/둘/셋). Verified via officeshot.</summary>
+    /// <summary>koreanCounting is positional sino-Hangul grouping 십/백/천/만
+    /// (10 → 십, 100 → 백, 2025 → 이천이십오): the leading 일 is dropped before
+    /// every unit and internal zeros are dropped. NOT digit-by-digit.</summary>
     private static string ToKoreanCounting(int n)
-        => ToKoreanDigital(n);
+        => BuildCjkGrouped(n, KoreanSinoDigits, '십', '백', '천', '만', '\0', dropZeros: true, OneStyle.Korean);
 
     // Native Korean counting words (고유어 수사): 하나 둘 셋 … up to 열아홉,
     // then 스물… Real Word renders koreanLegal with these, NOT the Chinese
@@ -497,21 +517,23 @@ public static class WordNumFmtRenderer
     }
 
     // Enclosed digit-with-full-stop glyphs ⒈⒉⒊ … U+2488..U+249B cover 1..20
-    // (U+2488 is literally named "DIGIT ONE FULL STOP"). Real Word renders
-    // decimalEnclosedFullstop with these single glyphs (the trailing literal
-    // "." some lists show comes from the level's lvlText, not the marker).
-    // Verified via officeshot (fams.docx). Beyond 20 fall back to "n.".
+    // (U+2488 is literally named "DIGIT ONE FULL STOP"; the period is intrinsic
+    // to the glyph). Word renders decimalEnclosedFullstop with these single
+    // glyphs. Beyond 20 the marker is the bare decimal number — it carries no
+    // intrinsic period, so any trailing "." comes from the level's lvlText.
     private static string ToEnclosedFullStop(int n)
     {
         if (n >= 1 && n <= 20) return ((char)(0x2487 + n)).ToString();
-        return $"{n}.";
+        return n.ToString(CultureInfo.InvariantCulture);
     }
 
     /// <summary>Japanese legal uses modern formal kanji 壱弐参肆伍陸漆捌玖拾.</summary>
     private static readonly char[] JpFormalDigits =
         { '零', '壱', '弐', '参', '肆', '伍', '陸', '漆', '捌', '玖' };
+    /// <summary>japaneseLegal: grouped with units 拾/百/阡/萬, keeps the leading
+    /// 壱 before every unit (壱拾/壱百/壱阡/壱萬), drops internal zeros (壱百壱).</summary>
     private static string ToJapaneseLegal(int n)
-        => BuildCjkPositional(n, JpFormalDigits, '拾', '佰', '仟', '萬');
+        => BuildCjkGrouped(n, JpFormalDigits, '拾', '百', '阡', '萬', '\0', dropZeros: true, OneStyle.KeepAll);
 
     // Thai & Devanagari ----------------------------------------------------
 
@@ -564,11 +586,14 @@ public static class WordNumFmtRenderer
         return letters[(n - 1) % letters.Length].ToString();
     }
 
-    // Devanagari vowels अ, आ, इ, ...
+    // Devanagari independent vowels अ आ इ … औ — the 16 contiguous code points
+    // U+0905..U+0914 (includes the vocalic ऌ and the candra/short ऍ ऎ ऑ ऒ that
+    // Word's enumeration walks in block order).
     private static string ToHindiVowels(int n)
     {
-        char[] vowels = { 'अ','आ','इ','ई','उ','ऊ','ऋ','ए','ऐ','ओ','औ' };
-        return vowels[(n - 1) % vowels.Length].ToString();
+        const int firstVowel = 0x0905; // अ
+        const int vowelCount = 16;     // .. U+0914 (औ)
+        return ((char)(firstVowel + (n - 1) % vowelCount)).ToString();
     }
 
     // Japanese full-width katakana, gojūon (あいうえお) order — 46 glyphs.

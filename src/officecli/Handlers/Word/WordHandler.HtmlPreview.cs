@@ -2048,8 +2048,12 @@ public partial class WordHandler
                     if (numId != currentNumId)
                     {
                         olState.PendingInstanceOverride.Clear();
+                        // Skip lvlRestart="0" levels: a never-restart continued
+                        // level keeps counting across the switch rather than
+                        // jumping to the override value (see GetListPrefix).
                         for (int lv = 0; lv <= 8; lv++)
-                            if (GetNumInstanceOverrideStart(numId, lv).HasValue)
+                            if (GetNumInstanceOverrideStart(numId, lv).HasValue
+                                && GetEffectiveLvlRestart(numId, lv) != 0)
                                 olState.PendingInstanceOverride.Add(lv);
                     }
 

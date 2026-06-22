@@ -1416,9 +1416,18 @@ public partial class WordHandler
         var fieldRunSep = fieldNoSeparator
             ? null
             : new Run(new FieldChar { FieldCharType = FieldCharValues.Separate });
-        var fieldRunResult = fieldNoSeparator
-            ? null
-            : new Run(new Text(fieldPlaceholder) { Space = SpaceProcessingModeValues.Preserve });
+        Run? fieldRunResult = null;
+        if (!fieldNoSeparator)
+        {
+            fieldRunResult = new Run();
+            // BUG-DUMP-FIELDTAB: a field's cached display text can carry tabs/line
+            // breaks (e.g. a numbered caption "4.1.\tImages" where the tab aligns
+            // the title past the list number). Tokenize \t→<w:tab/> and \n→<w:br/>
+            // instead of dumping the literal control char into one <w:t> — a raw
+            // U+0009 in <w:t> does not advance to the tab stop, so the number/title
+            // alignment was lost on every such field round-trip.
+            AppendTextWithBreaks(fieldRunResult, fieldPlaceholder);
+        }
         var fieldRunEnd = new Run(new FieldChar { FieldCharType = FieldCharValues.End });
 
         // Apply optional run formatting to all runs

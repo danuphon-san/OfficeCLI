@@ -627,6 +627,45 @@ public partial class WordHandler : IDocumentHandler
     /// or any referenced part can't be resolved, so the emitter falls back to
     /// the warn-and-drop path.
     /// </summary>
+    // BUG-DUMP-FF-ROWLEVEL-BOOKMARK: every <w:bookmarkStart> name anywhere in the
+    // main document body. Legacy form fields are wrapped in a same-name bookmark
+    // so REF fields can target them, but Word frequently places that bookmark at
+    // ROW level (a direct <w:tr> child sitting between two <w:tc>) rather than as
+    // a sibling of the field's run. The table emitter cannot round-trip a
+    // between-cell bookmark, so EmitParagraph's same-paragraph name check never
+    // sees it and wrongly pins noBookmark — AddFormField then skips the wrapping
+    // bookmark and ALL form-field bookmarks vanish, which makes Word refuse to
+    // open a form-heavy document. Consulting the document-wide name set lets the
+    // form-field emit recognise the row-level bookmark and have AddFormField
+    // recreate it (inside the cell — functionally equivalent for Word's form
+    // model). A field whose source genuinely had NO bookmark (a bare checkbox
+    // grid, BUG-DUMP-FFCHECKBOX-BOOKMARK) still stays bookmark-less.
+    internal HashSet<string> GetAllBookmarkNames()
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body == null) return set;
+        foreach (var bs in body.Descendants<BookmarkStart>())
+            if (bs.Name?.Value is { Length: > 0 } nm) set.Add(nm);
+        return set;
+    }
+
+    // BUG-DUMP-R72-FF-BOOKMARK-COUNT: per-name occurrence count of source body
+    // bookmarks. The form-field noBookmark decision is count-aware, not boolean:
+    // a doc with one <w:bookmarkStart name="Check1"> but 26 checkbox fields all
+    // named "Check1" must recreate exactly ONE Check1 bookmark, not 26. The set
+    // form (GetAllBookmarkNames) can't tell "1 field had it" from "all 26 did".
+    internal Dictionary<string, int> GetAllBookmarkNameCounts()
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body == null) return counts;
+        foreach (var bs in body.Descendants<BookmarkStart>())
+            if (bs.Name?.Value is { Length: > 0 } nm)
+                counts[nm] = counts.TryGetValue(nm, out var c) ? c + 1 : 1;
+        return counts;
+    }
+
     internal ActiveXEmitData? GetActiveXEmitData(string runPath)
     {
         OpenXmlElement? element;
@@ -957,9 +996,27 @@ public partial class WordHandler : IDocumentHandler
                 byte[] cb;
                 try { cb = ReadPartBytes(child.OpenXmlPart); }
                 catch { return null; }
+                // BUG-DUMP-R71-USERSHAPES-IMG: a child part can own its OWN parts
+                // — a chart's <c:userShapes> ChartDrawingPart references an image
+                // (drawingN.xml r:embed -> media/imageN). Without capturing that
+                // grandchild the rebuilt drawing's r:embed dangles ("relationship
+                // does not exist"). Collect one more nesting level so the image
+                // (and any other child-of-child) round-trips. Grandchildren are
+                // recreated under the child with their ORIGINAL rel id, so the
+                // child's verbatim XML refs resolve without rewriting.
+                var grandchildren = new List<ActiveXPartData>();
+                foreach (var gc in child.OpenXmlPart.Parts)
+                {
+                    byte[] gcb;
+                    try { gcb = ReadPartBytes(gc.OpenXmlPart); }
+                    catch { return null; }
+                    grandchildren.Add(new ActiveXPartData(
+                        gc.RelationshipId, gcb, gc.OpenXmlPart.ContentType,
+                        new List<ActiveXPartData>(), new List<ActiveXExternalData>()));
+                }
                 children.Add(new ActiveXPartData(
                     child.RelationshipId, cb, child.OpenXmlPart.ContentType,
-                    new List<ActiveXPartData>(), new List<ActiveXExternalData>()));
+                    grandchildren, new List<ActiveXExternalData>()));
             }
             // A collected part can carry its OWN external relationships — e.g. a
             // chart part whose <c:externalData r:id> links an external oleObject
@@ -1881,6 +1938,76 @@ public partial class WordHandler : IDocumentHandler
         catch { /* id normalization is best-effort; never block the flush */ }
         try { NormalizeAllRunPropsSchemaOrder(); }
         catch { /* schema-order normalization is best-effort; never block the flush */ }
+        try { EnsureUniqueMoveRunIds(); }
+        catch { /* move-id dedup is best-effort; never block the flush */ }
+    }
+
+    // BUG-DUMP-R71-MOVE-DUP-ID: a move that spans multiple runs/paragraphs
+    // round-trips through per-run `add r revision.type=moveFrom revision.id=X`,
+    // each wrapping its run in a <w:moveFrom w:id="X">; N runs then produce N
+    // MoveFromRun elements all sharing id X. The strict validator rejects
+    // same-type duplicate w:id. The CLI deliberately shares the id within a
+    // move so the Move_{id} range-marker NAME pairs the moveFrom with its moveTo
+    // (see BuildMovePairIdMap / WrapRunAsMoveFrom) — and that pairing rides on
+    // the range-marker name, NOT on the content-run id. So at batch finalization
+    // we can re-assign each MoveFromRun / MoveToRun a unique id (leaving the
+    // range markers and their names untouched) to satisfy validation without
+    // disturbing the move pairing. Word's own files use unique content-run ids
+    // with name-based pairing, so this matches the native shape. Interactive
+    // (non-DeferSave) WrapRunAsMove* is unchanged — this pass runs only here.
+    private void EnsureUniqueMoveRunIds()
+    {
+        var main = _doc.MainDocumentPart;
+        if (main == null) return;
+        IEnumerable<OpenXmlElement?> roots = new OpenXmlElement?[] { main.Document?.Body }
+            .Concat(main.HeaderParts.Select(h => (OpenXmlElement?)h.Header))
+            .Concat(main.FooterParts.Select(f => (OpenXmlElement?)f.Footer))
+            .Append(main.FootnotesPart?.Footnotes)
+            .Append(main.EndnotesPart?.Endnotes);
+        var rootList = roots.Where(r => r != null).Cast<OpenXmlElement>().ToList();
+
+        // Allocate fresh ids above the global max of every move-element w:id in
+        // play so a reassigned move-run id can't collide with another.
+        long next = 0;
+        void TrackMax(string? v) { if (v != null && long.TryParse(v, out var n) && n > next) next = n; }
+        foreach (var root in rootList)
+        {
+            foreach (var e in root.Descendants<MoveFromRun>()) TrackMax(e.Id?.Value);
+            foreach (var e in root.Descendants<MoveToRun>()) TrackMax(e.Id?.Value);
+            foreach (var e in root.Descendants<MoveFromRangeStart>()) TrackMax(e.Id?.Value);
+            foreach (var e in root.Descendants<MoveFromRangeEnd>()) TrackMax(e.Id?.Value);
+            foreach (var e in root.Descendants<MoveToRangeStart>()) TrackMax(e.Id?.Value);
+            foreach (var e in root.Descendants<MoveToRangeEnd>()) TrackMax(e.Id?.Value);
+        }
+
+        // Per-type uniqueness: the validator only flags same-type duplicate w:id,
+        // so an element may share an id with a different-typed move element (one
+        // move's worth is fine) — the fault is N elements of the SAME type all
+        // carrying the collapsed pairing id (N MoveFromRun content wrappers, or
+        // the per-fragment range markers a cross-paragraph span emits). Keep the
+        // first occurrence's id (the lone single-run case is untouched) and
+        // re-stamp the rest. Range-marker w:name is left intact, so the
+        // Move_{id} name pairing — the only thing accept/reject and the dump
+        // round-trip rely on — survives.
+        void DedupById(Func<OpenXmlElement, string?> get, Action<OpenXmlElement, string> set,
+                       Func<OpenXmlElement, bool> match)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var root in rootList)
+                foreach (var el in root.Descendants().Where(match))
+                {
+                    var cur = get(el);
+                    if (string.IsNullOrEmpty(cur)) continue;
+                    if (!seen.Add(cur!))
+                        set(el, (++next).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+        }
+        DedupById(e => (e as MoveFromRun)?.Id?.Value, (e, v) => ((MoveFromRun)e).Id = v, e => e is MoveFromRun);
+        DedupById(e => (e as MoveToRun)?.Id?.Value, (e, v) => ((MoveToRun)e).Id = v, e => e is MoveToRun);
+        DedupById(e => (e as MoveFromRangeStart)?.Id?.Value, (e, v) => ((MoveFromRangeStart)e).Id = v, e => e is MoveFromRangeStart);
+        DedupById(e => (e as MoveFromRangeEnd)?.Id?.Value, (e, v) => ((MoveFromRangeEnd)e).Id = v, e => e is MoveFromRangeEnd);
+        DedupById(e => (e as MoveToRangeStart)?.Id?.Value, (e, v) => ((MoveToRangeStart)e).Id = v, e => e is MoveToRangeStart);
+        DedupById(e => (e as MoveToRangeEnd)?.Id?.Value, (e, v) => ((MoveToRangeEnd)e).Id = v, e => e is MoveToRangeEnd);
     }
 
     // BUG-DUMP-R71-RPR-ORDER: document-wide CT_RPr / CT_ParaRPr child-order

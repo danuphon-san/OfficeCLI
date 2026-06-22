@@ -124,7 +124,7 @@ public static partial class WordBatchEmitter
         // `runs` filter sees only the cached display run and emits the field
         // value as static text — PAGE/REF/SEQ/HYPERLINK/NUMPAGES degrade to
         // their evaluated string and stop auto-updating (BUG-X2-05 / X2-1).
-        var fieldEntries = CollapseFieldChains(pNode.Children ?? new List<DocumentNode>());
+        var fieldEntries = CollapseFieldChains(pNode.Children ?? new List<DocumentNode>(), word);
         // R14-bug1+2: a legacy form field MAY embed a BookmarkStart/End of its
         // own name (Word wraps form fields in a bookmark so REF fields can target
         // them, but a plain FORMCHECKBOX/FORMTEXT authored without that wrap has
@@ -137,7 +137,11 @@ public static partial class WordBatchEmitter
             .Select(e => e.Format["ffName"]?.ToString() ?? "")
             .Where(n => !string.IsNullOrEmpty(n))
             .ToHashSet(StringComparer.Ordinal);
-        if (formFieldNames.Count > 0)
+        // Gate on ANY form field, not only named ones: a paragraph holding only
+        // nameless fields still needs the noBookmark pin pass below, else each
+        // nameless field gains a fabricated ff_<guid> bookmark on rebuild
+        // (BUG-DUMP-R72-FF-BOOKMARK-COUNT).
+        if (fieldEntries.Any(e => e.Type == "formfield"))
         {
             // BUG-DUMP-FFCHECKBOX-BOOKMARK: a form field whose SOURCE had no
             // wrapping bookmark must NOT gain a fabricated one on rebuild.
@@ -156,11 +160,45 @@ public static partial class WordBatchEmitter
                     && e.Format.TryGetValue("name", out var bnm) && bnm != null)
                 .Select(e => e.Format["name"]!.ToString() ?? "")
                 .ToHashSet(StringComparer.Ordinal);
-            foreach (var ffSynth in fieldEntries.Where(e => e.Type == "formfield"
-                         && e.Format.TryGetValue("ffName", out _)))
+            // BUG-DUMP-FF-ROWLEVEL-BOOKMARK / BUG-DUMP-R72-FF-BOOKMARK-COUNT: a
+            // form field's wrapping bookmark may sit at ROW level (a <w:tr> child
+            // between cells) — invisible to the same-paragraph set, and dropped by
+            // the table emitter — so pinning noBookmark purely on the same-paragraph
+            // check would erase every row-level bookmark. The earlier fix consulted
+            // a document-wide NAME SET ("does any bookmark with this name exist?"),
+            // but that over-fires when many fields share one name: a doc with ONE
+            // <w:bookmarkStart name="Check1"> and 26 checkbox fields all named
+            // "Check1" then recreated 26 Check1 bookmarks (+a uniquify cascade).
+            // Use a count-aware BUDGET instead: each name may hand out only as many
+            // wrapping bookmarks as the source actually had. A same-paragraph match
+            // is a real bookmark, so it always recreates AND reserves one budget
+            // unit; a field with no same-paragraph bookmark keeps one only while the
+            // remaining budget (row-level / other-paragraph source bookmarks) lasts;
+            // an unnamed field — which cannot carry a named bookmark — and a field
+            // whose budget is exhausted are pinned noBookmark.
+            foreach (var ffSynth in fieldEntries.Where(e => e.Type == "formfield"))
             {
-                var ffn = ffSynth.Format["ffName"]?.ToString() ?? "";
-                if (!string.IsNullOrEmpty(ffn) && !bookmarkNamesPresent.Contains(ffn))
+                var ffn = ffSynth.Format.TryGetValue("ffName", out var ffnObj)
+                    ? (ffnObj?.ToString() ?? "")
+                    : "";
+                if (string.IsNullOrEmpty(ffn))
+                {
+                    // A nameless source field had no wrapping bookmark (a bookmark
+                    // needs a name), yet AddFormField would auto-generate an
+                    // ff_<guid> name + bookmark for it (the interactive default).
+                    // Pin noBookmark on round-trip so a bookmark-less field stays
+                    // bookmark-less instead of gaining a fabricated ff_<guid> one.
+                    ffSynth.Format["_noBookmark"] = true;
+                    continue;
+                }
+                if (bookmarkNamesPresent.Contains(ffn))
+                {
+                    // Real same-paragraph wrapping bookmark: always recreate, but
+                    // reserve its budget so a later same-named field can't reuse it.
+                    ctx?.ConsumeBookmarkBudget(word, ffn);
+                    continue;
+                }
+                if (ctx == null || !ctx.ConsumeBookmarkBudget(word, ffn))
                     ffSynth.Format["_noBookmark"] = true;
             }
             if (ctx != null)
@@ -492,8 +530,26 @@ public static partial class WordBatchEmitter
         // paragraph's content; track nesting depth to keep to top-level children.
         var perNameIdx = new Dictionary<string, int>(StringComparer.Ordinal);
         int rank = 0;
-        int depth = 0; // depth relative to the paragraph's content (0 = direct child)
         bool seenParaOpen = false;
+        // BUG-DUMP-SDTORDER-HYPERLINK: a <w:r> nested inside a <w:hyperlink> (or
+        // an ins/del/smartTag/customXml/dir/bdo run-wrapper) IS surfaced by
+        // Navigation as a paragraph-level /r[N] — its run resolver flattens
+        // Descendants<Run>() excluding only SdtRun-nested runs (see the "r" case
+        // in WordHandler.Navigation.cs). So r[N] must count runs THROUGH those
+        // transparent wrappers; counting only literal top-level children
+        // desynced r[N] (a paragraph with hyperlinks numbered ". If the
+        // assessment" as r[3] here but r[5] in Navigation) and scrambled the
+        // inline-SDT flush order — a content control between two runs came back
+        // attached to the wrong run. Only <w:pPr> and <w:sdt> are opaque (pPr's
+        // children aren't content; an inline SDT's runs surface under the sdt
+        // node, not as paragraph runs); every other run-container is transparent.
+        var transparentWrappers = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "hyperlink", "ins", "del", "moveFrom", "moveTo",
+            "smartTag", "customXml", "dir", "bdo",
+        };
+        var openStack = new Stack<bool>(); // true = this open incremented suppress
+        int suppress = 0; // >0 ⇒ inside an opaque container (pPr / sdt / a run)
         // Match element opens/closes/self-closes for the w: and m: namespaces
         // (m:oMathPara / m:oMath surface as paragraph children too).
         foreach (System.Text.RegularExpressions.Match m in
@@ -508,12 +564,16 @@ public static partial class WordBatchEmitter
                 if (!closing) { seenParaOpen = true; }
                 continue;
             }
-            if (closing) { depth--; continue; }
-            if (depth == 0)
+            if (closing)
             {
-                // Direct child of the paragraph — assign the next document rank
-                // under its OOXML local name (matches the /r[N], /sdt[N], …
-                // path segments Navigation builds).
+                if (openStack.Count > 0 && openStack.Pop()) suppress--;
+                continue;
+            }
+            if (suppress == 0)
+            {
+                // Paragraph-level child (only transparent wrappers above it) —
+                // assign the next document rank under its OOXML local name
+                // (matches the /r[N], /sdt[N], … path segments Navigation builds).
                 var seg = name switch
                 {
                     "r" => "r",
@@ -528,7 +588,15 @@ public static partial class WordBatchEmitter
                 perNameIdx[seg] = idx + 1;
                 map[$"{seg}[{idx + 1}]"] = rank++;
             }
-            if (!selfClose) depth++;
+            if (!selfClose)
+            {
+                // Transparent run-wrappers do NOT suppress their children (inner
+                // runs still count as paragraph runs); everything else (pPr, sdt,
+                // a run and its rPr/text) is opaque.
+                bool opaque = !transparentWrappers.Contains(name);
+                if (opaque) suppress++;
+                openStack.Push(opaque);
+            }
         }
         return map;
     }
@@ -1944,8 +2012,18 @@ public static partial class WordBatchEmitter
                     // rather than the content).
                     var srcHlPath = run.Path.Substring(0, idxEq); // …/hyperlink[K]
                     var hlSeg = derived.Substring(hlIdx); // /hyperlink[K]
-                    int alreadyEmitted = items.Count(it => it.Type == "hyperlink"
-                        && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
+                    // BUG-DUMP-FIELDHL-XPARA: count hyperlink rows since THIS
+                    // paragraph's own `add p` — paraTargetPath ("/…/p[last()]") is
+                    // shared by every paragraph, so a global count let an earlier
+                    // paragraph's hyperlink suppress the missing-hyperlink emit here
+                    // and route the equation to a non-existent /hyperlink[K].
+                    int eqLastParaAdd = items.FindLastIndex(it =>
+                        it.Command == "add" && it.Type == "p");
+                    int alreadyEmitted = 0;
+                    for (int hi = eqLastParaAdd + 1; hi < items.Count; hi++)
+                        if (items[hi].Type == "hyperlink"
+                            && string.Equals(items[hi].Parent, paraTargetPath, StringComparison.Ordinal))
+                            alreadyEmitted++;
                     var rebasedHl = paraTargetPath + hlSeg;
                     int wantK = 0;
                     var kStr = hlSeg.Length > 11 ? hlSeg[11..^1] : "";
@@ -2445,8 +2523,25 @@ public static partial class WordBatchEmitter
                     {
                         var rebased = paraTargetPath
                             + candidateHlParent.Substring(hlIdxStart);
-                        int emittedHls = items.Count(it => it.Type == "hyperlink"
-                            && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
+                        // BUG-DUMP-FIELDHL-XPARA: paraTargetPath is the literal
+                        // "/…/p[last()]" — IDENTICAL for every paragraph (dump always
+                        // targets the most-recently-added p). Counting hyperlink rows
+                        // by Parent==paraTargetPath therefore tallied hyperlinks from
+                        // ALL prior paragraphs, so a field-ONLY hyperlink (no separate
+                        // display run → no `add hyperlink` row of its own) inherited a
+                        // phantom "hyperlink exists" from an unrelated earlier
+                        // paragraph and routed the field to /hyperlink[1] that doesn't
+                        // exist in THIS paragraph — "Path not found" on replay dropped
+                        // the whole REF/PAGEREF field and its visible text. Count only
+                        // hyperlink rows emitted SINCE the current paragraph's own
+                        // `add p` boundary so the tally is paragraph-local.
+                        int lastParaAdd = items.FindLastIndex(it =>
+                            it.Command == "add" && it.Type == "p");
+                        int emittedHls = 0;
+                        for (int hi = lastParaAdd + 1; hi < items.Count; hi++)
+                            if (items[hi].Type == "hyperlink"
+                                && string.Equals(items[hi].Parent, paraTargetPath, StringComparison.Ordinal))
+                                emittedHls++;
                         if (emittedHls >= kIdx)
                             fldParent = rebased;
                     }
@@ -2572,6 +2667,31 @@ public static partial class WordBatchEmitter
                 });
                 return true;
             }
+            // BUG-DUMP-WPG-GROUP: an mc:AlternateContent-wrapped DrawingML group
+            // (<wpg:wgp> group of pictures) or shape surfaces as a plain "run"
+            // node — the Drawing lives inside the AltContent so there is no typed
+            // picture node, the no-rel raw-set above skipped it (its blips carry
+            // r:embed), and it is a <w:drawing> not a <w:pict> so the VML carrier
+            // skipped it too. It then fell into the warn-drop below and the WHOLE
+            // group (every nested image) vanished. Ship it through the inlined-
+            // parts carrier: GetDrawingShapeEmitData inlines every referenced
+            // image part and rewrites the rel ids on replay, so the group drawing
+            // round-trips verbatim. Mirrors the wps:wsp shape carrier in the
+            // type=="picture" branch below. GuardCarrierContentTypes returns null
+            // for a drawing referencing an unsupported part (a chart, …), so those
+            // correctly fall through to the warn-drop instead of being mis-routed.
+            if (probeXml.Contains("<w:drawing", StringComparison.Ordinal)
+                && word.GetDrawingShapeEmitData(run.Path) is { } grpData)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add",
+                    Parent = sharedAttachPara ?? paraTargetPath,
+                    Type = "inlinedparts",
+                    Props = PackInlinedPartsProps(grpData),
+                });
+                return true;
+            }
             // Drawing-bearing but not safely raw-set-able inline (lives in a
             // header/footer/cell, or carries an external relationship we can't
             // re-anchor). Flag the loss rather than silently dropping it.
@@ -2593,6 +2713,28 @@ public static partial class WordBatchEmitter
         // non-textbox-shape raw-set convention.
         {
             var shapeXml = word.GetElementXml(run.Path);
+            // BUG-DUMP-WPG-GROUP: a DrawingML GROUP (<wpg:wgp> — multiple pictures/
+            // shapes grouped, often mc:AlternateContent-wrapped) surfaces as
+            // type="picture" because GetImageBinary finds the FIRST nested blip.
+            // The picture path below would flatten the whole group to that single
+            // <pic:pic>, dropping every other grouped image AND the group structure.
+            // Route the group through the inlined-parts carrier instead, so all
+            // nested image parts + the verbatim group drawing round-trip. Mirrors
+            // the wps:wsp shape carrier just below; GuardCarrierContentTypes nulls
+            // out a group referencing an unsupported part so it falls through.
+            if (!string.IsNullOrEmpty(shapeXml)
+                && shapeXml.Contains("<wpg:wgp", StringComparison.Ordinal)
+                && word.GetDrawingShapeEmitData(run.Path) is { } wpgData)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add",
+                    Parent = sharedAttachPara ?? paraTargetPath,
+                    Type = "inlinedparts",
+                    Props = PackInlinedPartsProps(wpgData),
+                });
+                return true;
+            }
             if (!string.IsNullOrEmpty(shapeXml)
                 && IsWpsShapeDrawing(shapeXml)
                 && ctx != null
@@ -3302,6 +3444,31 @@ public static partial class WordBatchEmitter
             }
         }
 
+        // BUG-DUMP-TEXTBOX-IMG: a MODERN DrawingML textbox shape (wps:wsp +
+        // txbxContent, often mc:AlternateContent/wpg-wrapped — e.g. a letterhead
+        // shape pairing a caption box with a logo) that ALSO carries an embedded
+        // picture (<a:blip r:embed>) loses that image on the typed `add textbox`
+        // path below, which extracts only geometry + text. The image binary then
+        // vanishes from the rebuild (this is the wpg-group image-loss class: a
+        // page of grouped letterhead shapes silently dropping their logos). Route
+        // such a shape through the inlined-parts carrier so the embedded image
+        // part + verbatim shape XML (box + text + picture) round-trip, mirroring
+        // the VML carrier above. Plain textboxes (no embedded image) keep the
+        // typed `add textbox` path so they stay cleanly editable.
+        if (rawXml.Contains("r:embed", StringComparison.Ordinal)
+            && (attachParaPath ?? paraTargetPath) is { } tbImgParent
+            && word.GetDrawingShapeEmitData(run.Path) is { } tbImgData)
+        {
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = tbImgParent,
+                Type = "inlinedparts",
+                Props = PackInlinedPartsProps(tbImgData),
+            });
+            return true;
+        }
+
         // Only emit a typed `add textbox` for hosts AddTextbox itself
         // supports: /body, /body/tbl[..]/tc[N], /header[N], /footer[N].
         // Other parents fall through to the raw-set append.
@@ -3801,6 +3968,17 @@ public static partial class WordBatchEmitter
                 props[$"part{pi}.child{ci}.relId"] = child.RelId;
                 props[$"part{pi}.child{ci}.data"] =
                     $"data:{child.ContentType};base64,{Convert.ToBase64String(child.Bytes)}";
+                // BUG-DUMP-R71-USERSHAPES-IMG: a child can own further parts (a
+                // chart userShapes drawing -> its image). Emit that grandchild
+                // level so the drawing's r:embed isn't left dangling on replay.
+                int gi = 0;
+                foreach (var gc in child.Children)
+                {
+                    gi++;
+                    props[$"part{pi}.child{ci}.gc{gi}.relId"] = gc.RelId;
+                    props[$"part{pi}.child{ci}.gc{gi}.data"] =
+                        $"data:{gc.ContentType};base64,{Convert.ToBase64String(gc.Bytes)}";
+                }
             }
             // Per-part external rels (e.g. a chart's <c:externalData r:id> ->
             // external oleObject workbook). Recreated on the part itself, with
@@ -4303,8 +4481,18 @@ public static partial class WordBatchEmitter
             hlEnd - hlIdxStart - hlMarker.Length);
         if (!int.TryParse(kStr, out var kIdx)) return paraTargetPath;
         var rebased = paraTargetPath + candidateHlParent.Substring(hlIdxStart);
-        int emittedHls = items.Count(it => it.Type == "hyperlink"
-            && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
+        // BUG-DUMP-FIELDHL-XPARA: paraTargetPath ("/…/p[last()]") is identical for
+        // every paragraph, so counting hyperlink rows by Parent==paraTargetPath
+        // tallied hyperlinks from ALL prior paragraphs — a tab/ptab/equation run in
+        // a hyperlink that emitted no `add hyperlink` row of its own would inherit a
+        // phantom hyperlink from an earlier paragraph and route to a non-existent
+        // /hyperlink[K]. Count only rows since this paragraph's own `add p`.
+        int lastParaAdd = items.FindLastIndex(it => it.Command == "add" && it.Type == "p");
+        int emittedHls = 0;
+        for (int hi = lastParaAdd + 1; hi < items.Count; hi++)
+            if (items[hi].Type == "hyperlink"
+                && string.Equals(items[hi].Parent, paraTargetPath, StringComparison.Ordinal))
+                emittedHls++;
         return emittedHls >= kIdx ? rebased : paraTargetPath;
     }
 

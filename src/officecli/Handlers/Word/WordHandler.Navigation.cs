@@ -1946,6 +1946,28 @@ public partial class WordHandler
                 node.Format["revision.date"] = insDate.ToString("o");
             if (insAncestor.Id?.Value is { } insId)
                 node.Format["revision.id"] = insId.ToString();
+            // BUG-DUMP-DELININS: a <w:ins> may itself contain a <w:del> (one
+            // reviewer inserts text, a second reviewer deletes that insertion).
+            // The run is then BOTH inserted and deleted and its text rides in
+            // <w:delText>. A single revision.type can't carry both wrappers, so
+            // the inner del was dropped — the deletion round-tripped as a live
+            // insertion (<w:delText> rebuilt as <w:t>, the deleted content
+            // silently un-deleted; this is the cd241 delText-loss class).
+            // ECMA-376 permits only ins⊃del nesting (del cannot contain ins),
+            // so a run with BOTH an ins AND a del ancestor is always ins-outer/
+            // del-inner. Capture the inner del as revision.nested.* so the
+            // emitter rebuilds the <w:ins><w:del> stack.
+            var nestedDel = run.Ancestors<DeletedRun>().FirstOrDefault();
+            if (nestedDel != null)
+            {
+                node.Format["revision.nested.type"] = "del";
+                if (!string.IsNullOrEmpty(nestedDel.Author?.Value))
+                    node.Format["revision.nested.author"] = nestedDel.Author!.Value!;
+                if (nestedDel.Date?.Value is DateTime nestedDelDate)
+                    node.Format["revision.nested.date"] = nestedDelDate.ToString("o");
+                if (nestedDel.Id?.Value is { } nestedDelId)
+                    node.Format["revision.nested.id"] = nestedDelId.ToString();
+            }
         }
         else if (moveFromAncestor != null)
         {
@@ -3600,13 +3622,25 @@ public partial class WordHandler
             // foreign producers). Probe both.
             var prevExt = pPrChange.GetFirstChild<ParagraphPropertiesExtended>();
             var prevPpr = pPrChange.GetFirstChild<PreviousParagraphProperties>();
-            OpenXmlElement? prevPpEl = (prevExt != null && prevExt.HasChildren)
-                ? prevExt
-                : (prevPpr != null && prevPpr.HasChildren) ? prevPpr : null;
             // BUG-DUMP-R43-8: carry the verbatim prior-pPr snapshot so the
             // emitter restores it via revision.beforeXml instead of stamping an
             // empty <w:pPr/> marker. The inner element's OuterXml round-trips
             // through AddParagraph's pPrChange InnerXml assignment.
+            // BUG-DUMP-PPRCHANGE-CS-EMPTYSNAP: emit beforeXml even when the prior
+            // snapshot is EMPTY (the element exists but has no children — Word's
+            // "format changed from the default" marker). Prefer the populated
+            // element, but fall back to an empty one so the key is still present.
+            // Without it, an empty-snapshot pPrChange on a paragraph that also
+            // carries complex-script (.cs) run props made the replayed `set` hit
+            // the "RTL cascade properties not supported with trackChange" guard
+            // (which is bypassed only when revision.beforeXml is supplied) — the
+            // op failed and the cell's content was dropped. An empty snapshot
+            // round-trips as an empty <w:pPr/> via ApplyBeforeXmlSnapshot, so no
+            // smearing occurs.
+            OpenXmlElement? prevPpEl =
+                  (prevExt != null && prevExt.HasChildren) ? prevExt
+                : (prevPpr != null && prevPpr.HasChildren) ? prevPpr
+                : (OpenXmlElement?)prevExt ?? prevPpr;
             if (prevPpEl != null)
                 node.Format["revision.beforeXml"] = prevPpEl.OuterXml;
         }
@@ -5284,6 +5318,34 @@ public partial class WordHandler
                             synthNode.Format["revision.author"] = delAnc.Author!.Value!;
                         if (delAnc.Date?.Value is DateTime delAncDate)
                             synthNode.Format["revision.date"] = delAncDate.ToString("o");
+                    }
+                    else
+                    {
+                        // BUG-DUMP-SMARTTAG-DELWRAP: when the tracked-change wrapper
+                        // sits INSIDE a <w:smartTag>/<w:customXml> (itself an
+                        // OpenXmlUnknownElement), the <w:ins>/<w:del>/<w:moveFrom>/
+                        // <w:moveTo> between the wrapper and this run also parses as
+                        // an OpenXmlUnknownElement — the typed Ancestors<> probes
+                        // above both miss it, so a deletion nested in a smartTag lost
+                        // its revision entirely and round-tripped as live <w:t> text
+                        // (delText silently un-deleted). Walk the unknown-element
+                        // ancestors for the w:ns revision wrapper and read its
+                        // w:author/w:date attributes by name.
+                        var revAnc = unkRun.Ancestors<DocumentFormat.OpenXml.OpenXmlUnknownElement>()
+                            .FirstOrDefault(a => a.NamespaceUri == wNs
+                                && a.LocalName is "ins" or "del" or "moveFrom" or "moveTo");
+                        if (revAnc != null)
+                        {
+                            string? RevAttr(string n) => revAnc.GetAttributes()
+                                .FirstOrDefault(a => a.LocalName == n && a.NamespaceUri == wNs).Value;
+                            synthNode.Format["revision.type"] = revAnc.LocalName;
+                            if (RevAttr("author") is { Length: > 0 } revAuthor)
+                                synthNode.Format["revision.author"] = revAuthor;
+                            if (RevAttr("date") is { Length: > 0 } revDate)
+                                synthNode.Format["revision.date"] = revDate;
+                            if (RevAttr("id") is { Length: > 0 } revId)
+                                synthNode.Format["revision.id"] = revId;
+                        }
                     }
                 }
                 // BUG-DUMP-R29-SMARTTAG: insert at the wrapper run's true document

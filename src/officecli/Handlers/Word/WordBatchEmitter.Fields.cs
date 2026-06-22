@@ -121,7 +121,49 @@ public static partial class WordBatchEmitter
         }
     }
 
-    private static List<DocumentNode> CollapseFieldChains(List<DocumentNode> children)
+    // BUG-DUMP-FIELDMARKER-RPR: extract the size/font/bold/italic/color carried
+    // on a field MARKER run's <w:rPr> (begin/instr/end). Navigation does not
+    // surface run typography onto fieldChar/instrText nodes (they are not text
+    // runs), so firstFormattedMarker stays null and a field whose markers carry
+    // an explicit size (e.g. an INCLUDEPICTURE whose runs are sz=24) rebuilt with
+    // bare markers — the hidden field-code line collapsed to the default size,
+    // shrinking the line and reflowing the page. Read the marker's raw rPr and
+    // forward the FieldResultFormatKeys scalars via the same _resultFmt. channel
+    // the cached-result path uses; AddField applies them uniformly to all field
+    // runs. Only fills keys the result/marker-Format path did not already set.
+    private static void ForwardMarkerRprFromRaw(WordHandler word, DocumentNode beginNode, DocumentNode synth)
+    {
+        if (string.IsNullOrEmpty(beginNode.Path)) return;
+        string xml;
+        try { xml = word.RawElementXml(beginNode.Path) ?? ""; }
+        catch { return; }
+        var rprM = System.Text.RegularExpressions.Regex.Match(xml, @"<w:rPr>.*?</w:rPr>",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        if (!rprM.Success) return;
+        var rpr = rprM.Value;
+        void Set(string key, string? val)
+        {
+            if (string.IsNullOrEmpty(val)) return;
+            if (!synth.Format.ContainsKey("_resultFmt." + key)) synth.Format["_resultFmt." + key] = val;
+        }
+        var sz = System.Text.RegularExpressions.Regex.Match(rpr, @"<w:sz w:val=""(\d+)""");
+        if (sz.Success && int.TryParse(sz.Groups[1].Value, out var hp))
+            Set("size", (hp / 2.0).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "pt");
+        var fonts = System.Text.RegularExpressions.Regex.Match(rpr, @"<w:rFonts\b[^>]*>");
+        if (fonts.Success)
+        {
+            var ascii = System.Text.RegularExpressions.Regex.Match(fonts.Value, @"w:ascii=""([^""]+)""");
+            if (ascii.Success) Set("font.latin", ascii.Groups[1].Value);
+        }
+        if (System.Text.RegularExpressions.Regex.IsMatch(rpr, @"<w:b(?:\s+w:val=""(?:1|true|on)"")?\s*/>"))
+            Set("bold", "true");
+        if (System.Text.RegularExpressions.Regex.IsMatch(rpr, @"<w:i(?:\s+w:val=""(?:1|true|on)"")?\s*/>"))
+            Set("italic", "true");
+        var col = System.Text.RegularExpressions.Regex.Match(rpr, @"<w:color w:val=""([^""]+)""");
+        if (col.Success && col.Groups[1].Value != "auto") Set("color", col.Groups[1].Value);
+    }
+
+    private static List<DocumentNode> CollapseFieldChains(List<DocumentNode> children, WordHandler word)
     {
         var result = new List<DocumentNode>();
         for (int i = 0; i < children.Count; i++)
@@ -211,6 +253,18 @@ public static partial class WordBatchEmitter
             // text content) for a vertAlign and stash it so it rides on the field
             // op even when no formatted post-separate text run exists.
             string? fieldVertAlign = null;
+            // BUG-DUMP-R72-SETFIELD-BOOKMARK: a SET field (and any field Word
+            // bookmarks) carries a <w:bookmarkStart>/<w:bookmarkEnd> INSIDE the
+            // begin..end span — for SET it wraps the cached result between
+            // separate and end so REF fields can retrieve the stored value. The
+            // walk below has no branch for bookmark nodes, so they were consumed
+            // when `i = end` skips the span and silently dropped (TSMAD29 lost 61
+            // SET-field bookmarks; the SET field itself survived, hiding the loss
+            // from validate/convergence). Flag an inner bookmark so the whole
+            // slice is round-tripped verbatim via the same raw-set passthrough the
+            // rich-result / nested-field cases use, preserving the bookmark in
+            // place byte-for-byte.
+            bool sawInnerBookmark = false;
             for (int j = i + 1; j < children.Count; j++)
             {
                 var k = children[j];
@@ -314,6 +368,12 @@ public static partial class WordBatchEmitter
                 {
                     // BUG-DUMP-R28-INCLUDEPICTURE: the cached result drawing.
                     resultPictureNodes.Add(k);
+                }
+                else if ((k.Type == "bookmark" || k.Type == "bookmarkEnd") && depth == 1)
+                {
+                    // BUG-DUMP-R72-SETFIELD-BOOKMARK: bookmark wrapping the field
+                    // result — route the whole field to a verbatim slice below.
+                    sawInnerBookmark = true;
                 }
             }
             if (end < 0)
@@ -489,7 +549,10 @@ public static partial class WordBatchEmitter
             // Flag it and stash the field-slice run paths so TryEmitFieldRun
             // raw-sets the whole begin..end chain verbatim, preserving per-run
             // formatting. Empty / single-run results stay on the typed path.
-            if (sawSeparate && ResultRunsAreRich(resultRuns))
+            // BUG-DUMP-R72-SETFIELD-BOOKMARK: an inner bookmark also forces the
+            // verbatim slice (same passthrough as a rich result) so the bookmark
+            // wrapping the field result survives in place.
+            if ((sawSeparate && ResultRunsAreRich(resultRuns)) || sawInnerBookmark)
             {
                 var slicePaths = new List<string>();
                 for (int s = i; s <= end; s++)
@@ -553,6 +616,13 @@ public static partial class WordBatchEmitter
                         synth.Format["_resultFmt." + fk] = fv;
                 }
             }
+            // BUG-DUMP-FIELDMARKER-RPR: when neither the cached result nor the
+            // marker nodes' Format surfaced run typography (fieldChar/instrText
+            // nodes carry none), recover the marker rPr from the begin run's raw
+            // XML so an explicit size/font on the field markers round-trips and
+            // the hidden field-code line keeps its height.
+            if (!synth.Format.ContainsKey("_resultFmt.size"))
+                ForwardMarkerRprFromRaw(word, c, synth);
             // BUG-DUMP-FIELDVALIGN: forward the field-wide vertAlign captured
             // from any result run in the chain. Stash it under the same
             // `_resultFmt.` channel TryEmitFieldRun already drains so it maps

@@ -561,7 +561,11 @@ public partial class WordHandler
             // reflows. Absent → null → no wp14 child emitted.
             var sizeRelH = properties.GetValueOrDefault("sizeRelH");
             var sizeRelV = properties.GetValueOrDefault("sizeRelV");
-            imgRun = CreateAnchorImageRun(relId, cxEmu, cyEmu, altText, wrapType, hPos, vPos, hRel, vRel, behind, imgDocPropId, pictureName, hAlign, vAlign, relHeight, effectExtent, wrapDist, wrapPolygon, sizeRelH, sizeRelV);
+            // BUG-DUMP-WRAPSIDE: forward the wrapSquare text side (left/right/
+            // largest) so a one-sided wrap round-trips instead of defaulting to
+            // bothSides and reflowing the text around the float.
+            var wrapSide = properties.GetValueOrDefault("wrap.side") ?? properties.GetValueOrDefault("wrapSide");
+            imgRun = CreateAnchorImageRun(relId, cxEmu, cyEmu, altText, wrapType, hPos, vPos, hRel, vRel, behind, imgDocPropId, pictureName, hAlign, vAlign, relHeight, effectExtent, wrapDist, wrapPolygon, sizeRelH, sizeRelV, wrapSide);
         }
         else
         {
@@ -1026,6 +1030,23 @@ public partial class WordHandler
                     throw new ArgumentException($"{opName} part{pi}.child{ci} requires relId and a non-empty data: URI");
                 var childPart = CreateInlinedChildPart(created, cct, childRelId!)
                     ?? throw new ArgumentException($"{opName} part{pi}.child{ci}: unsupported content type '{cct}'");
+                // BUG-DUMP-R71-USERSHAPES-IMG: recreate the child's OWN parts (a
+                // chart userShapes drawing -> its image) BEFORE feeding the child
+                // bytes, using the ORIGINAL rel id so the child's verbatim r:embed
+                // resolves without rewriting. Without this the rebuilt drawing's
+                // r:embed dangles ("relationship does not exist").
+                for (int gi = 1; properties.TryGetValue($"part{pi}.child{ci}.gc{gi}.relId", out var gcRelId); gi++)
+                {
+                    var gcUri = properties.GetValueOrDefault($"part{pi}.child{ci}.gc{gi}.data");
+                    if (string.IsNullOrEmpty(gcRelId)
+                        || !OfficeCli.Core.OleHelper.TryDecodeDataUri(gcUri, out var gcbytes, out var gcct)
+                        || gcbytes.Length == 0)
+                        throw new ArgumentException($"{opName} part{pi}.child{ci}.gc{gi} requires relId and a non-empty data: URI");
+                    var gcPart = CreateInlinedChildPart(childPart, gcct, gcRelId!)
+                        ?? throw new ArgumentException($"{opName} part{pi}.child{ci}.gc{gi}: unsupported content type '{gcct}'");
+                    using var gcms = new MemoryStream(gcbytes);
+                    gcPart.FeedData(gcms);
+                }
                 using var cms = new MemoryStream(cbytes);
                 childPart.FeedData(cms);
             }
@@ -1073,6 +1094,15 @@ public partial class WordHandler
             => hostPart.AddNewPart<DiagramPersistLayoutPart>(ct, null),
         _ when ct.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
             => hostPart.AddNewPart<ImagePart>(ct, null),
+        // BUG-DUMP-INKML: digital-ink (handwriting) parts (application/inkml+xml,
+        // referenced from <w14:contentPart r:id>) are attached via a customXml
+        // relationship — Word/the SDK reach them as a CustomXmlPart whose content
+        // type is overridden to inkml+xml. The carrier previously had no arm for
+        // this content type and aborted the whole inlined-parts step, dropping the
+        // ink drawing. Recreate it as a CustomXmlPart with the source content type
+        // so the customXml relationship + inkml payload round-trip.
+        "application/inkml+xml"
+            => hostPart.AddNewPart<CustomXmlPart>(ct, null),
         // BUG-DUMP-R55-VMLCHART: a VML shape / AlternateContent drawing embeds a
         // DrawingML chart (chart+xml, referenced by r:id). Without this the
         // inlined-parts materializer aborted the whole `add vmlshape` step and
