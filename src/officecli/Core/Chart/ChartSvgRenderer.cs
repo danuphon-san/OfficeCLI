@@ -1321,22 +1321,34 @@ internal partial class ChartSvgRenderer
         var (niceMax, tickInterval, tickCount) = percent
             ? (100.0, 20.0, 5)
             : ComputeNiceAxis(Math.Abs(maxVal) > Math.Abs(minVal) ? maxVal : -minVal);
-        // For non-stacked charts with negative values, expand the axis to cover minVal
+        // For non-stacked charts with negative values, expand the axis to cover minVal.
+        // niceMin straddles zero so the zero line sits inside the plot and negative
+        // areas fill below it — same domain rule as the bar/column path
+        // (R12b parity: dataMin = Math.Min(0, allValues.Min())).
         var niceMin = minVal < 0 ? -ComputeNiceAxis(-minVal).niceMax : 0.0;
         var axisRange = niceMax - niceMin;
+        // Ticks/gridlines must span the whole niceMin..niceMax range, not just the
+        // positive 0..niceMax portion. nTicks counts steps across the full domain so
+        // labels read e.g. -4,-2,0,2,4,6 instead of 0..6 with negatives clipped.
+        var nTicks = percent ? tickCount : (int)Math.Round((niceMax - niceMin) / tickInterval);
+        if (nTicks < 1) nTicks = 1;
 
         // Helper: map a data value to a y-coordinate within [oy, oy+ph]
         double DataToY(double v) => oy + ph - (v - niceMin) / axisRange * ph;
         double ZeroY() => DataToY(0.0);
 
         if (ShowValGridlines)
-        for (int t = 1; t <= tickCount; t++)
+        for (int t = 0; t <= nTicks; t++)
         {
-            var gy = oy + ph - (double)ph * t / tickCount;
+            var gy = oy + ph - (double)ph * t / nTicks;
             sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
         }
         sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
         sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy + ph}\" x2=\"{ox + pw}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
+        // Zero baseline when the domain straddles zero (negative data present) — the
+        // area fills meet at this line, positives above / negatives below.
+        if (niceMin < 0)
+            sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{ZeroY():0.#}\" x2=\"{ox + pw}\" y2=\"{ZeroY():0.#}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
 
         if (stacked)
         {
@@ -1381,11 +1393,11 @@ internal partial class ChartSvgRenderer
             var lx = ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
             sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
         }
-        for (int t = 0; t <= tickCount; t++)
+        for (int t = 0; t <= nTicks; t++)
         {
-            var val = tickInterval * t;
+            var val = niceMin + tickInterval * t;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
-            var ty = oy + ph - (double)ph * t / tickCount;
+            var ty = oy + ph - (double)ph * t / nTicks;
             sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
