@@ -184,7 +184,50 @@ public partial class WordHandler
             }
         }
 
+        // Pattern fill → approximate the hatch with a CSS repeating-linear-gradient
+        // alternating <a:fgClr> and <a:bgClr>. CSS can't reproduce every OOXML
+        // preset (dkHorizontal, diagCross, …) so the angle is chosen from the
+        // preset family (vertical / horizontal / diagonal); the result conveys
+        // "patterned, not empty". Falls back to a solid fgClr when colors are
+        // partially present, never to transparent.
+        var pattFill = spPr.Elements().FirstOrDefault(e => e.LocalName == "pattFill");
+        if (pattFill != null)
+        {
+            var fg = ResolvePatternColor(pattFill.Elements().FirstOrDefault(e => e.LocalName == "fgClr"));
+            var bg = ResolvePatternColor(pattFill.Elements().FirstOrDefault(e => e.LocalName == "bgClr"));
+            var prst = pattFill.GetAttributes().FirstOrDefault(a => a.LocalName == "prst").Value;
+
+            if (fg != null && bg != null)
+            {
+                var angle = prst switch
+                {
+                    var p when p != null && p.Contains("Vertical", StringComparison.OrdinalIgnoreCase) => "90deg",
+                    var p when p != null && p.Contains("Horizontal", StringComparison.OrdinalIgnoreCase) => "0deg",
+                    _ => "45deg", // diagonal / cross / dotted / default
+                };
+                return $"background:repeating-linear-gradient({angle},{fg} 0 3px,{bg} 3px 6px)";
+            }
+            // Partial color info → solid fallback (existence over transparency).
+            if (fg != null) return $"background-color:{fg}";
+            if (bg != null) return $"background-color:{bg}";
+        }
+
         return "";
+    }
+
+    /// <summary>Resolve an a:fgClr/a:bgClr wrapper to a CSS color, or null.</summary>
+    private string? ResolvePatternColor(OpenXmlElement? clr)
+    {
+        if (clr == null) return null;
+        var rgb = clr.Elements().FirstOrDefault(e => e.LocalName == "srgbClr");
+        if (rgb != null)
+        {
+            var val = rgb.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+            if (val != null && IsHexColor(val)) return $"#{val}";
+        }
+        var scheme = clr.Elements().FirstOrDefault(e => e.LocalName == "schemeClr");
+        if (scheme != null) return ResolveSchemeColor(scheme);
+        return null;
     }
 
     private string ResolveShapeBorderCss(OpenXmlElement? spPr)
