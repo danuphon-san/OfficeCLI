@@ -1946,6 +1946,28 @@ public partial class WordHandler
                 node.Format["revision.date"] = insDate.ToString("o");
             if (insAncestor.Id?.Value is { } insId)
                 node.Format["revision.id"] = insId.ToString();
+            // BUG-DUMP-DELININS: a <w:ins> may itself contain a <w:del> (one
+            // reviewer inserts text, a second reviewer deletes that insertion).
+            // The run is then BOTH inserted and deleted and its text rides in
+            // <w:delText>. A single revision.type can't carry both wrappers, so
+            // the inner del was dropped — the deletion round-tripped as a live
+            // insertion (<w:delText> rebuilt as <w:t>, the deleted content
+            // silently un-deleted; this is the cd241 delText-loss class).
+            // ECMA-376 permits only ins⊃del nesting (del cannot contain ins),
+            // so a run with BOTH an ins AND a del ancestor is always ins-outer/
+            // del-inner. Capture the inner del as revision.nested.* so the
+            // emitter rebuilds the <w:ins><w:del> stack.
+            var nestedDel = run.Ancestors<DeletedRun>().FirstOrDefault();
+            if (nestedDel != null)
+            {
+                node.Format["revision.nested.type"] = "del";
+                if (!string.IsNullOrEmpty(nestedDel.Author?.Value))
+                    node.Format["revision.nested.author"] = nestedDel.Author!.Value!;
+                if (nestedDel.Date?.Value is DateTime nestedDelDate)
+                    node.Format["revision.nested.date"] = nestedDelDate.ToString("o");
+                if (nestedDel.Id?.Value is { } nestedDelId)
+                    node.Format["revision.nested.id"] = nestedDelId.ToString();
+            }
         }
         else if (moveFromAncestor != null)
         {
