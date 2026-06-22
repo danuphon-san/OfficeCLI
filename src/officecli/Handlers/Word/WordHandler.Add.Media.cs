@@ -1094,6 +1094,15 @@ public partial class WordHandler
             => hostPart.AddNewPart<DiagramPersistLayoutPart>(ct, null),
         _ when ct.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
             => hostPart.AddNewPart<ImagePart>(ct, null),
+        // BUG-DUMP-INKML: digital-ink (handwriting) parts (application/inkml+xml,
+        // referenced from <w14:contentPart r:id>) are attached via a customXml
+        // relationship — Word/the SDK reach them as a CustomXmlPart whose content
+        // type is overridden to inkml+xml. The carrier previously had no arm for
+        // this content type and aborted the whole inlined-parts step, dropping the
+        // ink drawing. Recreate it as a CustomXmlPart with the source content type
+        // so the customXml relationship + inkml payload round-trip.
+        "application/inkml+xml"
+            => hostPart.AddNewPart<CustomXmlPart>(ct, null),
         // BUG-DUMP-R55-VMLCHART: a VML shape / AlternateContent drawing embeds a
         // DrawingML chart (chart+xml, referenced by r:id). Without this the
         // inlined-parts materializer aborted the whole `add vmlshape` step and
