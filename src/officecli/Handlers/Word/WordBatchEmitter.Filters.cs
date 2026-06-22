@@ -14,6 +14,12 @@ public static partial class WordBatchEmitter
     private static readonly HashSet<string> SkipKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "basedOn.path",
+        // Comment resolved-state (done) + reply-parent (parentId) are readback
+        // keys backed by word/commentsExtended.xml, which the dump round-trips
+        // verbatim via a raw `/commentsExtended replace`. Emitting them as typed
+        // `add comment` props too would double-apply and break the dump
+        // fixed-point — the raw replace is the single source of truth.
+        "done", "parentId", "resolved",
         "paraId", "textId", "rsidR", "rsidRDefault", "rsidRPr", "rsidP", "rsidTr",
         // Paragraph Get emits `style`, `styleId`, and `styleName` — all three
         // carry the same value (style id, repeated). AddParagraph only

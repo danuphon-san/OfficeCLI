@@ -1835,6 +1835,12 @@ public partial class WordHandler
             var anchorPath = FindCommentAnchorPath(comment.Id.Value);
             if (anchorPath != null) node.Format["anchoredTo"] = anchorPath;
         }
+        // commentsExtended.xml (w15): resolved-state + reply-parent. `done` is
+        // emitted on every comment (enables `query 'comment[done=false]'`);
+        // `parentId` only on replies (the parent comment's w:id).
+        var (cmtParentId, cmtDone) = ReadCommentExInfo(comment);
+        node.Format["done"] = cmtDone ? "true" : "false";
+        if (cmtParentId != null) node.Format["parentId"] = cmtParentId;
         // R21-WB-1: surface direction from the first content paragraph's
         // pPr.BiDi so the cascade (already applied by ApplyCommentFormatKeys)
         // round-trips through Get. Mirrors footnote/endnote readback above.

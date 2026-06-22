@@ -72,6 +72,33 @@
       ],
       "readback": "n/a (encoded inline; affects emitted markers)",
       "enforcement": "report"
+    },
+    "parentId": {
+      "type": "number",
+      "description": "w:id of the comment this one replies to. Threads the reply under its parent in Word's review pane via word/commentsExtended.xml (w15:paraIdParent, keyed by the comment paragraphs' w14:paraId). Get returns the parent comment's w:id on replies only.",
+      "aliases": ["parentid"],
+      "add": true,
+      "set": false,
+      "get": true,
+      "examples": [
+        "--prop parentId=1"
+      ],
+      "readback": "parent comment w:id (replies only)",
+      "enforcement": "report"
+    },
+    "done": {
+      "type": "bool",
+      "description": "resolved-state of the comment (Word's 'Resolve'), stored in word/commentsExtended.xml as w15:done. Get returns done=true|false on every comment, so 'query comment[done=false]' lists unresolved comments.",
+      "aliases": ["resolved"],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "set \"/comments/comment[1]\" --prop done=true",
+        "--prop done=false"
+      ],
+      "readback": "true|false",
+      "enforcement": "report"
     }
   }
 }

@@ -161,9 +161,62 @@ public partial class WordHandler
         // Apply paragraph-level / run-level format keys (direction, font, size, etc.)
         // Mirrors R2-2 footnote/header fix — the same vocabulary should work
         // on comment bodies as on footnote/endnote bodies.
+        // Reply threading (w15:paraIdParent) + resolved-state (w15:done) live in
+        // word/commentsExtended.xml, keyed by the comment paragraphs' w14:paraId.
+        // Consume parentId/done here (translating the parent's w:id -> its paraId)
+        // and remove them so the unsupported-forwarding below doesn't flag them.
+        if ((properties.TryGetValue("parentId", out var parentIdRaw)
+             || properties.TryGetValue("parentid", out parentIdRaw))
+            && !string.IsNullOrEmpty(parentIdRaw))
+        {
+            var parentParaId = GetCommentFirstParaId(parentIdRaw)
+                ?? throw new ArgumentException(
+                    $"parentId={parentIdRaw}: no comment with that id to reply to.");
+            if (string.IsNullOrEmpty(commentBody.ParagraphId?.Value)) AssignParaId(commentBody);
+            // Word writes a commentEx for every comment; ensure the parent's
+            // thread-root entry exists, then link this reply to it.
+            UpsertCommentEx(parentParaId, null, null);
+            UpsertCommentEx(commentBody.ParagraphId!.Value!, parentParaId, false);
+        }
+        properties.Remove("parentId");
+        properties.Remove("parentid");
+        if ((properties.TryGetValue("done", out var addDoneRaw)
+             || properties.TryGetValue("resolved", out addDoneRaw)))
+        {
+            if (string.IsNullOrEmpty(commentBody.ParagraphId?.Value)) AssignParaId(commentBody);
+            UpsertCommentEx(commentBody.ParagraphId!.Value!, null, IsTruthy(addDoneRaw));
+        }
+        properties.Remove("done");
+        properties.Remove("resolved");
+
         var _commentUnsupported = new List<string>();
         ApplyCommentFormatKeys(commentEl, properties, _commentUnsupported);
         commentsPart.Comments.Save();
+
+        // Surface genuinely-unsupported props through the same channel every
+        // other `add` type uses (LastAddUnsupportedProps -> CLI "UNSUPPORTED
+        // props:" WARNING). AddComment used to discard _commentUnsupported, so
+        // an unknown key (a typo, or a not-yet-supported feature like
+        // `parentId` reply-threading / `done` resolution) was swallowed
+        // silently — inconsistent with `add paragraph`, where ApplyCommentFormatKeys
+        // sees the structural keys AddComment consumes itself (rangeOpen,
+        // pointRef, runStart, …) and would otherwise flag them as false
+        // positives; exclude that set, forward the rest.
+        foreach (var key in _commentUnsupported)
+        {
+            switch (key.ToLowerInvariant())
+            {
+                case "text": case "author": case "initials": case "date":
+                case "annotationref": case "rstyle":
+                case "commentparaid": case "pointref":
+                case "range": case "rangeopen": case "rangeend":
+                case "runstart": case "runend":
+                    continue;
+                default:
+                    LastAddUnsupportedProps.Add(key);
+                    break;
+            }
+        }
 
         var rangeStart = new CommentRangeStart { Id = commentId };
         var rangeEnd = new CommentRangeEnd { Id = commentId };

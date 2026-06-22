@@ -2352,7 +2352,23 @@ public partial class WordHandler
                         var anchorPath = FindCommentAnchorPath(comment.Id.Value);
                         if (anchorPath != null) cNode.Format["anchoredTo"] = anchorPath;
                     }
-                    results.Add(cNode);
+                    // commentsExtended.xml (w15) resolved-state + reply-parent —
+                    // mirrors CommentToNode so `query 'comment[done=false]'` /
+                    // 'comment[parentId=N]' filter correctly.
+                    var (cmtParentId, cmtDone) = ReadCommentExInfo(comment);
+                    cNode.Format["done"] = cmtDone ? "true" : "false";
+                    if (cmtParentId != null) cNode.Format["parentId"] = cmtParentId;
+                    // Filter by attribute (e.g. comment[done=false], comment[parentId=1]).
+                    bool matchAttrs = true;
+                    foreach (var (attrKey, rawVal) in parsed.Attributes)
+                    {
+                        bool negate = rawVal.StartsWith("!");
+                        var val = negate ? rawVal[1..] : rawVal;
+                        var hasKey = cNode.Format.TryGetValue(attrKey, out var fmtVal);
+                        bool matches = hasKey && string.Equals(fmtVal?.ToString(), val, StringComparison.OrdinalIgnoreCase);
+                        if (negate ? matches : !matches) { matchAttrs = false; break; }
+                    }
+                    if (matchAttrs) results.Add(cNode);
                 }
             }
             return results;

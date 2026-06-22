@@ -683,7 +683,11 @@ public partial class WordHandler
             // the base Dictionary enumerator, bypassing the tracking override).
             properties.ContainsKey(key);
             var lk = key.ToLowerInvariant();
-            if (lk == "text" || lk == "author" || lk == "initials" || lk == "date") continue;
+            // done/resolved (w15:done) + parentId (w15:paraIdParent) are handled
+            // by SetElementComment / AddComment against commentsExtended.xml, not
+            // here — skip so they aren't mis-flagged as unsupported comment props.
+            if (lk == "text" || lk == "author" || lk == "initials" || lk == "date"
+                || lk == "done" || lk == "resolved" || lk == "parentid") continue;
             // BUG-DUMP-R45-3: explicit paragraph-mark-only formatting (the dotted
             // `markRPr.*` form Navigation emits when the source comment paragraph
             // genuinely carries a <w:pPr><w:rPr>). Writes ONLY to the ¶ mark,
