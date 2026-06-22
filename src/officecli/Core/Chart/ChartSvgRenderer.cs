@@ -2032,7 +2032,9 @@ internal partial class ChartSvgRenderer
 
     public void RenderBubbleChartSvg(StringBuilder sb, PlotArea plotArea,
         List<(string name, double[] values)> series, string[] categories, List<string> colors,
-        int ox, int oy, int pw, int ph)
+        int ox, int oy, int pw, int ph,
+        bool showDataLabels = false, bool showVal = true, bool showSerName = false,
+        bool showCatName = false, string? dataLabelNumFmt = null)
     {
         var bubbleSeries = plotArea.Descendants<OpenXmlCompositeElement>()
             .Where(e => e.LocalName == "ser" && e.Parent?.LocalName == "bubbleChart").ToList();
@@ -2132,6 +2134,20 @@ internal partial class ChartSvgRenderer
                 var frac = Math.Max(0, sz) / maxSz;
                 var r = widthMode ? frac * maxRadius : Math.Sqrt(frac) * maxRadius + maxRadius * 0.15;
                 sb.AppendLine($"        <circle cx=\"{bx:0.#}\" cy=\"{by:0.#}\" r=\"{r:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.6\"/>");
+                // Data label — the Y value (same convention as the scatter renderer),
+                // placed just outside the bubble to the right so it clears the fill.
+                if (showDataLabels)
+                {
+                    var yv = yVals[i];
+                    var valuePart = !string.IsNullOrEmpty(dataLabelNumFmt) ? FormatAxisValue(yv, dataLabelNumFmt)
+                        : yv % 1 == 0 ? $"{(int)yv}" : $"{yv:0.#}";
+                    var lparts = new List<string>();
+                    if (showSerName && s < series.Count) lparts.Add(series[s].name);
+                    if (showCatName && i < categories.Length) lparts.Add(categories[i]);
+                    if (showVal) lparts.Add(valuePart);
+                    var vlabel = string.Join(", ", lparts);
+                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + r + 4:0.#}\" y=\"{by:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"start\" dominant-baseline=\"middle\">{HtmlEncode(vlabel)}</text>");
+                }
             }
         }
         for (int t = 0; t <= xTicks; t++)
@@ -3950,7 +3966,9 @@ internal partial class ChartSvgRenderer
         }
         else if (chartType == "bubble")
         {
-            RenderBubbleChartSvg(sb, info.PlotArea!, info.Series, info.Categories, info.Colors, marginLeft, marginTop, plotW, plotH);
+            RenderBubbleChartSvg(sb, info.PlotArea!, info.Series, info.Categories, info.Colors, marginLeft, marginTop, plotW, plotH,
+                info.ShowDataLabels, info.ShowDataLabelVal, info.ShowDataLabelSerName,
+                info.ShowDataLabelCatName, info.DataLabelsNumFmt);
         }
         else if (chartType == "stock")
         {
