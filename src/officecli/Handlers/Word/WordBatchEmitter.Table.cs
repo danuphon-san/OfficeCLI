@@ -64,6 +64,41 @@ public static partial class WordBatchEmitter
         return null;
     }
 
+    // BUG-DUMP-H84: true when the table has a ROW-LEVEL <w:sdt> — a content
+    // control that is a DIRECT child of <w:tbl> (sibling of <w:tr>), wrapping one
+    // or more rows. The canonical case is a <w15:repeatingSection> form template
+    // (often with a <w15:repeatingSectionItem> SDT per row). EmitTable enumerates
+    // bare <w:tr> children and has no carrier for such a wrapper, so it would be
+    // silently flattened to a static table. Depth-scan mirrors
+    // EnumerateCellDirectChildren: the <w:tbl> wrapper is depth 0, its direct
+    // children at depth 0; a <w:sdt> seen at depth 0 is row-level (a cell-level
+    // SDT sits inside <w:tc>, depth > 0, and must NOT trigger this).
+    private static bool TableHasRowLevelSdt(string? tblXml)
+    {
+        if (string.IsNullOrEmpty(tblXml)
+            || !tblXml!.Contains("<w:sdt", StringComparison.Ordinal))
+            return false;
+        int depth = -1;
+        bool seenWrapper = false;
+        foreach (System.Text.RegularExpressions.Match m in
+                 System.Text.RegularExpressions.Regex.Matches(
+                     tblXml!, @"<(/?)w:([A-Za-z]+)\b[^>]*?(/?)>"))
+        {
+            var closing = m.Groups[1].Value == "/";
+            var name = m.Groups[2].Value;
+            var selfClose = m.Groups[3].Value == "/";
+            if (!seenWrapper)
+            {
+                if (!closing) { seenWrapper = true; depth = 0; }
+                continue;
+            }
+            if (closing) { depth--; continue; }
+            if (depth == 0 && name == "sdt") return true;
+            if (!selfClose) depth++;
+        }
+        return false;
+    }
+
     private static void EmitTable(WordHandler word, string sourcePath, int targetIndex,
                                   List<BatchItem> items, BodyEmitContext? ctx = null,
                                   string? parentTablePath = null,
@@ -83,6 +118,52 @@ public static partial class WordBatchEmitter
         if (ctx != null) tableOrdinal = ++ctx.TableOrdinalBox[0];
 
         var tableNode = word.Get(sourcePath);
+
+        // BUG-DUMP-H84: a table whose rows are wrapped by a row-level <w:sdt>
+        // (a <w15:repeatingSection> form template / per-row repeatingSectionItem)
+        // can't round-trip through the typed `add table` path below — EmitTable
+        // enumerates bare <w:tr> children and has no carrier for the wrapping
+        // control, so the repeating-section structure was silently flattened to a
+        // static table (markers 1→0, no warning). Route the whole <w:tbl> verbatim
+        // via raw-set, mirroring the rich block-SDT path (EmitSdt). Restricted to
+        // body tables with no external relationship (the common form-template
+        // shape — verbatim injection can't recreate dangling rels); other cases
+        // warn and fall through (rows + content survive as a static table, no
+        // longer a silent loss).
+        var tblRawXml = word.RawElementXml(sourcePath);
+        if (!string.IsNullOrEmpty(tblRawXml) && TableHasRowLevelSdt(tblRawXml))
+        {
+            if (containerPath == "/body" && !HasExternalRelRef(tblRawXml!))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = "/document",
+                    Xpath = "//w:body/w:sectPr",
+                    Action = "insertbefore",
+                    Xml = tblRawXml!
+                });
+                // CONSISTENCY(tbl-ordinal): the verbatim table (and any nested
+                // <w:tbl> in its cells) ships WITHOUT routing through EmitTable, so
+                // EmitTable's `++TableOrdinalBox` (line above) counted only the
+                // outer table. Bump by the shipped XML's remaining table count so
+                // later `(//w:tbl)[N]` selectors stay in lockstep with replay.
+                // Mirrors the EmitSdt verbatim / textbox carrier adjustment.
+                if (ctx != null)
+                {
+                    int shipped = System.Text.RegularExpressions.Regex
+                        .Matches(tblRawXml!, "<w:tbl[ >]").Count;
+                    if (shipped > 1) ctx.TableOrdinalBox[0] += shipped - 1;
+                }
+                return;
+            }
+            ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                Element: "table.rowSdt",
+                Path: sourcePath,
+                Reason: "table rows wrapped by a content control (e.g. repeatingSection) — the wrapping control is dropped on dump→batch; the rows and their content are preserved as a static table"));
+            // fall through to the typed table emit (content survives)
+        }
+
         var rows = (tableNode.Children ?? new List<DocumentNode>())
             .Where(c => c.Type == "row")
             .ToList();
