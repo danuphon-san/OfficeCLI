@@ -1397,6 +1397,38 @@ public partial class PowerPointHandler
         var cx = overridePos?.cx ?? xfrm.Extents.Cx?.Value ?? 0;
         var cy = overridePos?.cy ?? xfrm.Extents.Cy?.Value ?? 0;
 
+        // Picture-level hyperlink → wrap the picture <div> in <a> for clickability in
+        // HTML preview. CONSISTENCY(shape-picture-parity): RenderShape already does
+        // this for shapes (and NodeBuilder surfaces Format["link"] for pictures), but
+        // RenderPicture dropped it — a hyperlinked image rendered un-clickable. Same
+        // rules: external URLs only; internal slide-jump (ppaction://hlinksldjump) and
+        // unsafe schemes (javascript:/data: …) are skipped.
+        string? picHrefUrl = null;
+        string? picHrefTooltip = null;
+        {
+            var nvHlink = pic.NonVisualPictureProperties?.NonVisualDrawingProperties
+                ?.GetFirstChild<Drawing.HyperlinkOnClick>();
+            if (nvHlink != null)
+            {
+                picHrefTooltip = nvHlink.Tooltip?.Value;
+                var action = nvHlink.Action?.Value;
+                var hlId = nvHlink.Id?.Value;
+                if (string.IsNullOrEmpty(action) || !action.Contains("hlink"))
+                {
+                    if (!string.IsNullOrEmpty(hlId))
+                    {
+                        try
+                        {
+                            var rel = slidePart.HyperlinkRelationships.FirstOrDefault(r => r.Id == hlId);
+                            if (rel?.Uri != null && Core.HyperlinkUriValidator.IsSafeScheme(rel.Uri.ToString()))
+                                picHrefUrl = rel.Uri.ToString();
+                        }
+                        catch { }
+                    }
+                }
+            }
+        }
+
         var styles = new List<string>
         {
             $"left:{Units.EmuToPt(x)}pt",
@@ -1620,6 +1652,14 @@ public partial class PowerPointHandler
                 styles.Add(geomCss);
         }
 
+        // Open <a> wrapper for picture-level hyperlink (before the picture <div>).
+        if (!string.IsNullOrEmpty(picHrefUrl))
+        {
+            var tooltipAttr = !string.IsNullOrEmpty(picHrefTooltip)
+                ? $" title=\"{HtmlEncode(picHrefTooltip!)}\"" : "";
+            sb.Append($"    <a class=\"shape-link\" href=\"{HtmlEncode(picHrefUrl!)}\" rel=\"noopener\" target=\"_blank\"{tooltipAttr} style=\"display:contents;cursor:pointer\">");
+        }
+
         sb.Append($"    <div class=\"picture\"{dataPathAttr} style=\"{string.Join(";", styles)}\">");
 
         // Extract image data
@@ -1779,6 +1819,10 @@ public partial class PowerPointHandler
         }
 
         sb.AppendLine("</div>");
+
+        // Close <a> wrapper for picture-level hyperlink.
+        if (!string.IsNullOrEmpty(picHrefUrl))
+            sb.Append("</a>");
     }
 
     // ==================== Connector Rendering ====================
