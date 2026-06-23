@@ -453,27 +453,44 @@ public partial class WordHandler
     {
         var pg = GetPageLayout();
 
+        // A header/footer image's wrapNone overlay is emitted INSIDE the
+        // .doc-header / .doc-footer band (RenderHeaderFooterHtml sets
+        // _ctx.ImageHostPart to the HeaderPart/FooterPart). That band is itself
+        // position:absolute (its own containing block for absolute children) and
+        // is already inset to the page's left margin and offset to
+        // HeaderDistancePt — so the overlay's origin is the band's top-left, NOT
+        // the physical page. Adding the body's top/left margins here (the body
+        // path below) would push a paragraph/column-relative header logo down
+        // into the body area. When hosted in a header/footer, measure
+        // column/paragraph offsets from the band origin (0,0) instead.
+        bool inHeaderFooter = _ctx.ImageHostPart is HeaderPart or FooterPart;
+
         var hPos = anchor.GetFirstChild<DW.HorizontalPosition>();
         var vPos = anchor.GetFirstChild<DW.VerticalPosition>();
         var hFrom = hPos?.RelativeFrom?.Value;
         var vFrom = vPos?.RelativeFrom?.Value;
 
-        double leftPt = pg.MarginLeftPt;
+        // Body baselines add the page margins; header/footer baselines are zero
+        // because the band is already inset to those margins.
+        double leftBase = inHeaderFooter ? 0 : pg.MarginLeftPt;
+        double topBase = inHeaderFooter ? 0 : pg.MarginTopPt;
+
+        double leftPt = leftBase;
         var hOffEl = hPos?.Descendants().FirstOrDefault(e => e.LocalName == "posOffset");
         if (hOffEl != null && long.TryParse(hOffEl.InnerText, out var hOffEmu))
         {
             leftPt = hFrom == DW.HorizontalRelativePositionValues.Page
                 ? hOffEmu / EmuConverter.EmuPerPointF
-                : pg.MarginLeftPt + hOffEmu / EmuConverter.EmuPerPointF;
+                : leftBase + hOffEmu / EmuConverter.EmuPerPointF;
         }
 
-        double topPt = pg.MarginTopPt;
+        double topPt = topBase;
         var vOffEl = vPos?.Descendants().FirstOrDefault(e => e.LocalName == "posOffset");
         if (vOffEl != null && long.TryParse(vOffEl.InnerText, out var vOffEmu))
         {
             topPt = vFrom == DW.VerticalRelativePositionValues.Page
                 ? vOffEmu / EmuConverter.EmuPerPointF
-                : pg.MarginTopPt + vOffEmu / EmuConverter.EmuPerPointF;
+                : topBase + vOffEmu / EmuConverter.EmuPerPointF;
         }
 
         // behindDoc="1" → behind text (watermark); else in front.
