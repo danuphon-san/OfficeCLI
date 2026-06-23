@@ -1881,6 +1881,25 @@ public partial class WordHandler
         return BuildSectionNode(sectPrEl, path);
     }
 
+    // BUG-DUMP-DELININS / BUG-DUMP-MOVE-DEL: a run wrapped by an outer revision
+    // (ins / moveFrom / moveTo) AND an inner <w:del> must surface the inner
+    // deletion as revision.nested.* so the emitter rebuilds the nested
+    // <w:ins|moveFrom|moveTo><w:del> stack. Without it the <w:del> wrapper was
+    // dropped and the deleted text resurfaced as live, accepted content (a silent
+    // meaning change). ECMA-376 permits ins/moveFrom/moveTo to wrap a del.
+    private static void CaptureNestedDeletion(Run run, DocumentNode node)
+    {
+        var nestedDel = run.Ancestors<DeletedRun>().FirstOrDefault();
+        if (nestedDel == null) return;
+        node.Format["revision.nested.type"] = "del";
+        if (!string.IsNullOrEmpty(nestedDel.Author?.Value))
+            node.Format["revision.nested.author"] = nestedDel.Author!.Value!;
+        if (nestedDel.Date?.Value is DateTime nestedDelDate)
+            node.Format["revision.nested.date"] = nestedDelDate.ToString("o");
+        if (nestedDel.Id?.Value is { } nestedDelId)
+            node.Format["revision.nested.id"] = nestedDelId.ToString();
+    }
+
     private DocumentNode RunToNode(Run run, DocumentNode node, string path)
     {
         node.Type = "run";
@@ -1980,21 +1999,11 @@ public partial class WordHandler
             // the inner del was dropped — the deletion round-tripped as a live
             // insertion (<w:delText> rebuilt as <w:t>, the deleted content
             // silently un-deleted; this is the cd241 delText-loss class).
-            // ECMA-376 permits only ins⊃del nesting (del cannot contain ins),
-            // so a run with BOTH an ins AND a del ancestor is always ins-outer/
-            // del-inner. Capture the inner del as revision.nested.* so the
-            // emitter rebuilds the <w:ins><w:del> stack.
-            var nestedDel = run.Ancestors<DeletedRun>().FirstOrDefault();
-            if (nestedDel != null)
-            {
-                node.Format["revision.nested.type"] = "del";
-                if (!string.IsNullOrEmpty(nestedDel.Author?.Value))
-                    node.Format["revision.nested.author"] = nestedDel.Author!.Value!;
-                if (nestedDel.Date?.Value is DateTime nestedDelDate)
-                    node.Format["revision.nested.date"] = nestedDelDate.ToString("o");
-                if (nestedDel.Id?.Value is { } nestedDelId)
-                    node.Format["revision.nested.id"] = nestedDelId.ToString();
-            }
+            // A run with BOTH an ins AND a del ancestor is ins-outer/del-inner
+            // (ECMA-376 permits ins⊃del). Capture the inner del as revision.nested.*
+            // so the emitter rebuilds the <w:ins><w:del> stack. (moveFrom/moveTo may
+            // also wrap a del — same capture, see those branches.)
+            CaptureNestedDeletion(run, node);
         }
         else if (moveFromAncestor != null)
         {
@@ -2011,6 +2020,7 @@ public partial class WordHandler
                 node.Format["revision.date"] = mfDate.ToString("o");
             if (moveFromAncestor.Id?.Value is { } mfId)
                 node.Format["revision.id"] = mfId.ToString();
+            CaptureNestedDeletion(run, node);   // BUG-DUMP-MOVE-DEL: moveFrom⊃del
         }
         else if (moveToAncestor != null)
         {
@@ -2021,6 +2031,7 @@ public partial class WordHandler
                 node.Format["revision.date"] = mtDate.ToString("o");
             if (moveToAncestor.Id?.Value is { } mtId)
                 node.Format["revision.id"] = mtId.ToString();
+            CaptureNestedDeletion(run, node);   // BUG-DUMP-MOVE-DEL: moveTo⊃del
         }
         else
         {

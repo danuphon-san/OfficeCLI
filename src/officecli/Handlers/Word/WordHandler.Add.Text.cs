@@ -2976,6 +2976,27 @@ public partial class WordHandler
                     WrapRunAsMoveFrom(newRun, moveAuthor, moveDate, trackChangeId!);
                 else
                     WrapRunAsMoveTo(newRun, moveAuthor, moveDate, trackChangeId!);
+                // BUG-DUMP-MOVE-DEL: a run that is BOTH moved AND deleted
+                // (<w:moveFrom|moveTo><w:del><w:r>) must keep its inner deletion —
+                // otherwise the moved-and-deleted text resurfaces as live, accepted
+                // content (meaning change). Insert a <w:del> between the move wrapper
+                // and the run and convert <w:t> to <w:delText>, mirroring ins⊃del.
+                if (nestedTcKind == "del" && newRun.Parent != null)
+                {
+                    var moveParent = newRun.Parent;
+                    var innerDel = new DeletedRun
+                    {
+                        Id = !string.IsNullOrEmpty(nestedTcId) ? nestedTcId : GenerateRevisionId()
+                    };
+                    if (!string.IsNullOrEmpty(nestedTcAuthor)) innerDel.Author = nestedTcAuthor;
+                    if (!string.IsNullOrEmpty(nestedTcDate)
+                        && DateTime.TryParse(nestedTcDate, null, System.Globalization.DateTimeStyles.RoundtripKind, out var mvNdDate))
+                        innerDel.Date = mvNdDate;
+                    foreach (var t in newRun.Elements<Text>().ToList())
+                        t.Parent?.ReplaceChild(new DeletedText(t.Text ?? "") { Space = t.Space }, t);
+                    moveParent.ReplaceChild(innerDel, newRun);
+                    innerDel.AppendChild(newRun);
+                }
             }
         }
 
