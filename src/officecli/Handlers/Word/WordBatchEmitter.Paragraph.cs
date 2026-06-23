@@ -4568,6 +4568,17 @@ public static partial class WordBatchEmitter
             // <w:sdtPr>/<w:sdtEndPr><w:rPr>; a content rPr sits under <w:r>.
             && System.Text.RegularExpressions.Regex.IsMatch(sdtXml, "<w:r[ >].*?<w:rPr"))
             return true;
+        // BUG-DUMP-H80-1: a run-level SDT whose content carries a tracked change
+        // (<w:del>/<w:ins>/<w:moveFrom>/<w:moveTo>) cannot round-trip through the
+        // flat `add sdt text=` path — a del-only content paragraph (no live run)
+        // flattens to an empty run and the deletion is silently dropped. This is
+        // the inline-path counterpart of the block-SDT fix (IsRichBlockSdt in
+        // WordBatchEmitter.Resources.cs); the block fix did not cover this path.
+        if (sdtXml.Contains("<w:del", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:ins", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:moveFrom", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:moveTo", StringComparison.Ordinal))
+            return true;
         return sdtXml.Contains("<w:hyperlink", StringComparison.Ordinal)
             || sdtXml.Contains("<w:fldChar", StringComparison.Ordinal)
             || sdtXml.Contains("w:instrText", StringComparison.Ordinal)
