@@ -473,8 +473,8 @@ public partial class WordHandler
     //     host with no Wingdings font still shows a real box/check, not tofu:
     //       0xA8 / U+F0A8 -> U+2610 empty ballot box
     //       'o'  / U+006F -> U+2610 empty ballot box (Wingdings 'o' slot)
-    //       0xFE / U+F0FE -> U+2612 ballot box with X
-    //       0xFD / U+F0FD -> U+2611 ballot box with check
+    //       0xFE / U+F0FE -> U+2611 ballot box with check
+    //       0xFD / U+F0FD -> U+2612 ballot box with X
     //       0xFC / U+F0FC -> U+2713 check mark
     //       0xFB / U+F0FB -> U+2717 ballot X
     // (Wingdings 0xA7 / U+F0A7 square and 0xB7 / U+F0B7 round bullet already
@@ -489,8 +489,8 @@ public partial class WordHandler
         "\uf02d" => "\u2013", // Symbol 0x2D minus -> en-dash bullet
         "\uf0a8" => "\u2610", // Wingdings 0xA8 -> empty ballot box
         "o" => "\u2610",      // Wingdings 'o' (low-code) -> empty ballot box
-        "\uf0fe" => "\u2612", // Wingdings 0xFE -> ballot box with X
-        "\uf0fd" => "\u2611", // Wingdings 0xFD -> ballot box with check
+        "\uf0fe" => "\u2611", // Wingdings 0xFE -> ballot box with check
+        "\uf0fd" => "\u2612", // Wingdings 0xFD -> ballot box with X
         "\uf0fc" => "\u2713", // Wingdings 0xFC -> check mark
         "\uf0fb" => "\u2717", // Wingdings 0xFB -> ballot X
         _ => lvlText
