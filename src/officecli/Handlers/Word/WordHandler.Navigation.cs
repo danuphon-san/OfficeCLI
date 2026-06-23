@@ -3932,23 +3932,20 @@ public partial class WordHandler
                     if (start != null)
                         node.Format["start"] = start.Value;
                 }
-                // BUG-DUMP-R49-1: <w:numPr><w:ins .../> is a tracked insertion
-                // of the list-numbering assignment (Reviewing pane: "Formatted: List
-                // Paragraph"). Surface as numPrIns.* so the batch emitter can
-                // replay <w:numPr><w:ins> via a raw-set after the paragraph is
-                // created (no first-class Add/Set vocabulary for numPr tracked
-                // changes exists; verbatim is the safest round-trip). Mirrors the
-                // paraMarkIns.* readback pattern for paragraph-mark tracked changes.
-                var numPrIns = numProps.GetFirstChild<Inserted>();
-                if (numPrIns != null)
-                {
-                    if (!string.IsNullOrEmpty(numPrIns.Author?.Value))
-                        node.Format["numPrIns.author"] = numPrIns.Author!.Value!;
-                    if (numPrIns.Date?.Value is DateTime npiDate)
-                        node.Format["numPrIns.date"] = npiDate.ToString("o");
-                    if (numPrIns.Id?.Value is { } npiId)
-                        node.Format["numPrIns.id"] = npiId.ToString();
-                }
+            }
+            else if (numProps != null)
+            {
+                // BUG-DUMP-H77: a direct <w:numPr> with NO <w:numId> child — a bare
+                // list-level override (<w:ilvl> only) or a tracked numbering-insertion
+                // (<w:numPr><w:ins/></w:numPr>, no ilvl/numId). The numId branch above
+                // is skipped, and the style-inheritance fallback would either miss it
+                // or wrongly promote inherited numbering — so the whole numPr was
+                // silently dropped on `add p`. Surface numLevel directly (NO numId, so
+                // no numFmt/listStyle/start lookup and NO numInherited flag); the
+                // numPrIns.* readback below fires for both numId and numId-less numPr.
+                var bareIlvl = numProps.NumberingLevelReference?.Val?.Value;
+                if (bareIlvl.HasValue)
+                    node.Format["numLevel"] = bareIlvl.Value.ToString();
             }
             else
             {
@@ -3974,6 +3971,26 @@ public partial class WordHandler
                     var start = GetStartValue(inhId, inhLvl);
                     if (start != null)
                         node.Format["start"] = start.Value;
+                }
+            }
+            // BUG-DUMP-R49-1 / BUG-DUMP-H77: <w:numPr><w:ins .../> is a tracked
+            // insertion of the list-numbering assignment (Reviewing pane: "Formatted:
+            // List Paragraph"). Surface as numPrIns.* so the batch emitter can replay
+            // <w:numPr><w:ins> after the paragraph is created (no first-class Add/Set
+            // vocabulary for numPr tracked changes; verbatim is the safest round-trip).
+            // Fires for BOTH a numId-bearing numPr AND a numId-less one — a tracked
+            // numbering insertion frequently carries no numId/ilvl at all.
+            if (numProps != null)
+            {
+                var numPrIns = numProps.GetFirstChild<Inserted>();
+                if (numPrIns != null)
+                {
+                    if (!string.IsNullOrEmpty(numPrIns.Author?.Value))
+                        node.Format["numPrIns.author"] = numPrIns.Author!.Value!;
+                    if (numPrIns.Date?.Value is DateTime npiDate)
+                        node.Format["numPrIns.date"] = npiDate.ToString("o");
+                    if (numPrIns.Id?.Value is { } npiId)
+                        node.Format["numPrIns.id"] = npiId.ToString();
                 }
             }
 

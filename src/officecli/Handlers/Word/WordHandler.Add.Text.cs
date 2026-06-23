@@ -1691,8 +1691,12 @@ public partial class WordHandler
             hasNpiNs |= properties.TryGetValue("numPrIns.id", out npiId);
             if (hasNpiNs)
             {
-                var numPr = pProps.NumberingProperties;
-                if (numPr != null && numPr.GetFirstChild<Inserted>() == null)
+                // BUG-DUMP-H77: a tracked numbering-insertion (<w:numPr><w:ins/></w:numPr>)
+                // frequently carries NO numId and NO ilvl, so the numId/numLevel blocks
+                // above never created the numPr. Materialize an empty numPr here so the
+                // <w:ins> marker round-trips (CT_NumPr permits ilvl?, numId?, ins?).
+                var numPr = pProps.NumberingProperties ?? (pProps.NumberingProperties = new NumberingProperties());
+                if (numPr.GetFirstChild<Inserted>() == null)
                 {
                     var author = string.IsNullOrEmpty(npiAuthor) ? "OfficeCLI" : npiAuthor!;
                     DateTime date = !string.IsNullOrEmpty(npiDate)
