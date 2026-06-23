@@ -166,6 +166,25 @@ internal partial class ChartSvgRenderer
         sb.AppendLine($"        <text x=\"{x:0.#}\" y=\"{ay:0.#}\" fill=\"{color}\" font-size=\"{fontSize}\" text-anchor=\"{anchor}\" transform=\"rotate({rot} {x:0.#} {ay:0.#})\">{enc}</text>");
     }
 
+    /// <summary>
+    /// Emit a LEFT (value) axis tick label, honoring a <c:valAx><c:txPr><a:bodyPr rot>
+    /// rotation. The non-rotated path is byte-identical to the legacy raw emit
+    /// (text-anchor=end, dominant-baseline=middle) so unchanged charts are unaffected;
+    /// a non-zero rotation adds a rotate() transform around the label's right-edge
+    /// anchor. Mirrors EmitBottomAxisLabel for the bottom (category) axis.
+    /// </summary>
+    private static void EmitLeftAxisLabel(StringBuilder sb, double x, double y,
+        string color, int fontSize, string label, int? rotationDeg)
+    {
+        var enc = HtmlEncode(label);
+        if (rotationDeg is not int rot || rot == 0)
+        {
+            sb.AppendLine($"        <text x=\"{x:0.#}\" y=\"{y:0.#}\" fill=\"{color}\" font-size=\"{fontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{enc}</text>");
+            return;
+        }
+        sb.AppendLine($"        <text x=\"{x:0.#}\" y=\"{y:0.#}\" fill=\"{color}\" font-size=\"{fontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\" transform=\"rotate({rot} {x:0.#} {y:0.#})\">{enc}</text>");
+    }
+
     public void RenderBarChartSvg(StringBuilder sb, List<(string name, double[] values)> series,
         string[] categories, List<string> colors, int ox, int oy, int pw, int ph,
         bool horizontal, bool stacked = false, bool percentStacked = false,
@@ -842,7 +861,7 @@ internal partial class ChartSvgRenderer
                 // Vertical columns: value axis is VERTICAL on the left (x=ox).
                 if (TickMarkVisible(ValMajorTickMark))
                     EmitVAxisTick(sb, ox, ty, ValMajorTickMark!);
-                sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{valFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+                EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, valFontSize, label, valLabelRotationDeg);
             }
             // Reference-line overlays: vertical bars/columns → horizontal line at value position on the Y (value) axis.
             if (referenceLines != null)
@@ -1103,7 +1122,7 @@ internal partial class ChartSvgRenderer
         string? dataLabelNumFmt = null,
         List<string?>? markerFillColors = null, List<string?>? markerLineColors = null,
         bool showSerName = false, bool showCatName = false, bool showVal = true,
-        int? catLabelRotationDeg = null)
+        int? catLabelRotationDeg = null, int? valLabelRotationDeg = null)
     {
         bool isLog = logBase.HasValue && logBase.Value > 1;
 
@@ -1430,7 +1449,7 @@ internal partial class ChartSvgRenderer
             var ty = MapY(tickVal);
             if (ValAxisVisible && TickMarkVisible(ValMajorTickMark))
                 EmitVAxisTick(sb, ox, ty, ValMajorTickMark!);
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, ValFontPx, label, valLabelRotationDeg);
         }
     }
 
@@ -1780,7 +1799,7 @@ internal partial class ChartSvgRenderer
         double? axisMin = null, double? axisMax = null, double? majorUnit = null, string? valNumFmt = null,
         bool showDataLabels = false, bool showVal = true, bool showSerName = false,
         bool showCatName = false, string? dataLabelNumFmt = null,
-        int? catLabelRotationDeg = null)
+        int? catLabelRotationDeg = null, int? valLabelRotationDeg = null)
     {
         if (series.Count == 0) return;
         var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
@@ -1935,7 +1954,7 @@ internal partial class ChartSvgRenderer
             var ty = oy + ph - (double)ph * t / nTicks;
             if (TickMarkVisible(ValMajorTickMark))
                 EmitVAxisTick(sb, ox, ty, ValMajorTickMark!);
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, ValFontPx, label, valLabelRotationDeg);
         }
 
         // Data labels at each vertex (parity with bar/line/pie). The label TEXT is
@@ -4047,7 +4066,7 @@ internal partial class ChartSvgRenderer
                     info.AxisMin, info.AxisMax, info.MajorUnit, info.ValNumFmt,
                     info.ShowDataLabels, info.ShowDataLabelVal, info.ShowDataLabelSerName,
                     info.ShowDataLabelCatName, info.DataLabelsNumFmt,
-                    info.CatAxisLabelRotationDeg);
+                    info.CatAxisLabelRotationDeg, info.ValAxisLabelRotationDeg);
         }
         else if (chartType == "combo")
         {
@@ -4100,7 +4119,7 @@ internal partial class ChartSvgRenderer
                     info.MarkerFillColors, info.MarkerLineColors,
                     info.ShowDataLabelSerName, info.ShowDataLabelCatName,
                     info.ShowDataLabelVal || info.ShowDataLabelPercent,
-                    info.CatAxisLabelRotationDeg);
+                    info.CatAxisLabelRotationDeg, info.ValAxisLabelRotationDeg);
         }
         else
         {
