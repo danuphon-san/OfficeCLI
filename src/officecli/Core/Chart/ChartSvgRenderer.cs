@@ -3044,7 +3044,17 @@ internal partial class ChartSvgRenderer
 
         // Colors
         var isPieType = info.ChartType.Contains("pie") || info.ChartType.Contains("doughnut");
-        var serElements = chartTypeEl?.Elements().Where(e => e.LocalName == "ser").ToList() ?? [];
+        // Gather ser elements across ALL chart-type groups (in the same document order
+        // ReadAllSeries uses to build info.Series), not just the first group. A combo
+        // chart has a barChart AND a lineChart group; taking only chartTypeEl's (first
+        // group's) ser dropped the line-group series, so they fell through to fallback
+        // colors. Each series' color is then resolved per-series by its parent group's
+        // type (line/scatter → stroke color, others → fill) inside ExtractColors.
+        var serElements = plotArea.Descendants<OpenXmlCompositeElement>()
+            .Where(e => e.LocalName == "ser" && e.Parent != null
+                && (e.Parent.LocalName.Contains("Chart") || e.Parent.LocalName.Contains("chart")))
+            .Cast<OpenXmlElement>()
+            .ToList();
         info.Colors = ExtractColors(serElements, info.Series, isPieType, info.ChartType, themeColors);
         // Per-data-point fill overrides (c:dPt) for non-pie charts. Pie/doughnut
         // already fold dPt into per-point Colors above, so only collect these for
@@ -3663,15 +3673,20 @@ internal partial class ChartSvgRenderer
         }
         else
         {
-            // Detect line/scatter series for stroke color extraction
-            var isLineType = chartType.Contains("line") || chartType == "scatter";
+            // Detect line/scatter series PER-SERIES from the owning chart group, not a
+            // single chart-level flag: a combo chart mixes bar and line groups, so the
+            // line series' color lives in <a:ln><a:solidFill> (stroke) while the bar
+            // series' lives in <a:solidFill> (fill). A single chartType=="combo" flag
+            // matched neither, so line series rendered fallback colors.
             for (int i = 0; i < series.Count; i++)
             {
                 string? rgb = null;
                 if (i < serElements.Count)
                 {
+                    var parentName = (serElements[i].Parent?.LocalName ?? "").ToLowerInvariant();
+                    var serIsLine = parentName.Contains("line") || parentName.Contains("scatter");
                     var spPr = serElements[i].Elements().FirstOrDefault(e => e.LocalName == "spPr");
-                    if (isLineType)
+                    if (serIsLine)
                     {
                         // For line/scatter, prefer stroke color from a:ln > a:solidFill
                         var ln = spPr?.Elements().FirstOrDefault(e => e.LocalName == "ln");
