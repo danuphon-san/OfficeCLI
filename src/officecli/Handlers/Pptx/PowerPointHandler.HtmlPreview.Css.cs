@@ -13,6 +13,13 @@ public partial class PowerPointHandler
 {
     // ==================== CSS Helper: Fill ====================
 
+    // CONSISTENCY(shape-fill-css): this solidFill/gradFill/pattFill → CSS mapping
+    // is ~70% structurally duplicated by WordHandler.ResolveShapeFillCss
+    // (Word/WordHandler.HtmlPreview.Css.cs). They diverge on element access
+    // (SDK-typed GetFirstChild here vs untyped LocalName scan there) and ride
+    // different tint/shade extraction before both delegate to ColorMath. Deferred
+    // Core consolidation (e.g. Core/ShapeFillCss) — do NOT land as a one-handler
+    // special case; unify cross-handler in one pass once the docx fix-storm settles.
     private static string GetShapeFillCss(ShapeProperties? spPr, OpenXmlPart part, Dictionary<string, string> themeColors)
     {
         if (spPr == null) return "";
