@@ -2316,10 +2316,16 @@ public partial class WordHandler
         var tcBorders = tcPr.TableCellBorders;
         if (tcBorders != null)
         {
-            if (!IsBorderNone(tcBorders.TopBorder)) { parts.RemoveAll(p => p.StartsWith("border-top:")); RenderBorderCss(parts, tcBorders.TopBorder, "border-top"); }
-            if (!IsBorderNone(tcBorders.BottomBorder)) { parts.RemoveAll(p => p.StartsWith("border-bottom:")); RenderBorderCss(parts, tcBorders.BottomBorder, "border-bottom"); }
-            if (!IsBorderNone(tcBorders.LeftBorder)) { parts.RemoveAll(p => p.StartsWith("border-left:")); RenderBorderCss(parts, tcBorders.LeftBorder, "border-left"); }
-            if (!IsBorderNone(tcBorders.RightBorder)) { parts.RemoveAll(p => p.StartsWith("border-right:")); RenderBorderCss(parts, tcBorders.RightBorder, "border-right"); }
+            // A PRESENT cell border side always overrides the inherited
+            // table-level border, including when it is an explicit nil/none:
+            // OOXML treats <w:* w:val="nil"/> as "suppress the table border on
+            // this side", not "inherit it". So remove the inherited border-<side>
+            // whenever the side element exists, then paint the cell border only
+            // when it actually has a value. An ABSENT side (null) still inherits.
+            if (tcBorders.TopBorder != null) { parts.RemoveAll(p => p.StartsWith("border-top:")); if (!IsBorderNone(tcBorders.TopBorder)) RenderBorderCss(parts, tcBorders.TopBorder, "border-top"); }
+            if (tcBorders.BottomBorder != null) { parts.RemoveAll(p => p.StartsWith("border-bottom:")); if (!IsBorderNone(tcBorders.BottomBorder)) RenderBorderCss(parts, tcBorders.BottomBorder, "border-bottom"); }
+            if (tcBorders.LeftBorder != null) { parts.RemoveAll(p => p.StartsWith("border-left:")); if (!IsBorderNone(tcBorders.LeftBorder)) RenderBorderCss(parts, tcBorders.LeftBorder, "border-left"); }
+            if (tcBorders.RightBorder != null) { parts.RemoveAll(p => p.StartsWith("border-right:")); if (!IsBorderNone(tcBorders.RightBorder)) RenderBorderCss(parts, tcBorders.RightBorder, "border-right"); }
 
             // Diagonal cell borders (w:tl2br / w:tr2bl) render as an absolutely
             // positioned SVG overlay inside the <td> (HTML has no diagonal
