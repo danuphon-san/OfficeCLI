@@ -1598,9 +1598,22 @@ public partial class WordHandler
                 && !string.Equals(csFont, latinFont, StringComparison.Ordinal))
                 ? $",'{CssSanitize(csFont)}'"
                 : "";
+            // Latin-led run (distinct ascii face, EastAsia kept only as the
+            // CJK-glyph provider): insert the synth-bold-capable generic right
+            // after the Latin face so that when the Latin font isn't installed
+            // (headless/Playwright), the browser reaches the generic — which
+            // synthesizes bold — BEFORE the EastAsia face. EA faces like
+            // "MS PGothic" carry no bold instance AND block synthetic bold, so
+            // when they lead the Latin glyphs they silently neutralize a run's
+            // <w:b/>. The EastAsia font + its CJK fallback chain still trail the
+            // generic, so CJK glyphs (absent from Latin/generic) continue to
+            // resolve to the EA face per CSS per-glyph matching. Pure CJK runs
+            // (no distinct Latin face → empty latinPrefix) keep the old order:
+            // EA leads, generic last — unchanged.
+            var latinLedGeneric = latinPrefix.Length > 0 ? $"{generic}," : "";
             parts.Add(fallback != null
-                ? $"font-family:{latinPrefix}'{CssSanitize(font)}',{fallback}{csSuffix},{generic}"
-                : $"font-family:{latinPrefix}'{CssSanitize(font)}'{csSuffix},{generic}");
+                ? $"font-family:{latinPrefix}{latinLedGeneric}'{CssSanitize(font)}',{fallback}{csSuffix},{generic}"
+                : $"font-family:{latinPrefix}{latinLedGeneric}'{CssSanitize(font)}'{csSuffix},{generic}");
         }
         else if (csFont != null
             && !csFont.StartsWith("+", StringComparison.Ordinal)
@@ -2971,6 +2984,18 @@ public partial class WordHandler
             if (b != null) return b.Val == null || b.Val.Value;
             current = style.BasedOn?.Val?.Value;
         }
+        // No <w:b/> anywhere in the resolved chain → the explicit declarations
+        // don't decide weight. Fall back to Word's built-in style table so a
+        // heading style that ships no <w:b/> still reports its real weight: the
+        // `Title` style renders THIN (Bold=false) but `<h1>`'s browser default
+        // would force it bold unless we report false here. Heading1-4 / Subtitle
+        // (Bold=true in the table, but any <w:b/> above already short-circuited)
+        // stay bold; Heading5-9 / Title report false → caller emits
+        // font-weight:normal. Genuinely-unresolvable styles still return null
+        // (ResolveBuiltInStyleDefaults bails when a chain style is undefined),
+        // deferring to the browser default rather than stomping built-in bold.
+        var builtIn = ResolveBuiltInStyleDefaults(styleId);
+        if (builtIn != null) return builtIn.Bold;
         return null;
     }
 

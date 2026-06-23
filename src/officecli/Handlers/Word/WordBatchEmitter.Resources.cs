@@ -3016,6 +3016,19 @@ public static partial class WordBatchEmitter
             || sdtXml.Contains("<w:moveFrom", StringComparison.Ordinal)
             || sdtXml.Contains("<w:moveTo", StringComparison.Ordinal))
             return true;
+        // BUG-DUMP-H94: an SDT whose content carries a range/anchor marker
+        // (<w:bookmarkStart/End>, <w:commentRangeStart/End> / <w:commentReference>,
+        // <w:permStart/End>) cannot round-trip through the flat `add sdt text=`
+        // path — that path seeds only the text and omits all inner markers, so the
+        // bookmark / comment-range / permission silently vanishes (balanced
+        // start+end drop together, so no marker-imbalance tripwire). None of the
+        // run/rPr/pPr triggers fire for a plain paragraph + a bookmark. Force the
+        // verbatim raw-set path. Same classifier-gap pattern as the tracked-change
+        // trigger above (H79) and the repeatingSection trigger (H84).
+        if (sdtXml.Contains("<w:bookmark", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:comment", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:perm", StringComparison.Ordinal))
+            return true;
         return sdtXml.Contains("<w:hyperlink", StringComparison.Ordinal)
             || sdtXml.Contains("<w:fldChar", StringComparison.Ordinal)
             || sdtXml.Contains("w:instrText", StringComparison.Ordinal)
@@ -3030,6 +3043,16 @@ public static partial class WordBatchEmitter
             || sdtXml.Contains("<w:br", StringComparison.Ordinal)
             || sdtXml.Contains("<w:tab", StringComparison.Ordinal)
             || sdtXml.Contains("<w:cr", StringComparison.Ordinal)
+            // BUG-DUMP-H95: other text-less run-content elements the typed
+            // `add sdt text=` path drops because they produce no <w:t> — a symbol
+            // (<w:sym>), a positional tab (<w:ptab> — distinct from <w:tab>, so the
+            // <w:tab> trigger above does NOT cover it), and the hyphen markers
+            // (<w:noBreakHyphen> turns "co-op" into "coop" when lost; <w:softHyphen>
+            // for completeness). Same text-less-content reason as <w:br>/<w:tab>/<w:cr>.
+            || sdtXml.Contains("<w:sym", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:ptab", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:noBreakHyphen", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:softHyphen", StringComparison.Ordinal)
             // BUG-DUMP-EQUATION-SDT: an equation content control's math content
             // (<m:oMath>/<m:oMathPara>) lives in m: runs, not <w:r>, so the run
             // checks above miss it and the typed path dropped the equation. Treat

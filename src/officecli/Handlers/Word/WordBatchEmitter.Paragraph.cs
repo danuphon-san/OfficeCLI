@@ -4613,6 +4613,15 @@ public static partial class WordBatchEmitter
             || sdtXml.Contains("<w:moveFrom", StringComparison.Ordinal)
             || sdtXml.Contains("<w:moveTo", StringComparison.Ordinal))
             return true;
+        // BUG-DUMP-H94: a run-level SDT whose content carries a range/anchor marker
+        // (<w:bookmarkStart/End>, <w:commentRangeStart/End> / <w:commentReference>,
+        // <w:permStart/End>) loses those markers through the flat `add sdt text=`
+        // path (seeds only text). Inline-path counterpart of the IsRichBlockSdt
+        // fix; force the verbatim raw-set path.
+        if (sdtXml.Contains("<w:bookmark", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:comment", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:perm", StringComparison.Ordinal))
+            return true;
         return sdtXml.Contains("<w:hyperlink", StringComparison.Ordinal)
             || sdtXml.Contains("<w:fldChar", StringComparison.Ordinal)
             || sdtXml.Contains("w:instrText", StringComparison.Ordinal)
@@ -4621,6 +4630,12 @@ public static partial class WordBatchEmitter
             || sdtXml.Contains("<w:br", StringComparison.Ordinal)
             || sdtXml.Contains("<w:tab", StringComparison.Ordinal)
             || sdtXml.Contains("<w:cr", StringComparison.Ordinal)
+            // BUG-DUMP-H95: text-less run-content the typed path drops (produce no
+            // <w:t>) — symbol, positional tab (<w:ptab> ≠ <w:tab>), hyphen markers.
+            || sdtXml.Contains("<w:sym", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:ptab", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:noBreakHyphen", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:softHyphen", StringComparison.Ordinal)
             // BUG-DUMP-EQUATION-SDT: an EQUATION content control (<w:sdtPr><w:equation/>
             // … <w:sdtContent><m:oMathPara>/<m:oMath>) carries its math in m: runs
             // (<m:r>/<m:t>), not <w:r>/<w:t>, so none of the run checks above fire and

@@ -1403,6 +1403,20 @@ internal class WatchServer : IDisposable
 
         if (patches.Count == 0) return null; // no changes
 
+        // A block that contains a mid-block page break (a paragraph with an
+        // inline <w:br type="page"/>) straddles a server page boundary: its
+        // <wb>…<we> span includes the structural
+        // </page-body></page></page-wrapper><div class="page-wrapper">…<page-body>
+        // markup of the next page. The section-count guard above does NOT catch
+        // this — the page (data-section) count is unchanged when you merely edit
+        // such a paragraph. Re-applying that span as a `replace`/`add` payload
+        // injects a whole page-wrapper INSIDE the current page-body, producing a
+        // visible page-nested-in-page. Detect the straddle directly on the patch
+        // payload and fall back to a full refresh.
+        foreach (var p in patches)
+            if (p.Html != null && p.Html.Contains("class=\"page-wrapper\"", StringComparison.Ordinal))
+                return null;
+
         // If more than 60% of blocks changed (and enough blocks to matter), fallback to full refresh
         var totalBlocks = Math.Max(oldBlocks.Count, newBlocks.Count);
         if (totalBlocks >= 5 && patches.Count > totalBlocks * 0.6)
