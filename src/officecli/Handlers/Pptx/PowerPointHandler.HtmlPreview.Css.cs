@@ -2498,26 +2498,39 @@ public partial class PowerPointHandler
         if (preset is "roundRect" or "round1Rect" or "round2SameRect" or "round2DiagRect")
         {
             var minSide = Math.Min(widthEmu, heightEmu);
-            // Default adjustment value is 16667 (= 16.667%)
-            long avVal = 16667;
+            // The round2* presets carry TWO adjust guides: adj1 = first corner pair,
+            // adj2 = second corner pair. Read both like the snip2* branch below;
+            // previously only adj1 was read and the second pair was hardcoded to 0,
+            // so adj2 was ignored and that pair always rendered square.
             var avList = presetGeom?.GetFirstChild<Drawing.AdjustValueList>();
-            var gd = avList?.GetFirstChild<Drawing.ShapeGuide>();
-            if (gd?.Formula?.Value != null && gd.Formula.Value.StartsWith("val "))
+            var gds = avList?.Elements<Drawing.ShapeGuide>().ToList() ?? new List<Drawing.ShapeGuide>();
+            long ReadRadiusAdj(int i, long dflt)
             {
-                if (long.TryParse(gd.Formula.Value.AsSpan(4), out var parsed))
-                    avVal = parsed;
+                if (i < gds.Count && gds[i].Formula?.Value is string f && f.StartsWith("val ")
+                    && long.TryParse(f.AsSpan(4), out var v)) return v;
+                return dflt;
             }
-            var radiusEmu = minSide * avVal / 100000;
-            var radiusPt = Units.EmuToPt(radiusEmu);
-            var r = $"{radiusPt:0.##}pt";
-            if (minSide <= 0) r = "6pt"; // fallback if no dimensions
+            // adj1 defaults to 16.667%; adj2 defaults to 0 (sharp) per the ECMA preset
+            // definition, so a round2* with no adj2 is unchanged from the old output.
+            long avVal = ReadRadiusAdj(0, 16667);
+            long avVal2 = ReadRadiusAdj(1, 0);
+            string Radius(long adj)
+            {
+                if (minSide <= 0) return "6pt"; // fallback if no dimensions
+                return $"{Units.EmuToPt(minSide * adj / 100000):0.##}pt";
+            }
+            var r = Radius(avVal);
+            var r2 = Radius(avVal2);
 
+            // CSS border-radius order: top-left top-right bottom-right bottom-left.
             return preset switch
             {
                 "roundRect" => $"border-radius:{r}",
                 "round1Rect" => $"border-radius:0 {r} 0 0",  // PowerPoint rounds the top-right corner
-                "round2SameRect" => $"border-radius:{r} {r} 0 0",
-                "round2DiagRect" => $"border-radius:{r} 0 {r} 0",
+                // round2SameRect: adj1 = top pair, adj2 = bottom pair.
+                "round2SameRect" => $"border-radius:{r} {r} {r2} {r2}",
+                // round2DiagRect: adj1 = TL+BR diagonal, adj2 = TR+BL diagonal.
+                "round2DiagRect" => $"border-radius:{r} {r2} {r} {r2}",
                 _ => ""
             };
         }
