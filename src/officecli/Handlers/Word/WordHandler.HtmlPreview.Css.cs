@@ -3034,11 +3034,21 @@ public partial class WordHandler
            trailing page-number segment lands at the right edge. */
         p.has-leader-tab, div.has-leader-tab {{ display: flex; align-items: baseline; }}
         /* Three-part Left-tab-Center-tab-Right header/paragraph: the
-           paragraph is a no-wrap flex row and each .atab-band flex-grows to an
-           equal share, text-aligned (left/center/right) per its own tab stop's
-           Val. nowrap keeps all bands on one line (Word never wraps these). */
+           paragraph is a no-wrap flex row and each .atab-band flex-grows,
+           text-aligned (left/center/right) per its own tab stop's Val. nowrap
+           keeps all bands on one line (Word never wraps these).
+           flex-basis is `auto` (band's intrinsic content width), not `0`
+           (forced equal thirds): when every band is short the free space splits
+           ~evenly (grow:1 each) so Center/Right still land mid/right exactly
+           like a three-part header, but a long band (a TOC entry's full title)
+           grows to fit its content and pushes its neighbours rather than being
+           capped to a third. No overflow:hidden / text-overflow:ellipsis — a
+           tab advances the pen to AT LEAST the stop and over-long content
+           simply extends past it; Word never clips at a tab stop. Same
+           "don't clip body text at a tab" principle as the positional-tab
+           min-width path. */
         p.has-aligned-tab, div.has-aligned-tab {{ display: flex; align-items: baseline; flex-wrap: nowrap; }}
-        .atab-band {{ flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+        .atab-band {{ flex: 1 1 auto; min-width: 0; white-space: nowrap; }}
         .ptab-spacer {{ flex: 1; min-width: 1em; }}
         ul, ol {{ padding-left: 2em; margin: 0; }}
         ul {{ list-style-type: disc; }}
