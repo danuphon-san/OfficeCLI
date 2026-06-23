@@ -1206,7 +1206,17 @@ public partial class WordHandler
             // width. Word autofits / keeps the word whole, overflowing slightly.
             // Text-box only — body/table cells keep break-word/anywhere so long
             // content still wraps inside fixed columns.
-            const string txbxWrap = "overflow-wrap:normal;word-break:normal";
+            // bodyPr/@wrap="none" (e.g. a deliberately narrow classification
+            // banner like "IN-CONFIDENCE") tells Word NOT to wrap — it renders a
+            // single line that overflows the small box. Honor it with nowrap +
+            // overflow:visible so the centered line stays whole instead of
+            // breaking at a hyphen ("IN-"/"CONFIDENCE") inside the tiny box.
+            var bodyPrEl = shape.Descendants().FirstOrDefault(e => e.LocalName == "bodyPr");
+            var noWrap = bodyPrEl != null
+                && bodyPrEl.GetAttributes().Any(a => a.LocalName == "wrap" && a.Value == "none");
+            var txbxWrap = noWrap
+                ? "overflow-wrap:normal;word-break:normal;white-space:nowrap;overflow:visible"
+                : "overflow-wrap:normal;word-break:normal";
             var txbxWrapStyle = fontRefColor != null
                 ? $"width:100%;color:{fontRefColor};{txbxWrap}"
                 : $"width:100%;{txbxWrap}";
