@@ -72,6 +72,10 @@ public static partial class WordBatchEmitter
         // by TryEmitFieldRun (routes the field to a verbatim raw-set chain);
         // never replayed as an Add/Set property.
         "_richFieldResult", "_fieldSlicePaths",
+        // BUG-DUMP-H78: internal flag forcing the field-slice raw-set to use the
+        // contiguous sibling-range extractor (captures a <w:del> wrapper inside a
+        // live field result). Consumed by TryEmitFieldRun; never replayed.
+        "_fieldSliceForceRange",
         // BUG-DUMP-R26-7: flag set when a field cached result wraps a hyperlink
         // (external rel) the typed path can't preserve — drives a deterministic
         // warning in TryEmitFieldRun. Never replayed as an Add/Set property.

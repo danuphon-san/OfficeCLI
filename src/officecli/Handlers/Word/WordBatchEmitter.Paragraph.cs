@@ -2220,11 +2220,25 @@ public static partial class WordBatchEmitter
             var sb = new System.Text.StringBuilder();
             bool ok = true;
             var rfSlice = spStr.Split('\n').Where(p => !string.IsNullOrEmpty(p)).ToList();
-            foreach (var p in rfSlice)
+            // BUG-DUMP-H78: a tracked deletion inside the result is a <w:del> sibling
+            // BETWEEN field runs; per-path extraction resolves each path to its inner
+            // <w:r> and strips the <w:del> wrapper. The emitter sets
+            // _fieldSliceForceRange so we take the contiguous sibling-range extraction
+            // (begin..end) directly, capturing the <w:del>/<w:delText> in place.
+            bool forceRange = run.Format.TryGetValue("_fieldSliceForceRange", out var frv)
+                && frv is bool frvB && frvB;
+            if (forceRange && rfSlice.Count > 0)
             {
-                var xml = word.GetElementXml(p);
-                if (string.IsNullOrEmpty(xml)) { ok = false; break; }
-                sb.Append(xml);
+                ok = false; // skip per-path; fall to the range resolve below
+            }
+            else
+            {
+                foreach (var p in rfSlice)
+                {
+                    var xml = word.GetElementXml(p);
+                    if (string.IsNullOrEmpty(xml)) { ok = false; break; }
+                    sb.Append(xml);
+                }
             }
             // BUG-DUMP-R56-NESTEDFORMFIELD: same bookmark-in-slice fragility as
             // the nested-field branch — fall back to a contiguous sibling-range

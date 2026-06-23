@@ -298,6 +298,16 @@ public static partial class WordBatchEmitter
             // rich-result / nested-field cases use, preserving the bookmark in
             // place byte-for-byte.
             bool sawInnerBookmark = false;
+            // BUG-DUMP-H78: a LIVE field whose result span contains a tracked
+            // deletion (<w:del> wrapping a <w:delText> run) cannot round-trip via
+            // the typed `add field` path — that path rebuilds a flat result from
+            // the live text only and drops the <w:del> run as "superseded
+            // BEFORE-deletion text" (correct for a result that was *replaced*, but
+            // wrong here: the deletion is genuine tracked-change content, e.g. a
+            // reviewer renumbering a cross-reference). Flag it so the whole field
+            // slice round-trips verbatim via raw-set (same passthrough as a rich
+            // result / inner bookmark), preserving the <w:del>/<w:delText> in place.
+            bool sawInnerDeletion = false;
             for (int j = i + 1; j < children.Count; j++)
             {
                 var k = children[j];
@@ -370,7 +380,13 @@ public static partial class WordBatchEmitter
                         && k.Format.TryGetValue("revision.type", out var revT)
                         && revT is string revTStr
                         && string.Equals(revTStr, "del", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // BUG-DUMP-H78: don't let the live displayed value absorb the
+                        // deleted text (that produced "2.72.8" garbage), but DO route
+                        // the whole field to the verbatim slice so the <w:del> survives.
+                        sawInnerDeletion = true;
                         continue;
+                    }
                     // Cached display segments after fldChar(separate). Concatenate
                     // their text. At depth>1 the run belongs to the nested
                     // field's cached display and is consumed by its own collapse
@@ -603,7 +619,7 @@ public static partial class WordBatchEmitter
             // BUG-DUMP-R72-SETFIELD-BOOKMARK: an inner bookmark also forces the
             // verbatim slice (same passthrough as a rich result) so the bookmark
             // wrapping the field result survives in place.
-            if ((sawSeparate && ResultRunsAreRich(resultRuns)) || sawInnerBookmark)
+            if ((sawSeparate && ResultRunsAreRich(resultRuns)) || sawInnerBookmark || sawInnerDeletion)
             {
                 var slicePaths = new List<string>();
                 for (int s = i; s <= end; s++)
@@ -615,6 +631,15 @@ public static partial class WordBatchEmitter
                 {
                     synth.Format["_richFieldResult"] = true;
                     synth.Format["_fieldSlicePaths"] = string.Join("\n", slicePaths);
+                    // BUG-DUMP-H78: the per-path slice extractor resolves each run
+                    // path to its inner <w:r>, which STRIPS a surrounding <w:del>
+                    // wrapper (a tracked deletion inside the result is a <w:del>
+                    // sibling between two field runs). Force the contiguous
+                    // sibling-range extraction (begin..end) so the <w:del>/<w:delText>
+                    // structure is captured in document order, not flattened to a
+                    // bare delText run.
+                    if (sawInnerDeletion)
+                        synth.Format["_fieldSliceForceRange"] = true;
                 }
             }
             // BUG-DUMP-R26-7 (PART B): a field cached result that wraps a
