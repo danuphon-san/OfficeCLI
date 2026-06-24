@@ -1368,7 +1368,24 @@ internal partial class ChartSvgRenderer
                     if (showCatName && p >= 0 && p < categories.Length) lparts.Add(categories[p]);
                     if (showVal) lparts.Add(valuePart);
                     var vlabel = string.Join(", ", lparts);
-                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{pts[p].x:0.#}\" y=\"{pts[p].y - 6:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
+                    // Honor <c:dLblPos> for line markers (ctr|l|r|t|b). Default is above
+                    // the point (PowerPoint's line default); previously the y-6 above
+                    // offset was hardcoded, so an explicit dLblPos=b/l/r/ctr was ignored
+                    // (bar/pie already honor DataLabelPos).
+                    double lblX = pts[p].x, lblY = pts[p].y - 6;
+                    var lblAnchor = "middle";
+                    if (HasExplicitDataLabelPos)
+                    {
+                        switch (DataLabelPos)
+                        {
+                            case "b": lblY = pts[p].y + DataLabelFontPx + 4; break;
+                            case "ctr": lblY = pts[p].y + DataLabelFontPx / 3.0; break;
+                            case "l": lblX = pts[p].x - 6; lblY = pts[p].y + DataLabelFontPx / 3.0; lblAnchor = "end"; break;
+                            case "r": lblX = pts[p].x + 6; lblY = pts[p].y + DataLabelFontPx / 3.0; lblAnchor = "start"; break;
+                            default: break; // t / above (legacy)
+                        }
+                    }
+                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lblX:0.#}\" y=\"{lblY:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"{lblAnchor}\">{vlabel}</text>");
                 }
             }
         }
