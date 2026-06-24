@@ -555,13 +555,18 @@ public partial class WordHandler
                             RenderHyperlinkHtml(sb, hyp, para);
                         else if (node is Run typedRun)
                             RenderRunHtml(sb, typedRun, para);
-                        else if (node.LocalName is "sdt" or "smartTag" or "customXml" or "fldSimple"
+                        // "sdtContent" is the <w:sdtContent> wrapper that holds an
+                        // SDT's runs — an inline content control (SdtRun) keeps its
+                        // text there, not as a direct child of <w:sdt>. Recurse into
+                        // it too, else a placeholder/label like a "DATE" content
+                        // control rendered nothing.
+                        else if (node.LocalName is "sdt" or "sdtContent" or "smartTag" or "customXml" or "fldSimple"
                             && node.NamespaceUri == "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
                             RenderWrapperContent(node);
                         else if (node is DocumentFormat.OpenXml.OpenXmlUnknownElement unk
                             && unk.NamespaceUri == "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
                         {
-                            if (unk.LocalName is "smartTag" or "customXml" or "sdt")
+                            if (unk.LocalName is "smartTag" or "customXml" or "sdt" or "sdtContent")
                             {
                                 RenderWrapperContent(unk);
                             }
