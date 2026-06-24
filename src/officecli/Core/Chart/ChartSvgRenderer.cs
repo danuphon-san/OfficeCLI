@@ -3819,8 +3819,8 @@ internal partial class ChartSvgRenderer
                     ?.Elements().FirstOrDefault(e => e.LocalName == "spPr");
                 var dnSpPr = upDownBars.Elements().FirstOrDefault(e => e.LocalName == "downBars")
                     ?.Elements().FirstOrDefault(e => e.LocalName == "spPr");
-                info.UpBarColor = ExtractFillColor(upSpPr) ?? "4CAF50";
-                info.DownBarColor = ExtractFillColor(dnSpPr) ?? "F44336";
+                info.UpBarColor = ExtractFillColor(upSpPr, themeColors) ?? "4CAF50";
+                info.DownBarColor = ExtractFillColor(dnSpPr, themeColors) ?? "F44336";
             }
         }
 
