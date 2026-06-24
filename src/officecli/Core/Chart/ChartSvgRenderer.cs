@@ -3720,7 +3720,9 @@ internal partial class ChartSvgRenderer
                 .LastOrDefault(); // chart-level <c:marker val="1"/> appears after series
             var chartMarkerVal = chartLevelMarker?.GetAttributes()
                 .FirstOrDefault(a => a.LocalName == "val").Value;
-            var chartMarkersOn = chartMarkerVal == "1" || chartMarkerVal == "true";
+            // CT_Boolean defaults to true: a bare <c:marker/> (no val attr) opts every series
+            // into the default marker cycle. The old `== "1"` read it as markers-off.
+            var chartMarkersOn = chartLevelMarker != null && (chartMarkerVal is null or "" or "1" or "true");
             // <c:scatterChart> uses <c:scatterStyle val="..."/> instead of a
             // chart-level <c:marker>. Values containing "marker" (lineMarker /
             // marker / smoothMarker) mean every series gets the default cycle.
