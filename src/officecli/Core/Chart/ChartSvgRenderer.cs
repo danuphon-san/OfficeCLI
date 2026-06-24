@@ -100,6 +100,12 @@ internal partial class ChartSvgRenderer
     // only every Nth category label (PowerPoint keeps all bars/points, only thins
     // the labels). 1 = every label. Synced from ChartInfo.
     public int CatTickLabelSkip { get; set; } = 1;
+    // Per-series set of data-point indices whose data label was explicitly deleted
+    // (<c:dLbl><c:delete/>); synced from ChartInfo. LabelDeleted(series, point) gates
+    // each per-point label emit so PowerPoint's "delete this one label" is honored.
+    public List<HashSet<int>> PerPointDeletedLabels { get; set; } = [];
+    private bool LabelDeleted(int series, int pointIdx)
+        => series >= 0 && series < PerPointDeletedLabels.Count && PerPointDeletedLabels[series].Contains(pointIdx);
     // Length of a major tick mark in px (PowerPoint draws ~4-5px).
     public const int MajorTickLen = 4;
     public string AxisLineColor { get; set; } = "#555";
@@ -520,7 +526,7 @@ internal partial class ChartSvgRenderer
                         if (segW > 0.5)
                             sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{segW:0.#}\" height=\"{barH:0.#}\" fill=\"{BarFill(s, dataIdx)}\" opacity=\"{FillOpacity(s)}\"/>");
                         // Label at segment center — skip if segment narrower than ~2 chars to avoid overflow
-                        if (showDataLabels && segW > DataLabelFontPx * 1.6)
+                        if (showDataLabels && !LabelDeleted(s, dataIdx) && segW > DataLabelFontPx * 1.6)
                         {
                             var vlabel = LabelText(s, dataIdx, rawVal, val);
                             sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + segW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
@@ -543,7 +549,7 @@ internal partial class ChartSvgRenderer
                         // Data label at the bar's end (grouped horizontal bars).
                         // Mirrors the stacked-branch and vertical-column label logic
                         // which previously left non-stacked horizontal bars unlabeled.
-                        if (showDataLabels && barH > DataLabelFontPx)
+                        if (showDataLabels && !LabelDeleted(s, dataIdx) && barH > DataLabelFontPx)
                         {
                             var vlabel = LabelText(s, dataIdx, rawVal, val);
                             // Honor <c:dLblPos>: outEnd places the label just past the
@@ -774,7 +780,7 @@ internal partial class ChartSvgRenderer
                             {
                                 if (barH > 0.5)
                                     sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{BarFill(s, c)}\" opacity=\"{FillOpacity(s)}\"/>");
-                                if (showDataLabels && barH > DataLabelFontPx + 2)
+                                if (showDataLabels && !LabelDeleted(s, c) && barH > DataLabelFontPx + 2)
                                 {
                                     var vlabel = LabelText(s, c, rawVal, rawVal);
                                     sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
@@ -816,7 +822,7 @@ internal partial class ChartSvgRenderer
                             }
                             if (segH > 0.5)
                                 sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{segH:0.#}\" fill=\"{BarFill(s, c)}\" opacity=\"{FillOpacity(s)}\"/>");
-                            if (showDataLabels && segH > DataLabelFontPx + 2)
+                            if (showDataLabels && !LabelDeleted(s, c) && segH > DataLabelFontPx + 2)
                             {
                                 var vlabel = LabelText(s, c, rawVal, val);
                                 sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{by + segH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
@@ -839,7 +845,7 @@ internal partial class ChartSvgRenderer
                         var bh = Math.Abs(valY - plotZeroY);
                         var by = Math.Min(plotZeroY, valY);
                         sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{bh:0.#}\" {BarFillAttrs(s, c, val)} opacity=\"{FillOpacity(s)}\"/>");
-                        if (showDataLabels)
+                        if (showDataLabels && !LabelDeleted(s, c))
                         {
                             var vlabel = LabelText(s, c, rawVal, val);
                             // Honor <c:dLblPos> for vertical columns. The value-end tip
@@ -1457,7 +1463,7 @@ internal partial class ChartSvgRenderer
             for (int p = 0; p < pts.Count; p++)
             {
                 sb.AppendLine($"        {RenderMarkerSvg(shape, pts[p].x, pts[p].y, mSize, mFill ?? lineColor, mStroke ?? lineColor)}");
-                if (showDataLabels)
+                if (showDataLabels && !LabelDeleted(s, p))
                 {
                     // R44: label TEXT uses the original (pre-stack) per-series
                     // value; the label POSITION stays at the stacked vertex
@@ -2123,6 +2129,7 @@ internal partial class ChartSvgRenderer
         for (int s = 0; s < series.Count; s++)
             for (int c = 0; c < catCount; c++)
             {
+                if (LabelDeleted(s, c)) continue;
                 var rawVal = c < series[s].values.Length ? series[s].values[c] : 0;
                 var plotVal = stacked ? cumulative[s, c] : rawVal;
                 // For percentStacked the displayed value is the original datum,
@@ -2980,6 +2987,10 @@ internal partial class ChartSvgRenderer
         // hex. Populated from each series' <c:dPt> children. Empty/absent series
         // dicts fall back to the per-series Colors entry (regression-safe).
         public List<Dictionary<int, string>> PerPointColors { get; set; } = [];
+        // Per-series set of data-point indices whose label was explicitly deleted
+        // (<c:dLbls><c:dLbl><c:idx><c:delete/>); those points show no label even when
+        // the series has showVal on. One set per series, aligned to series order.
+        public List<HashSet<int>> PerPointDeletedLabels { get; set; } = [];
         public string? Title { get; set; }
         public string TitleFontSize { get; set; } = "10pt";
         public bool TitleBold { get; set; } = true;   // chart titles default to bold
@@ -3286,6 +3297,8 @@ internal partial class ChartSvgRenderer
         // the non-pie case where Colors is per-series.
         if (!isPieType)
             info.PerPointColors = ExtractPerPointColors(serElements, themeColors);
+        // Per-point deleted-label overrides (read for all chart types, pie included).
+        info.PerPointDeletedLabels = ExtractDeletedLabels(serElements);
 
         // <c:varyColors val="1"/> on a single-series NON-pie chart colors each data
         // point from the theme accent palette (PowerPoint "vary colors by point") —
@@ -4034,6 +4047,32 @@ internal partial class ChartSvgRenderer
         return result;
     }
 
+    /// <summary>Per-series set of data-point indices whose data label was explicitly
+    /// deleted (&lt;c:dLbls&gt;&lt;c:dLbl&gt;&lt;c:idx&gt;&lt;c:delete/&gt;). PowerPoint hides
+    /// just those points' labels while keeping the rest of the series' labels.</summary>
+    private static List<HashSet<int>> ExtractDeletedLabels(List<OpenXmlElement> serElements)
+    {
+        var result = new List<HashSet<int>>();
+        foreach (var ser in serElements)
+        {
+            var set = new HashSet<int>();
+            var dLbls = ser.Elements().FirstOrDefault(e => e.LocalName == "dLbls");
+            if (dLbls != null)
+                foreach (var dLbl in dLbls.Elements().Where(e => e.LocalName == "dLbl"))
+                {
+                    var del = dLbl.Elements().FirstOrDefault(e => e.LocalName == "delete");
+                    if (del == null) continue;
+                    var dv = del.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+                    if (dv is not (null or "" or "1" or "true")) continue; // CT_Boolean default true
+                    var idxStr = dLbl.Elements().FirstOrDefault(e => e.LocalName == "idx")
+                        ?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+                    if (int.TryParse(idxStr, out var idx)) set.Add(idx);
+                }
+            result.Add(set);
+        }
+        return result;
+    }
+
     /// <summary>Extract per-series <c:invertIfNegative>. PowerPoint's effective
     /// default is TRUE (negative bars render hollow) when the element is absent;
     /// FALSE only when explicitly val="0". Returns one bool per series, aligned
@@ -4333,6 +4372,7 @@ internal partial class ChartSvgRenderer
         ValMajorTickMark = info.ValMajorTickMark;
         CatMajorTickMark = info.CatMajorTickMark;
         CatTickLabelSkip = info.CatTickLabelSkip;
+        PerPointDeletedLabels = info.PerPointDeletedLabels;
         if (info.AxisLineColor != null) AxisLineColor = CssHexColor(info.AxisLineColor);
         DataLabelFontPx = info.DataLabelFontPx;
         DataLabelPos = info.DataLabelPos;
