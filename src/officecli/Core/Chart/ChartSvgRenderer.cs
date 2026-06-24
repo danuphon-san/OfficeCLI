@@ -3219,7 +3219,12 @@ internal partial class ChartSvgRenderer
                 && (e.Parent.LocalName.Contains("Chart") || e.Parent.LocalName.Contains("chart")))
             .Cast<OpenXmlElement>()
             .ToList();
-        info.Colors = ExtractColors(serElements, info.Series, isPieType, info.ChartType, themeColors);
+        // Pie/doughnut varyColors: default true (vary by point) when the element is
+        // absent; explicit val="0"/"false" makes the pie monochrome (series color).
+        var pieVcEl = isPieType ? chartTypeEl?.Elements().FirstOrDefault(e => e.LocalName == "varyColors") : null;
+        var pieVcVal = pieVcEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+        var pieVaryColors = !(pieVcVal is "0" or "false");
+        info.Colors = ExtractColors(serElements, info.Series, isPieType, info.ChartType, themeColors, pieVaryColors);
         // Per-data-point fill overrides (c:dPt) for non-pie charts. Pie/doughnut
         // already fold dPt into per-point Colors above, so only collect these for
         // the non-pie case where Colors is per-series.
@@ -3863,16 +3868,27 @@ internal partial class ChartSvgRenderer
 
     /// <summary>Extract series colors (per-point for pie/doughnut, stroke for line/scatter, fill for others).</summary>
     private static List<string> ExtractColors(List<OpenXmlElement> serElements, List<(string name, double[] values)> series,
-        bool isPieType, string chartType, Dictionary<string, string>? themeColors = null)
+        bool isPieType, string chartType, Dictionary<string, string>? themeColors = null, bool varyColors = true)
     {
         var colors = new List<string>();
 
         if (isPieType && serElements.Count > 0)
         {
-            // Pie/doughnut: colors are per data point (dPt), not per series
+            // Pie/doughnut: colors are per data point (dPt), not per series.
             var ser = serElements[0];
             var dPts = ser.Elements().Where(e => e.LocalName == "dPt").ToList();
             var catCount = series.FirstOrDefault().values?.Length ?? 0;
+            // <c:varyColors val="0"/>: PowerPoint colors every non-overridden slice in
+            // the SINGLE series color (monochrome pie) instead of cycling the accent
+            // palette. Default (absent or val="1") varies by point. Explicit dPt fills
+            // still win in both modes.
+            string? serColorUniform = null;
+            if (!varyColors)
+            {
+                var serSpPr = ser.Elements().FirstOrDefault(e => e.LocalName == "spPr");
+                var serRgb = ExtractFillColor(serSpPr, themeColors);
+                serColorUniform = serRgb != null ? $"#{serRgb}" : FallbackColors[0];
+            }
             for (int i = 0; i < catCount; i++)
             {
                 var dPt = dPts.FirstOrDefault(d =>
@@ -3882,7 +3898,8 @@ internal partial class ChartSvgRenderer
                     return idxEl.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value == i.ToString();
                 });
                 var rgb = ExtractFillColor(dPt?.Elements().FirstOrDefault(e => e.LocalName == "spPr"), themeColors);
-                colors.Add(rgb != null ? $"#{rgb}" : FallbackColors[i % FallbackColors.Length]);
+                colors.Add(rgb != null ? $"#{rgb}"
+                    : serColorUniform ?? FallbackColors[i % FallbackColors.Length]);
             }
         }
         else
