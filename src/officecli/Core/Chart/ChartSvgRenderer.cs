@@ -2635,6 +2635,18 @@ internal partial class ChartSvgRenderer
 
         var catCount = Math.Max(categories.Length, seriesList.Max(s => s.values.Length));
 
+        // Primary value-axis horizontal gridlines (<c:valAx><c:majorGridlines/>). The
+        // bar/line renderers draw these but the combo path never did, so a combo chart
+        // rendered with a blank plot area (PowerPoint shows the major gridlines).
+        // Positions match the primary Y-axis labels below; drawn before the series so
+        // they sit behind. Gated on ShowValGridlines (synced from info.ValMajorGridlines).
+        if (ShowValGridlines)
+            for (int t = 0; t <= AxisTickCount; t++)
+            {
+                var gy = oy + ph - (double)ph * t / AxisTickCount;
+                sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"{GridlineWidthPx:0.##}\"{ValGridDashAttr}/>");
+            }
+
         // Axes
         sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
         sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy + ph}\" x2=\"{ox + pw}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
