@@ -37,6 +37,8 @@ public static class ModernFunctionQualifier
         // are bare).
         "IMCOSH", "IMCOT", "IMCSC", "IMCSCH", "IMSEC", "IMSECH", "IMSINH", "IMTAN",
         "BITAND", "BITOR", "BITXOR", "BITLSHIFT", "BITRSHIFT",
+        // Financial functions added in Excel 2013 (other financials are bare).
+        "PDURATION", "RRI",
         "TAKE", "DROP",
         "CHOOSECOLS", "CHOOSEROWS",
         "ARRAYTOTEXT", "VALUETOTEXT",

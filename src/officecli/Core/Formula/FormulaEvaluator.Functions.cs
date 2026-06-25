@@ -191,6 +191,13 @@ internal partial class FormulaEvaluator
             "SLN" => args.Count >= 3 ? FR((num(0) - num(1)) / num(2)) : null,
             "SYD" => EvalSyd(args), "DB" => EvalDb(args), "DDB" => EvalDdb(args),
             "RATE" => EvalRate(args), "IRR" => EvalIrr(args), // via shared root solver
+            "XNPV" => EvalXnpv(args), "XIRR" => EvalXirr(args), "MIRR" => EvalMirr(args),
+            "CUMIPMT" => EvalCumulative(args, principal: false), "CUMPRINC" => EvalCumulative(args, principal: true),
+            "FVSCHEDULE" => EvalFvSchedule(args),
+            "PDURATION" => EvalPduration(args), "RRI" => EvalRri(args),
+            "EFFECT" => EvalEffect(args), "NOMINAL" => EvalNominal(args),
+            "DOLLARDE" => EvalDollar(args, toDecimal: true), "DOLLARFR" => EvalDollar(args, toDecimal: false),
+            "ISPMT" => EvalIspmt(args),
 
             // ===== Database (Dxxx) — aggregate a table column over criteria =====
             "DSUM" => EvalDatabase(args, DbAgg.Sum), "DCOUNT" => EvalDatabase(args, DbAgg.Count),
@@ -1244,14 +1251,24 @@ internal partial class FormulaEvaluator
         double nper = args[2] is FormulaResult r3 ? r3.AsNumber() : 0, pv = args[3] is FormulaResult r4 ? r4.AsNumber() : 0;
         if (rate == 0) return FR(0);
         var pmt = rate * (pv * Math.Pow(1 + rate, nper)) / (Math.Pow(1 + rate, nper) - 1);
-        var fvBefore = pv * Math.Pow(1 + rate, per - 1) + pmt * (Math.Pow(1 + rate, per - 1) - 1) / rate;
-        return FR(-(fvBefore * rate));
+        // Remaining balance before this period = principal grown by interest LESS
+        // the payments already made. The payment term must be subtracted; adding
+        // it (the old bug) only happened to be correct at per=1 where it is zero.
+        var balanceBefore = pv * Math.Pow(1 + rate, per - 1) - pmt * (Math.Pow(1 + rate, per - 1) - 1) / rate;
+        return FR(-(balanceBefore * rate));
     }
 
     private static FormulaResult? EvalPpmt(List<object> args)
     {
         if (args.Count < 4) return null;
-        var pmt = EvalPmt(args)?.AsNumber() ?? 0;
+        // PPMT(rate, per, nper, pv, ...) = PMT - IPMT, but PMT's signature is
+        // (rate, nper, pv, ...) — drop the `per` argument when delegating to PMT
+        // (the old code passed PPMT's args straight through, so PMT read `per`
+        // as nper).
+        var pmtArgs = new List<object> { args[0], args[2], args[3] };
+        if (args.Count > 4) pmtArgs.Add(args[4]);
+        if (args.Count > 5) pmtArgs.Add(args[5]);
+        var pmt = EvalPmt(pmtArgs)?.AsNumber() ?? 0;
         var ipmt = EvalIpmt(args)?.AsNumber() ?? 0;
         return FR(pmt - ipmt);
     }
@@ -1323,6 +1340,150 @@ internal partial class FormulaEvaluator
         }
         var root = SolveRoot(F, guess);
         return root.HasValue ? FR(root.Value) : FormulaResult.Error("#NUM!");
+    }
+
+    // XNPV(rate, values, dates) — NPV over actual/365 day fractions from date[0].
+    private static FormulaResult? EvalXnpv(List<object> args)
+    {
+        if (args.Count < 3) return null;
+        double rate = args[0] is FormulaResult r ? r.AsNumber() : 0;
+        var values = AsDoubles(args[1]); var dates = AsDoubles(args[2]);
+        if (values == null || dates == null || values.Length == 0 || values.Length != dates.Length)
+            return FormulaResult.Error("#NUM!");
+        double d0 = dates[0], npv = 0;
+        for (int i = 0; i < values.Length; i++)
+            npv += values[i] / Math.Pow(1 + rate, (dates[i] - d0) / 365.0);
+        return FR(npv);
+    }
+
+    // XIRR(values, dates, [guess]) — rate making XNPV zero, via the shared solver.
+    private static FormulaResult? EvalXirr(List<object> args)
+    {
+        if (args.Count < 2) return null;
+        var values = AsDoubles(args[0]); var dates = AsDoubles(args[1]);
+        if (values == null || dates == null || values.Length < 2 || values.Length != dates.Length)
+            return FormulaResult.Error("#NUM!");
+        double guess = args.Count > 2 && args[2] is FormulaResult g ? g.AsNumber() : 0.1;
+        double d0 = dates[0];
+        double F(double rate)
+        {
+            double npv = 0;
+            for (int i = 0; i < values.Length; i++) npv += values[i] / Math.Pow(1 + rate, (dates[i] - d0) / 365.0);
+            return npv;
+        }
+        var root = SolveRoot(F, guess);
+        return root.HasValue ? FR(root.Value) : FormulaResult.Error("#NUM!");
+    }
+
+    // MIRR(values, finance_rate, reinvest_rate) — modified IRR.
+    private static FormulaResult? EvalMirr(List<object> args)
+    {
+        if (args.Count < 3) return null;
+        var cf = AsDoubles(args[0]);
+        if (cf == null || cf.Length < 2) return FormulaResult.Error("#DIV/0!");
+        double fin = args[1] is FormulaResult f ? f.AsNumber() : 0, rei = args[2] is FormulaResult r ? r.AsNumber() : 0;
+        int n = cf.Length;
+        double pvNeg = 0, fvPos = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (cf[i] < 0) pvNeg += cf[i] / Math.Pow(1 + fin, i);
+            else fvPos += cf[i] * Math.Pow(1 + rei, n - 1 - i);
+        }
+        if (pvNeg == 0 || fvPos == 0) return FormulaResult.Error("#DIV/0!");
+        return FR(Math.Pow(-fvPos / pvNeg, 1.0 / (n - 1)) - 1);
+    }
+
+    // CUMIPMT / CUMPRINC(rate, nper, pv, start_period, end_period, type) — sum of
+    // the per-period interest (or principal) over [start, end], reusing IPMT/PPMT.
+    private static FormulaResult? EvalCumulative(List<object> args, bool principal)
+    {
+        if (args.Count < 6) return null;
+        double rate = args[0] is FormulaResult r ? r.AsNumber() : 0, nper = args[1] is FormulaResult r2 ? r2.AsNumber() : 0;
+        double pv = args[2] is FormulaResult r3 ? r3.AsNumber() : 0;
+        int start = args[3] is FormulaResult r4 ? (int)r4.AsNumber() : 0, end = args[4] is FormulaResult r5 ? (int)r5.AsNumber() : 0;
+        double type = args[5] is FormulaResult r6 ? r6.AsNumber() : 0;
+        if (rate <= 0 || nper <= 0 || pv <= 0 || start < 1 || end < start || end > nper) return FormulaResult.Error("#NUM!");
+        double total = 0;
+        for (int per = start; per <= end; per++)
+        {
+            var perArgs = new List<object> { FR(rate), FR(per), FR(nper), FR(pv), FR(0), FR(type) };
+            var v = principal ? EvalPpmt(perArgs) : EvalIpmt(perArgs);
+            total += v?.AsNumber() ?? 0;
+        }
+        return FR(total);
+    }
+
+    // FVSCHEDULE(principal, schedule) — compound the principal by each rate.
+    private static FormulaResult? EvalFvSchedule(List<object> args)
+    {
+        if (args.Count < 2) return null;
+        double p = args[0] is FormulaResult r ? r.AsNumber() : 0;
+        var rates = AsDoubles(args[1]);
+        if (rates == null) { if (args[1] is FormulaResult fr) rates = [fr.AsNumber()]; else return null; }
+        foreach (var rate in rates) p *= 1 + rate;
+        return FR(p);
+    }
+
+    // PDURATION(rate, pv, fv) — periods required to reach fv.
+    private static FormulaResult? EvalPduration(List<object> args)
+    {
+        if (args.Count < 3) return null;
+        double rate = args[0] is FormulaResult r ? r.AsNumber() : 0, pv = args[1] is FormulaResult r2 ? r2.AsNumber() : 0, fv = args[2] is FormulaResult r3 ? r3.AsNumber() : 0;
+        if (rate <= 0 || pv <= 0 || fv <= 0) return FormulaResult.Error("#NUM!");
+        return FR((Math.Log(fv) - Math.Log(pv)) / Math.Log(1 + rate));
+    }
+
+    // RRI(nper, pv, fv) — equivalent periodic interest rate.
+    private static FormulaResult? EvalRri(List<object> args)
+    {
+        if (args.Count < 3) return null;
+        double nper = args[0] is FormulaResult r ? r.AsNumber() : 0, pv = args[1] is FormulaResult r2 ? r2.AsNumber() : 0, fv = args[2] is FormulaResult r3 ? r3.AsNumber() : 0;
+        if (nper <= 0 || pv <= 0) return FormulaResult.Error("#NUM!");
+        return FR(Math.Pow(fv / pv, 1.0 / nper) - 1);
+    }
+
+    // EFFECT(nominal_rate, npery) — effective annual interest rate.
+    private static FormulaResult? EvalEffect(List<object> args)
+    {
+        if (args.Count < 2) return null;
+        double nom = args[0] is FormulaResult r ? r.AsNumber() : 0; int npery = args[1] is FormulaResult r2 ? (int)r2.AsNumber() : 0;
+        if (nom <= 0 || npery < 1) return FormulaResult.Error("#NUM!");
+        return FR(Math.Pow(1 + nom / npery, npery) - 1);
+    }
+
+    // NOMINAL(effect_rate, npery) — nominal annual interest rate.
+    private static FormulaResult? EvalNominal(List<object> args)
+    {
+        if (args.Count < 2) return null;
+        double eff = args[0] is FormulaResult r ? r.AsNumber() : 0; int npery = args[1] is FormulaResult r2 ? (int)r2.AsNumber() : 0;
+        if (eff <= 0 || npery < 1) return FormulaResult.Error("#NUM!");
+        return FR(npery * (Math.Pow(1 + eff, 1.0 / npery) - 1));
+    }
+
+    // DOLLARDE / DOLLARFR — convert between a price quoted as a fraction and its
+    // decimal form. The fractional part is read against the fraction's digit width.
+    private static FormulaResult? EvalDollar(List<object> args, bool toDecimal)
+    {
+        if (args.Count < 2) return null;
+        double dollar = args[0] is FormulaResult r ? r.AsNumber() : 0; int fraction = args[1] is FormulaResult r2 ? (int)r2.AsNumber() : 0;
+        if (fraction < 0) return FormulaResult.Error("#NUM!");
+        if (fraction == 0) return toDecimal ? FormulaResult.Error("#DIV/0!") : FR(dollar);
+        double intPart = Math.Truncate(dollar);
+        double frac = dollar - intPart;
+        double pow = Math.Pow(10, Math.Ceiling(Math.Log10(fraction)));
+        return toDecimal
+            ? FR(intPart + frac * pow / fraction)             // fractional → decimal
+            : FR(intPart + frac * fraction / pow);            // decimal → fractional
+    }
+
+    // ISPMT(rate, per, nper, pv) — interest for a period with even principal pay-down.
+    private static FormulaResult? EvalIspmt(List<object> args)
+    {
+        if (args.Count < 4) return null;
+        double rate = args[0] is FormulaResult r ? r.AsNumber() : 0, per = args[1] is FormulaResult r2 ? r2.AsNumber() : 0;
+        double nper = args[2] is FormulaResult r3 ? r3.AsNumber() : 0, pv = args[3] is FormulaResult r4 ? r4.AsNumber() : 0;
+        if (nper == 0) return FormulaResult.Error("#DIV/0!");
+        return FR(pv * rate * (per / nper - 1));
     }
 
     // ==================== Database (Dxxx) ====================
