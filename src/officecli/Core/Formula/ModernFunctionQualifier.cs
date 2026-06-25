@@ -39,6 +39,13 @@ public static class ModernFunctionQualifier
         "BITAND", "BITOR", "BITXOR", "BITLSHIFT", "BITRSHIFT",
         // Financial functions added in Excel 2013 (other financials are bare).
         "PDURATION", "RRI",
+        // Statistical / engineering distribution functions added in Excel 2010+
+        // (legacy NORMDIST/GAMMADIST/CHIDIST/POISSON/ERF/… are bare).
+        "NORM.DIST", "NORM.S.DIST", "NORM.INV", "NORM.S.INV",
+        "GAMMA", "GAMMALN.PRECISE", "GAMMA.DIST", "GAMMA.INV",
+        "CHISQ.DIST", "CHISQ.DIST.RT", "CHISQ.INV", "CHISQ.INV.RT",
+        "POISSON.DIST", "EXPON.DIST", "CONFIDENCE.NORM",
+        "ERF.PRECISE", "ERFC.PRECISE", "GAUSS", "PHI",
         "TAKE", "DROP",
         "CHOOSECOLS", "CHOOSEROWS",
         "ARRAYTOTEXT", "VALUETOTEXT",
