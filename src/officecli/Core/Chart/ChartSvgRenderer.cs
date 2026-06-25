@@ -3861,6 +3861,12 @@ internal partial class ChartSvgRenderer
             var scatterStyleVal = scatterStyleEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
             if (scatterStyleVal != null && scatterStyleVal.Contains("arker", StringComparison.OrdinalIgnoreCase))
                 chartMarkersOn = true;
+            // Scatter charts carry their smooth-curve signal in <c:scatterStyle>
+            // ("smooth"/"smoothMarker"), not in <c:smooth>. PowerPoint draws Bézier
+            // curves for these; the renderer previously read only <c:smooth> and so
+            // drew straight segments. Propagate it into the per-series smooth default.
+            if (scatterStyleVal != null && scatterStyleVal.StartsWith("smooth", StringComparison.OrdinalIgnoreCase))
+                chartIsSmooth = true;
             // R16c: scatterStyle exactly "marker" (or "none") = markers without a
             // connecting line. "lineMarker"/"smoothMarker"/"line"/"smooth" keep the
             // line. Suppress the polyline in that case.
