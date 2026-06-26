@@ -65,11 +65,15 @@ jobs:
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "Publishing ${{ matrix.package }}@$V"
 
-      - name: Set package name and version
+      - name: Set package name, version, and brand the README for this scope
         working-directory: npm
         run: |
           npm pkg set name='${{ matrix.package }}'
           npm pkg set version='${{ steps.ver.outputs.version }}'
+          # The README's install/npx commands are written for @officecli/officecli;
+          # rewrite them to this package's name so the @aionui page tells users to
+          # install @aionui/officecli, not the other scope. No-op for @officecli.
+          sed -i "s|@officecli/officecli|${{ matrix.package }}|g" README.md
 
       - name: Publish to npm
         working-directory: npm
