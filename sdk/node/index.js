@@ -55,6 +55,10 @@ const IS_MAC = process.platform === 'darwin';
 // out, resend" path that could double-apply.
 const BUSY_CONNECT_TIMEOUT_MS = 30000; // = ResidentBusyConnectTimeoutMs
 const BUSY_MAX_RETRIES = 3;            // = ResidentBusyMaxRetries
+// = CommandBuilder's DefaultOpenIdleSeconds. open() upgrades a reused resident
+// (which create() may have auto-started with a short 60s timeout) to the 12min
+// interactive window, so a long session over an SDK handle isn't cut short.
+const OPEN_IDLE_SECONDS = 12 * 60;
 
 // Installer scripts: the d.officecli.ai mirror is primary; GitHub raw is only a
 // fallback (same order as install.sh / install-binary.js). The mirror is
@@ -509,6 +513,17 @@ class Document {
     return parseEnvelope(await this._cmd('batch', args, undefined, true, timeoutMs));
   }
 
+  // Best-effort idle-timeout upgrade over the always-responsive ping pipe.
+  // Mirrors ResidentClient.SendSetIdleTimeout: a failure is non-fatal — the
+  // resident keeps its original idle schedule. Single-shot (maxRetries=0).
+  async _setIdleTimeout(seconds) {
+    try {
+      await rpc(this._ping, { Command: '__set-idle-timeout__', Args: { seconds: String(seconds) } }, this.timeout, 0);
+    } catch (e) {
+      if (!(e instanceof OfficeCliError)) throw e;
+    }
+  }
+
   /** True iff a resident is alive AND serving this file (probes the -ping pipe). */
   async alive(timeoutMs = 1000) {
     return serves(this._ping, this.path, timeoutMs);
@@ -572,6 +587,11 @@ async function open(filePath, { binary = 'officecli', timeoutMs = 30000, autoIns
   const bin = await ensureCliBinary(binary, autoInstall);
   const doc = new Document(filePath, bin, timeoutMs);
   await doc._start();
+  // Mirror CLI `open`: when reusing a resident create() auto-started with a
+  // short 60s timeout, upgrade it to the 12min interactive window. (If _start
+  // spawned `officecli open` instead, that path already set 12min; re-sending
+  // is idempotent.)
+  await doc._setIdleTimeout(OPEN_IDLE_SECONDS);
   return doc;
 }
 

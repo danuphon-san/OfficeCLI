@@ -58,6 +58,11 @@ import subprocess
 # "read timed out, resend" path that could double-apply.
 _BUSY_CONNECT_TIMEOUT = 30.0   # = ResidentBusyConnectTimeoutMs (30000)
 _BUSY_MAX_RETRIES = 3          # = ResidentBusyMaxRetries
+# = CommandBuilder's DefaultOpenIdleSeconds. `open` upgrades a reused resident
+# (which `create` may have auto-started with a short 60s timeout) to the 12min
+# interactive window, so a long editing session over an SDK handle isn't cut
+# short by the create-time timeout.
+_OPEN_IDLE_SECONDS = 12 * 60
 
 _IS_WIN = sys.platform.startswith("win")
 _IS_MAC = sys.platform == "darwin"
@@ -449,6 +454,20 @@ class Document:
                 "force": force, "stopOnError": stop_on_error}
         return _parse(self._cmd("batch", args, timeout=timeout))
 
+    def _set_idle_timeout(self, seconds):
+        # Best-effort idle-timeout upgrade, served on the always-responsive ping
+        # pipe (bypasses _commandLock, answers even while the main pipe is busy).
+        # Mirrors ResidentClient.SendSetIdleTimeout: a failure is non-fatal — the
+        # resident is still usable, it just keeps its original idle schedule.
+        # Single-shot (max_retries=0): don't sit through the busy backoff for a
+        # best-effort nicety.
+        try:
+            _rpc(self._ping, {"Command": "__set-idle-timeout__",
+                              "Args": {"seconds": str(seconds)}},
+                 self.timeout, max_retries=0)
+        except OfficeCliError:
+            pass
+
     def alive(self, timeout=1.0):
         """Return True iff a resident is alive AND serving this file. Probes the
         always-responsive `-ping` pipe (officecli's TryConnect), which answers even
@@ -537,7 +556,13 @@ def open(path, binary="officecli", timeout=30.0, auto_install=True):
     officecli's TrySend; the reply read itself blocks (a busy resident answers in
     turn). Override per call via send(..., timeout=...) / batch(..., timeout=...);
     use alive() to probe liveness."""
-    return Document(path, binary=_ensure_binary(binary, auto_install), timeout=timeout)
+    doc = Document(path, binary=_ensure_binary(binary, auto_install), timeout=timeout)
+    # Mirror CLI `open`: when reusing a resident `create` auto-started with a
+    # short 60s timeout, upgrade it to the 12min interactive window. (If _start
+    # spawned `officecli open` instead, that path already set 12min; re-sending
+    # is idempotent.)
+    doc._set_idle_timeout(_OPEN_IDLE_SECONDS)
+    return doc
 
 
 def install():
