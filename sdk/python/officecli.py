@@ -156,7 +156,16 @@ def _send_win(pipe_path, line, connect_timeout):
         try:
             f = _builtin_open(pipe_path, "r+b", buffering=0)   # not the module open()
             break
+        except FileNotFoundError:
+            # No pipe == no resident. Fail FAST, like _send_unix's connect()
+            # raising ENOENT immediately — do NOT spin to the deadline. This is
+            # what makes a max_retries=0 probe (_serves/alive) fail fast instead
+            # of sitting through the whole connect_timeout when nothing is there.
+            raise
         except OSError:
+            # The pipe exists but the open lost the race (e.g. ERROR_PIPE_BUSY:
+            # every server instance is mid-handoff). The resident IS alive, so
+            # retry until the connect deadline.
             if time.time() > deadline:
                 raise
             time.sleep(0.02)
