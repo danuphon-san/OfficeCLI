@@ -488,6 +488,16 @@ public partial class ExcelHandler
                     if (col.OutlineLevel?.HasValue == true && col.OutlineLevel.Value > 0)
                         colNode.Format["outlineLevel"] = (int)col.OutlineLevel.Value;
                     if (col.Collapsed?.Value == true) colNode.Format["collapsed"] = true;
+                    // Resolve a column-level number format (col @s -> cellXf ->
+                    // numFmt) so `set col[A] --prop numFmt=...` round-trips as the
+                    // canonical `numberformat` key, mirroring the cell reader.
+                    if (col.Style?.Value is uint colStyleIdx && colStyleIdx != 0)
+                    {
+                        var (colNumFmtId, colFmtCode) = ExcelDataFormatter.GetCellFormat(
+                            new Cell { StyleIndex = colStyleIdx }, _doc.WorkbookPart);
+                        if (colNumFmtId > 0 && !string.IsNullOrEmpty(colFmtCode))
+                            colNode.Format["numberformat"] = colFmtCode;
+                    }
                     // Long-tail CT_Col attributes (style, bestFit, phonetic, ...).
                     // Symmetric with column Set's case-preserving SetAttribute fallback.
                     FillUnknownAttrProps(col, colNode, "", CuratedColAttrs);
@@ -1920,10 +1930,31 @@ public partial class ExcelHandler
             }
         }
 
-        // Resolve font color
+        // Resolve font props. The dxf font carries whatever BuildFormulaCfFont
+        // wrote (bold/italic/strike/underline/size/name/color); surface them all
+        // so `get`/`query` round-trips what `add`/`set` accepts — otherwise an
+        // applied `font.bold` reads back as nothing (it IS in the XML).
         var font = dxf.GetFirstChild<Font>();
         if (font != null)
         {
+            var bold = font.GetFirstChild<Bold>();
+            if (bold != null && (bold.Val == null || bold.Val.Value))
+                cfNode.Format["font.bold"] = true;
+            var italic = font.GetFirstChild<Italic>();
+            if (italic != null && (italic.Val == null || italic.Val.Value))
+                cfNode.Format["font.italic"] = true;
+            var strike = font.GetFirstChild<Strike>();
+            if (strike != null && (strike.Val == null || strike.Val.Value))
+                cfNode.Format["font.strike"] = true;
+            var underline = font.GetFirstChild<Underline>();
+            if (underline != null)
+                cfNode.Format["font.underline"] = underline.Val?.InnerText ?? "single";
+            var fontSize = font.GetFirstChild<FontSize>();
+            if (fontSize?.Val?.Value != null)
+                cfNode.Format["font.size"] = $"{fontSize.Val.Value:0.##}pt";
+            var fontName = font.GetFirstChild<FontName>();
+            if (!string.IsNullOrEmpty(fontName?.Val?.Value))
+                cfNode.Format["font.name"] = fontName.Val.Value;
             var fontColor = font.GetFirstChild<DocumentFormat.OpenXml.Spreadsheet.Color>();
             if (fontColor?.Rgb?.Value != null)
                 cfNode.Format["font.color"] = ParseHelpers.FormatHexColor(fontColor.Rgb.Value);

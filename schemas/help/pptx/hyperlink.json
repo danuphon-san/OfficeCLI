@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "pptx",
   "element": "hyperlink",
+  "elementAliases": ["hlink"],
   "parent": "shape",
   "operations": {
     "add": true,

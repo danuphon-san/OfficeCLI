@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "xlsx",
   "element": "pivottable",
+  "elementAliases": ["pivot"],
   "parent": "sheet",
   "operations": {
     "add": true,

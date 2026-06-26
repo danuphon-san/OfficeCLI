@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "pptx",
   "element": "model3d",
+  "elementAliases": ["glb", "model", "3dmodel"],
   "parent": "slide",
   "operations": {
     "add": true,

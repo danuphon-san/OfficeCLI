@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "docx",
   "element": "revision",
+  "elementAliases": ["ins", "del", "moveto", "movefrom"],
   "parent": "paragraph|run|table|row|cell|section",
   "operations": {
     "add": false,

@@ -429,7 +429,7 @@ public partial class WordHandler
         // element paths (/section[N], /body/sectPr[N], /chart[N], /toc[N], …) match
         // case-insensitively so /Section[1] is equivalent to /section[1]. styleSetMatch
         // below remains case-sensitive — style ids are user-defined identifiers.
-        var secSetMatch = System.Text.RegularExpressions.Regex.Match(path, @"^(?:/section\[(\d+)\]|/body/sectPr(?:\[(\d+)\])?)$",
+        var secSetMatch = System.Text.RegularExpressions.Regex.Match(path, @"^(?:/section\[(\d+|last\(\))\]|/body/sectPr(?:\[(\d+)\])?)$",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (secSetMatch.Success) return SetSectionPath(secSetMatch, properties);
 
@@ -490,8 +490,16 @@ public partial class WordHandler
         if (element is Table tbl) return SetElementTable(tbl, properties);
         if (element is TabStop tabStop) return SetElementTabStop(tabStop, properties);
         if (element is TextBoxContent txbx) return SetElementTextBoxContent(txbx, properties);
-        // Shapes (Drawing host or wps:wsp/v:shape descendant) have no curated
-        // Set handler. Without this guard the dispatcher returned an empty
+        // /body/shape[N] resolves to the wps:wsp element. SetShapeProps models the
+        // curated spPr surface (fill/line/width/height/geometry) reusing the Add
+        // builders, and forwards out-of-scope keys as unsupported so Add and
+        // Set track the same prop surface.
+        if (string.Equals(element.LocalName, "wsp", StringComparison.Ordinal)
+            && string.Equals(element.NamespaceUri,
+                "http://schemas.microsoft.com/office/word/2010/wordprocessingShape", StringComparison.Ordinal))
+            return SetShapeProps(element, properties);
+        // Other shape carriers (Drawing host or v:shape descendant) have no
+        // curated Set handler. Without this guard the dispatcher returned an empty
         // unsupported list → CLI reported "Updated" (exit 0) while writing
         // nothing. Surface every key as unsupported + a warning so the call
         // signals the gap clearly, mirroring how Add returns UNSUPPORTED for

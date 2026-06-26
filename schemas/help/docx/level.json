@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "docx",
   "element": "level",
+  "elementAliases": ["lvl"],
   "parent": "abstractNum",
   "addParent": "/numbering/abstractNum[@id=N]",
   "operations": {

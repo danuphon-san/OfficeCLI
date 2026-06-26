@@ -2,7 +2,7 @@
   "$schema": "../_schema.json",
   "format": "pptx",
   "element": "paragraph",
-  "elementAliases": ["p"],
+  "elementAliases": ["p", "para"],
   "parent": "shape|placeholder",
   "operations": {
     "add": true,

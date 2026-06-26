@@ -1204,6 +1204,22 @@ public partial class WordHandler
         var element = NavigateToElement(srcParts)
             ?? throw new ArgumentException($"Source not found: {sourcePath}");
 
+        // A display equation lives as <w:p><m:oMathPara/></w:p>. The path
+        // `/body/oMathPara[N]` navigates to the INNER oMathPara, whose only
+        // sibling is the paragraph's pPr — so reordering it within its sole
+        // wrapper is a silent no-op (it re-appends to the same <w:p> and still
+        // reports "Moved"). Redirect the move to the wrapping paragraph so a
+        // body-level reorder actually repositions the equation. Skipped when the
+        // wrapper also carries other content (inline math among text), where
+        // moving just the oMathPara is the intended operation.
+        if (element is DocumentFormat.OpenXml.Math.Paragraph
+            && element.Parent is Paragraph mathWrapPara
+            && mathWrapPara.ChildElements.All(c =>
+                c is DocumentFormat.OpenXml.Math.Paragraph || c is ParagraphProperties))
+        {
+            element = mathWrapPara;
+        }
+
         // Infer --to from --after/--before full path if not specified
         var anchorFullPath = position?.After ?? position?.Before;
         if (string.IsNullOrEmpty(targetParentPath) && anchorFullPath != null && anchorFullPath.StartsWith("/"))

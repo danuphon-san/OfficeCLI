@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "docx",
   "element": "pagebreak",
+  "elementAliases": ["break", "columnbreak"],
   "parent": "paragraph|body",
   "operations": {
     "add": true,

@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "xlsx",
   "element": "validation",
+  "elementAliases": ["datavalidation"],
   "parent": "sheet",
   "operations": {
     "add": true,

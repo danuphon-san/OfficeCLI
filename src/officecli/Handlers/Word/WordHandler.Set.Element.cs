@@ -3048,24 +3048,270 @@ public partial class WordHandler
     // pass-through is closed for good.
     private List<string> SetElementTextBoxContent(TextBoxContent txbx, Dictionary<string, string> properties)
     {
+        // Position keys live on the enclosing <wp:anchor>, not the txbxContent —
+        // reject them up-front (unchanged behaviour). Everything else routes to
+        // the shared spPr mutator on the wsp that wraps this txbxContent, so the
+        // textbox supports the same Set surface (fill/line/width/height/geometry)
+        // as a bare shape.
+        if (properties.Keys.Any(k => k.ToLowerInvariant() is "hposition" or "posh" or "vposition" or "posv"))
+            throw new ArgumentException(
+                $"Setting position keys (posH/posV/hposition/vposition) on " +
+                $"/body/textbox[N] is not supported (the position lives on the " +
+                $"enclosing <wp:anchor>, not on <w:txbxContent>). " +
+                $"Add the textbox at the desired position via " +
+                $"`add /body --type textbox --prop posH=… posV=…` instead.");
+
+        var wsp = txbx.Ancestors()
+            .FirstOrDefault(e => e.LocalName == "wsp"
+                && e.NamespaceUri == "http://schemas.microsoft.com/office/word/2010/wordprocessingShape");
+        if (wsp == null)
+            return properties.Keys.ToList();   // no shape parent → nothing applies
+        return SetShapeProps(wsp, properties);
+    }
+
+    /// <summary>
+    /// Set the curated spPr surface (fill / line / width / height / geometry) on
+    /// a <c>wps:wsp</c> shape. Shared by <c>/body/shape[N]</c> (the wsp itself)
+    /// and <c>/body/textbox[N]</c> (the wsp wrapping the txbxContent). Reuses the
+    /// exact Add-path builders (BuildLineXml, BuildSolidFillXml, SanitizeGeometry,
+    /// SanitizeHex, ParseDrawingSize) so Add and Set produce byte-identical XML.
+    /// Edits the spPr children in place, preserving CT_ShapeProperties element
+    /// order (xfrm, prstGeom, fill, ln). Width/height update BOTH the shape
+    /// <c>&lt;a:ext&gt;</c> and the layout <c>&lt;wp:extent&gt;</c>, mirroring Add.
+    /// Returns the unsupported keys (out-of-scope props: position/rotation/inset/
+    /// text/shadow/gradient/wrap), which the caller forwards as UNSUPPORTED.
+    /// </summary>
+    private List<string> SetShapeProps(OpenXmlElement wsp, Dictionary<string, string> properties)
+    {
         var unsupported = new List<string>();
-        foreach (var (key, value) in properties)
+
+        const string ANs = "http://schemas.openxmlformats.org/drawingml/2006/main";
+        const string WpNs = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
+
+        var spPr = wsp.ChildElements.FirstOrDefault(e => e.LocalName == "spPr");
+        if (spPr == null)
+            return properties.Keys.ToList();   // malformed shape — apply nothing
+
+        OpenXmlElement? AChild(OpenXmlElement parent, string local) =>
+            parent.ChildElements.FirstOrDefault(e => e.LocalName == local && e.NamespaceUri == ANs);
+
+        var xfrm = AChild(spPr, "xfrm");
+        var prstGeom = AChild(spPr, "prstGeom");
+
+        // Collect the curated keys (split-by-key parsing mirrors AddShape).
+        string? fillRaw = properties.GetValueOrDefault("fill") ?? properties.GetValueOrDefault("fillcolor");
+        string? geomRaw = properties.GetValueOrDefault("geometry") ?? properties.GetValueOrDefault("preset");
+        string? widthRaw = properties.GetValueOrDefault("width");
+        string? heightRaw = properties.GetValueOrDefault("height");
+
+        // line: composite "STYLE;SIZE;COLOR" OR split line.style/.width/.color.
+        string? lineCompact = properties.GetValueOrDefault("line");
+        bool hasLine = lineCompact != null
+            || properties.ContainsKey("line.style") || properties.ContainsKey("linestyle")
+            || properties.ContainsKey("line.width") || properties.ContainsKey("linewidth")
+            || properties.ContainsKey("line.color") || properties.ContainsKey("linecolor");
+        string? lineStyle = null, lineWidth = null, lineColor = null;
+        if (!string.IsNullOrEmpty(lineCompact)
+            && !string.Equals(lineCompact, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = lineCompact.Split(';');
+            if (parts.Length >= 1 && !string.IsNullOrEmpty(parts[0])) lineStyle = parts[0];
+            if (parts.Length >= 2 && !string.IsNullOrEmpty(parts[1])) lineWidth = parts[1];
+            if (parts.Length >= 3 && !string.IsNullOrEmpty(parts[2])) lineColor = parts[2];
+        }
+        else if (string.Equals(lineCompact, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            lineStyle = "none";
+        }
+        lineStyle ??= properties.GetValueOrDefault("line.style") ?? properties.GetValueOrDefault("linestyle");
+        lineWidth ??= properties.GetValueOrDefault("line.width") ?? properties.GetValueOrDefault("linewidth");
+        lineColor ??= properties.GetValueOrDefault("line.color") ?? properties.GetValueOrDefault("linecolor");
+
+        // --- geometry → replace prstGeom@prst ---
+        if (geomRaw != null && prstGeom != null)
+            prstGeom.SetAttribute(new OpenXmlAttribute("prst", "", SanitizeGeometry(geomRaw)));
+
+        // --- width / height → update <a:ext cx cy> and <wp:extent cx cy> ---
+        if ((widthRaw != null || heightRaw != null) && xfrm != null)
+        {
+            var ext = AChild(xfrm, "ext");
+            // Anchor wrapper carries the matching <wp:extent>.
+            var wpExtent = wsp.Ancestors()
+                .FirstOrDefault(e => e.LocalName == "anchor" || e.LocalName == "inline")
+                ?.Descendants().FirstOrDefault(e => e.LocalName == "extent" && e.NamespaceUri == WpNs);
+            if (widthRaw != null)
+            {
+                long cx = ParseDrawingSize(widthRaw, ReadUnqualifiedLong(ext, "cx") ?? 914_400);
+                ext?.SetAttribute(new OpenXmlAttribute("cx", "", cx.ToString()));
+                wpExtent?.SetAttribute(new OpenXmlAttribute("cx", "", cx.ToString()));
+            }
+            if (heightRaw != null)
+            {
+                long cy = ParseDrawingSize(heightRaw, ReadUnqualifiedLong(ext, "cy") ?? 914_400);
+                ext?.SetAttribute(new OpenXmlAttribute("cy", "", cy.ToString()));
+                wpExtent?.SetAttribute(new OpenXmlAttribute("cy", "", cy.ToString()));
+            }
+        }
+
+        // --- fill → replace solidFill / noFill / gradFill ---
+        if (fillRaw != null)
+        {
+            string fillXml =
+                string.IsNullOrEmpty(fillRaw) || string.Equals(fillRaw, "none", StringComparison.OrdinalIgnoreCase)
+                    ? "<a:noFill/>"
+                    : $"<a:solidFill><a:srgbClr val=\"{SanitizeHex(fillRaw)}\"/></a:solidFill>";
+            // Remove any existing fill element.
+            foreach (var f in spPr.ChildElements
+                .Where(e => e.NamespaceUri == ANs
+                    && e.LocalName is "noFill" or "solidFill" or "gradFill" or "blipFill" or "pattFill" or "grpFill")
+                .ToList())
+                f.Remove();
+            var newFill = ParseShapeFragment(fillXml);
+            // Schema order: fill follows prstGeom (or xfrm) and precedes ln.
+            InsertSpPrChildInOrder(spPr, newFill, ANs);
+        }
+
+        // --- line → replace a:ln ---
+        if (hasLine)
+        {
+            var existingLn = spPr.ChildElements
+                .FirstOrDefault(e => e.LocalName == "ln" && e.NamespaceUri == ANs);
+
+            // Merge with the existing outline so a `set line.width` alone keeps
+            // the current color/dash and vice versa — BuildLineXml rebuilds the
+            // whole <a:ln> from only the keys it's handed, so any sub-prop NOT
+            // in this call must be back-filled from the live <a:ln>. Skip the
+            // merge for the explicit `line=none` clear (lineStyle=="none"),
+            // which is meant to wipe the outline.
+            bool isExplicitClear = string.Equals(lineStyle, "none", StringComparison.OrdinalIgnoreCase);
+            if (!isExplicitClear && existingLn != null)
+                ReadExistingLine(existingLn, ANs, ref lineStyle, ref lineWidth, ref lineColor);
+
+            string lnXml = BuildLineXml(lineStyle, lineWidth, lineColor);
+            if (existingLn != null) existingLn.Remove();
+            if (!string.IsNullOrEmpty(lnXml))
+            {
+                var newLn = ParseShapeFragment(lnXml);
+                InsertSpPrChildInOrder(spPr, newLn, ANs);
+            }
+        }
+
+        // Forward genuinely out-of-scope keys as unsupported (position/rotation/
+        // inset/text/shadow/gradient/wrap/alt/etc — see Add path).
+        foreach (var key in properties.Keys)
         {
             switch (key.ToLowerInvariant())
             {
-                case "hposition" or "posh" or "vposition" or "posv":
-                    throw new ArgumentException(
-                        $"Setting position keys (posH/posV/hposition/vposition) on " +
-                        $"/body/textbox[N] is not supported (the position lives on the " +
-                        $"enclosing <wp:anchor>, not on <w:txbxContent>). " +
-                        $"Add the textbox at the desired position via " +
-                        $"`add /body --type textbox --prop posH=… posV=…` instead.");
+                case "fill": case "fillcolor":
+                case "line": case "line.style": case "linestyle":
+                case "line.width": case "linewidth":
+                case "line.color": case "linecolor":
+                case "width": case "height":
+                case "geometry": case "preset":
+                    continue;
                 default:
                     unsupported.Add(key);
                     break;
             }
         }
+
+        SaveDoc();
         return unsupported;
+    }
+
+    /// <summary>
+    /// Insert a freshly-built spPr child (solidFill/noFill/ln) at the correct
+    /// CT_ShapeProperties position. Order is: xfrm, prstGeom (or custGeom), fill
+    /// (noFill/solidFill/gradFill/blipFill/pattFill/grpFill), ln, effectLst, …
+    /// We place fill before any existing ln; ln after any existing fill. Falls
+    /// back to append when no successor anchor is present.
+    /// </summary>
+    private static void InsertSpPrChildInOrder(OpenXmlElement spPr, OpenXmlElement child, string aNs)
+    {
+        bool isLn = child.LocalName == "ln";
+        if (isLn)
+        {
+            // ln goes after fill/prstGeom/xfrm but before effectLst/scene3d/…
+            var after = spPr.ChildElements.LastOrDefault(e => e.NamespaceUri == aNs
+                && e.LocalName is "noFill" or "solidFill" or "gradFill" or "blipFill" or "pattFill" or "grpFill"
+                    or "prstGeom" or "custGeom" or "xfrm");
+            if (after != null) { after.InsertAfterSelf(child); return; }
+            spPr.AppendChild(child);
+            return;
+        }
+        // fill: after prstGeom/xfrm, before ln (and anything later).
+        var lnEl = spPr.ChildElements.FirstOrDefault(e => e.LocalName == "ln" && e.NamespaceUri == aNs);
+        if (lnEl != null) { lnEl.InsertBeforeSelf(child); return; }
+        var geomOrXfrm = spPr.ChildElements.LastOrDefault(e => e.NamespaceUri == aNs
+            && e.LocalName is "prstGeom" or "custGeom" or "xfrm");
+        if (geomOrXfrm != null) { geomOrXfrm.InsertAfterSelf(child); return; }
+        spPr.AppendChild(child);
+    }
+
+    /// <summary>
+    /// Read the current outline (<c>a:ln</c>) sub-properties — width (as an
+    /// explicit "<emu>emu" string), dash style and color — into the
+    /// <paramref name="style"/>/<paramref name="width"/>/<paramref name="color"/>
+    /// slots, but ONLY where the caller left them null. Lets a partial
+    /// <c>set line.X</c> preserve the unspecified sub-props instead of letting
+    /// BuildLineXml reset them to its defaults (black solid, theme width).
+    /// </summary>
+    private static void ReadExistingLine(OpenXmlElement ln, string aNs,
+        ref string? style, ref string? width, ref string? color)
+    {
+        if (width == null)
+        {
+            var w = ReadUnqualifiedLong(ln, "w");
+            // FormatEmu-style explicit suffix so ParseEmu reads it back as raw
+            // EMU (a bare integer would be mis-read as points).
+            if (w is > 0) width = $"{w}emu";
+        }
+        if (style == null)
+        {
+            var dash = ln.ChildElements
+                .FirstOrDefault(e => e.LocalName == "prstDash" && e.NamespaceUri == aNs);
+            var dashVal = dash?.GetAttributes()
+                .FirstOrDefault(a => a.LocalName == "val" && string.IsNullOrEmpty(a.NamespaceUri)).Value;
+            if (!string.IsNullOrEmpty(dashVal)) style = dashVal;
+        }
+        if (color == null)
+        {
+            var solidFill = ln.ChildElements
+                .FirstOrDefault(e => e.LocalName == "solidFill" && e.NamespaceUri == aNs);
+            var srgb = solidFill?.ChildElements
+                .FirstOrDefault(e => e.LocalName == "srgbClr" && e.NamespaceUri == aNs);
+            var clrVal = srgb?.GetAttributes()
+                .FirstOrDefault(a => a.LocalName == "val" && string.IsNullOrEmpty(a.NamespaceUri)).Value;
+            if (!string.IsNullOrEmpty(clrVal)) color = clrVal;
+        }
+    }
+
+    /// <summary>Read an unqualified (no-namespace) integer attribute off an
+    /// element, returning null when absent/unparsable.</summary>
+    private static long? ReadUnqualifiedLong(OpenXmlElement? el, string name)
+    {
+        if (el == null) return null;
+        var attr = el.GetAttributes().FirstOrDefault(a => a.LocalName == name && string.IsNullOrEmpty(a.NamespaceUri));
+        return long.TryParse(attr.Value, out var v) ? v : (long?)null;
+    }
+
+    /// <summary>Parse a DrawingML spPr fragment (e.g. "&lt;a:solidFill&gt;…")
+    /// into an OpenXmlElement, keeping the a:/wps: namespace context alive.
+    /// Mirrors ParseDrawingFromXml's XmlReader-via-wrapper approach.</summary>
+    private static OpenXmlElement ParseShapeFragment(string fragment)
+    {
+        // Route through a w:p > w:r > w:drawing wrapper (same approach as
+        // ParseDrawingFromXml) so the a:/wps: prefixes resolve, then lift the
+        // built fragment out of the parsed spPr.
+        var wrapXml =
+            $@"<w:p xmlns:w=""http://schemas.openxmlformats.org/wordprocessingml/2006/main"" xmlns:wp=""http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"" xmlns:a=""http://schemas.openxmlformats.org/drawingml/2006/main"" xmlns:wps=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><w:r><w:drawing><wp:inline><a:graphic><a:graphicData uri=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wps:wsp><wps:spPr>{fragment}</wps:spPr></wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>";
+        var p = new Paragraph(wrapXml);
+        var spPr = p.Descendants().FirstOrDefault(e => e.LocalName == "spPr"
+            && e.NamespaceUri == "http://schemas.microsoft.com/office/word/2010/wordprocessingShape");
+        var first = spPr?.FirstChild
+            ?? throw new InvalidOperationException("Shape fragment parse failed");
+        first.Remove();
+        return first;
     }
 
 }

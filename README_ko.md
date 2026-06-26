@@ -256,7 +256,7 @@ officecli watch deck.pptx                            # http://localhost:26315
 
 #### 수식 & 피벗 엔진
 
-150+ Excel 함수가 작성 시 자동 평가 — `=SUM(A1:A2)`를 작성하고, 셀을 `get` 하면, 값이 이미 거기. Office에서 재계산하는 라운드트립 불필요. 동적 배열 함수 (`FILTER` / `UNIQUE` / `SORT` / `SEQUENCE`, `_xlfn.` 자동 접두사), `VLOOKUP` / `INDEX` / `MATCH`, 날짜 & 텍스트 함수 등 140+ 함수 커버.
+350+ Excel 함수가 작성 시 자동 평가 — `=SUM(A1:A2)`를 작성하고, 셀을 `get` 하면, 값이 이미 거기. Office에서 재계산하는 라운드트립 불필요. 스필되는 동적 배열 (`FILTER` / `SORT` / `UNIQUE` / `SEQUENCE` / `LET` / `LAMBDA`, `_xlfn.` 자동 접두사), `VLOOKUP` / `XLOOKUP` / `INDEX` / `MATCH`, 재무·채권 함수, 통계 분포·검정·회귀, 날짜 & 텍스트 함수 등 커버.
 
 또한 소스 범위에서 단일 명령으로 네이티브 OOXML 피벗 테이블 — 멀티 필드 행/열/필터, 10가지 집계, `showDataAs` 모드, 날짜 그룹화, 계산 필드, Top-N, 레이아웃. 피벗 캐시 + 정의가 OOXML에 기록되어 Excel은 집계가 채워진 상태로 파일을 엽니다:
 
@@ -387,7 +387,7 @@ curl -fsSL https://officecli.ai/SKILL.md -o ~/.claude/skills/officecli.md
 - **점진적 복잡도 (L1 → L2 → L3)** — 에이전트는 읽기 전용 뷰부터 시작해, DOM 작업으로 에스컬레이트, 필요할 때만 raw XML로 폴백. 토큰 사용을 최소화.
 - **자가 치유 워크플로우** — `validate`, `view issues`, 그리고 구조화된 에러 코드 (`not_found`, `invalid_value`, `unsupported_property`) 가 suggestion과 유효 범위를 반환합니다. 에이전트는 사람의 개입 없이 자가 수정.
 - **내장 에이전트 친화적 렌더링 엔진** — `view html` / `view screenshot` / `watch`가 네이티브로 HTML과 PNG를 출력. Office 불필요. 에이전트는 CI / Docker / 헤드리스 환경에서도 자신의 출력을 "보고" 레이아웃 문제를 수정할 수 있습니다.
-- **내장 수식 & 피벗 엔진** — 150+ Excel 함수 작성 시 자동 평가; 소스 범위에서 단일 명령으로 네이티브 OOXML 피벗 테이블. 에이전트는 Office에서 재계산할 필요 없이 계산값과 집계 결과를 즉시 읽습니다.
+- **내장 수식 & 피벗 엔진** — 350+ Excel 함수 작성 시 자동 평가 (스필되는 동적 배열, 재무·채권·통계 함수군 포함); 소스 범위에서 단일 명령으로 네이티브 OOXML 피벗 테이블. 에이전트는 Office에서 재계산할 필요 없이 계산값과 집계 결과를 즉시 읽습니다.
 - **템플릿 병합** — 에이전트가 한 번 레이아웃을 설계, 다운스트림 코드가 `{{key}}` 자리표시자를 N번 채움. 각 보고서를 재생성하며 토큰을 태우는 것을 방지.
 - **라운드트립 Dump** — `dump`가 모든 `.docx`를 재생 가능한 batch JSON으로. 에이전트는 raw OOXML XML이 아닌 구조화된 사양을 읽어 인간이 작성한 샘플에서 학습.
 - **내장 도움말** — 속성명이나 값 형식이 헷갈릴 때, 에이전트는 추측하지 않고 `officecli <format> set <element>`를 실행.

@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "xlsx",
   "element": "comment",
+  "elementAliases": ["note"],
   "parent": "sheet|cell",
   "operations": {
     "add": true,

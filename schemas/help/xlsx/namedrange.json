@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "xlsx",
   "element": "namedrange",
+  "elementAliases": ["definedname", "name"],
   "parent": "workbook|sheet",
   "operations": {
     "add": true,

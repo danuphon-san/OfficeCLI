@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "docx",
   "element": "permStart",
+  "elementAliases": ["permend"],
   "parent": "body|paragraph",
   "operations": {
     "add": true,

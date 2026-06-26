@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "xlsx",
   "element": "ole",
+  "elementAliases": ["embed", "object", "oleobject"],
   "parent": "sheet",
   "operations": {
     "add": true,

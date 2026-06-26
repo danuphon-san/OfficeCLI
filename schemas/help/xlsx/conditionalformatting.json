@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "xlsx",
   "element": "conditionalformatting",
+  "elementAliases": ["cf"],
   "parent": "sheet",
   "operations": {
     "add": true,

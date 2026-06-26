@@ -597,17 +597,22 @@ public partial class WordHandler
         // so /Section[1] and /section[1] are equivalent. The returned node's Path is
         // canonicalised to lowercase so callers see a round-trippable form. Style ids
         // (/styles/<id>) remain case-sensitive — they are user-defined identifiers.
-        var secMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/section\[(\d+)\]$",
+        var secMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/section\[(\d+|last\(\))\]$",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (secMatch.Success)
         {
-            var secIdx = int.Parse(secMatch.Groups[1].Value);
             var sectionProps = FindSectionProperties();
+            // /section[last()] resolves to the final section (mirrors p[last()]).
+            var secGrp = secMatch.Groups[1].Value;
+            var secIdx = secGrp.Equals("last()", StringComparison.OrdinalIgnoreCase)
+                ? sectionProps.Count
+                : int.Parse(secGrp);
             if (secIdx < 1 || secIdx > sectionProps.Count)
                 throw new ArgumentException($"Section {secIdx} not found (total: {sectionProps.Count})");
 
             var sectPr = sectionProps[secIdx - 1];
-            return BuildSectionNode(sectPr, path.ToLowerInvariant());
+            // Canonicalise last() in the returned path to the resolved index.
+            return BuildSectionNode(sectPr, $"/section[{secIdx}]");
         }
 
         // /docDefaults — root-level access to docDefaults rPr/pPr. Mirrors

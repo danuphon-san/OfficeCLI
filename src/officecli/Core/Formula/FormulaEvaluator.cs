@@ -174,7 +174,7 @@ internal class RangeData
 }
 
 /// <summary>
-/// Excel formula evaluator supporting 150+ functions.
+/// Excel formula evaluator supporting 350+ functions.
 /// Split across partial class files:
 ///   FormulaEvaluator.cs          — core: tokenizer, parser, cell resolution
 ///   FormulaEvaluator.Functions.cs — function dispatch + implementations

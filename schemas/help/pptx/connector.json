@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "pptx",
   "element": "connector",
+  "elementAliases": ["connection"],
   "parent": "slide",
   "operations": {
     "add": true,

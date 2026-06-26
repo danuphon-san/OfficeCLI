@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "docx",
   "element": "sdt",
+  "elementAliases": ["contentcontrol"],
   "parent": "body|paragraph",
   "operations": {
     "add": true,

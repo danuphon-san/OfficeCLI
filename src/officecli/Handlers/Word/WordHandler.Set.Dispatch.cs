@@ -795,8 +795,13 @@ public partial class WordHandler
         var unsupported = new List<string>();
         var secIdxStr = secSetMatch.Groups[1].Success ? secSetMatch.Groups[1].Value
             : (secSetMatch.Groups[2].Success ? secSetMatch.Groups[2].Value : "1");
-        var secIdx = int.Parse(secIdxStr);
         var sectionProps = FindSectionProperties();
+        // /section[last()] resolves to the final section (mirrors p[last()]).
+        // On an empty doc (no sectPr yet) last() falls through to 1 so the
+        // auto-create-section-1 branch below still fires.
+        var secIdx = secIdxStr.Equals("last()", StringComparison.OrdinalIgnoreCase)
+            ? (sectionProps.Count >= 1 ? sectionProps.Count : 1)
+            : int.Parse(secIdxStr);
 
         // If no section properties exist and requesting section 1, create one
         if (sectionProps.Count == 0 && secIdx == 1)

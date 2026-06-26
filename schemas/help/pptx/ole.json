@@ -2,6 +2,7 @@
   "$schema": "../_schema.json",
   "format": "pptx",
   "element": "ole",
+  "elementAliases": ["embed", "object", "oleobject"],
   "parent": "slide",
   "operations": {
     "add": true,

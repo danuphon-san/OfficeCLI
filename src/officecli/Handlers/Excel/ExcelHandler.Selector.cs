@@ -100,18 +100,25 @@ public partial class ExcelHandler
         var containsMatch = Regex.Match(selector, @":contains\(['""]?(.+?)['""]?\)");
         if (containsMatch.Success) valueContains = containsMatch.Groups[1].Value;
 
-        // Shorthand: "cell:text" → treat as :contains(text)
+        // Shorthand: "cell:text" → treat as :contains(text). Exclude the
+        // recognised pseudo-classes (incl. `not`) so `:not(:has(formula))` is
+        // not mistaken for a literal substring filter "not(:has(formula))".
         if (valueContains == null)
         {
-            var shorthandMatch = Regex.Match(selector, @"^(?:\w+)?:(?!contains|empty|has)(.+)$");
+            var shorthandMatch = Regex.Match(selector, @"^(?:\w+)?:(?!contains|empty|has|not)(.+)$");
             if (shorthandMatch.Success) valueContains = shorthandMatch.Groups[1].Value;
         }
 
-        // :empty pseudo-selector
-        if (selector.Contains(":empty")) isEmpty = true;
+        // :empty pseudo-selector (and its negation). Check the negated form
+        // first — `:not(:empty)` also contains the `:empty` substring.
+        if (selector.Contains(":not(:empty)")) isEmpty = false;
+        else if (selector.Contains(":empty")) isEmpty = true;
 
-        // :has(formula) pseudo-selector
-        if (selector.Contains(":has(formula)")) hasFormula = true;
+        // :has(formula) pseudo-selector (and its negation). `:not(:has(formula))`
+        // contains `:has(formula)`, so the negated form must be checked first —
+        // otherwise it inverts to "has a formula" and returns the wrong set.
+        if (selector.Contains(":not(:has(formula))")) hasFormula = false;
+        else if (selector.Contains(":has(formula)")) hasFormula = true;
 
         return new CellSelector(sheet, column, valueEquals, valueNotEquals, valueContains, hasFormula, isEmpty, typeEquals, typeNotEquals, formatEquals, formatNotEquals);
     }
