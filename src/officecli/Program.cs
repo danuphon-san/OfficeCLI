@@ -156,32 +156,35 @@ if (args.Length >= 1 && (args[0] == "skills" || args[0] == "skill"))
 // the same semantics.
 if (args.Length >= 1 && args[0] == "load_skill")
 {
-    if (args.Length >= 2)
+    // Optional --path <relpath> fetches one bundled reference file the skill's
+    // SKILL.md points to (manifest listed at the end of the no-path output).
+    // Mirrors the MCP load_skill path= argument.
+    string? skillRelPath = null;
+    var positional = new List<string>();
+    for (int ai = 1; ai < args.Length; ai++)
     {
-        // Optional --path <relpath> fetches one bundled reference file the
-        // skill's SKILL.md points to (manifest listed at the end of the
-        // no-path output). Mirrors the MCP load_skill path= argument.
-        string? skillRelPath = null;
-        var positional = new List<string>();
-        for (int ai = 1; ai < args.Length; ai++)
+        if (args[ai] == "--path" && ai + 1 < args.Length) { skillRelPath = args[++ai]; continue; }
+        positional.Add(args[ai]);
+    }
+    // No skill name → print the catalog (name + when-to-use), mirroring MCP.
+    if (positional.Count == 0 && string.IsNullOrEmpty(skillRelPath))
+    {
+        Console.Out.Write(OfficeCli.Core.SkillInstaller.BuildSkillCatalog());
+        return 0;
+    }
+    if (positional.Count == 1)
+    {
+        try
         {
-            if (args[ai] == "--path" && ai + 1 < args.Length) { skillRelPath = args[++ai]; continue; }
-            positional.Add(args[ai]);
+            Console.Out.Write(string.IsNullOrEmpty(skillRelPath)
+                ? OfficeCli.Core.SkillInstaller.LoadSkillContent(positional[0])
+                : OfficeCli.Core.SkillInstaller.LoadSkillFile(positional[0], skillRelPath));
+            return 0;
         }
-        if (positional.Count == 1)
+        catch (ArgumentException ex)
         {
-            try
-            {
-                Console.Out.Write(string.IsNullOrEmpty(skillRelPath)
-                    ? OfficeCli.Core.SkillInstaller.LoadSkillContent(positional[0])
-                    : OfficeCli.Core.SkillInstaller.LoadSkillFile(positional[0], skillRelPath));
-                return 0;
-            }
-            catch (ArgumentException ex)
-            {
-                Console.Error.WriteLine(ex.Message);
-                return 1;
-            }
+            Console.Error.WriteLine(ex.Message);
+            return 1;
         }
     }
     OfficeCli.CommandBuilder.WriteEarlyDispatchUsage("load_skill", Console.Error);

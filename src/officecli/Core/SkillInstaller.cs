@@ -104,35 +104,51 @@ internal static class SkillInstaller
     /// </summary>
     private static string GetSkillDescription(string folder)
     {
-        var assembly = Assembly.GetExecutingAssembly();
-        var resourceName = $"skills/{folder}/SKILL.md";
+        var desc = GetFullSkillDescription(folder);
+        return desc.Length > 60 ? desc[..57] + "..." : desc;  // truncate for aligned console listing
+    }
 
-        if (resourceName == null) return "";
-
-        var content = LoadEmbeddedResource(resourceName);
-        if (content == null) return "";
-
-        // Parse YAML front-matter: find description field
-        if (!content.StartsWith("---")) return "";
-
+    /// <summary>
+    /// Full (untruncated) front-matter <c>description</c> of a skill's SKILL.md.
+    /// For officecli skills this field carries the routing guidance ("Use when…
+    /// / Trigger on… / Do NOT trigger for…"), so it is exactly what an agent
+    /// needs to pick a skill. Empty string when absent.
+    /// </summary>
+    private static string GetFullSkillDescription(string folder)
+    {
+        var content = LoadEmbeddedResource($"skills/{folder}/SKILL.md");
+        if (content == null || !content.StartsWith("---")) return "";
         var endIdx = content.IndexOf("---", 3);
         if (endIdx < 0) return "";
-
-        var frontMatter = content[3..endIdx];
-        foreach (var line in frontMatter.Split('\n'))
+        foreach (var line in content[3..endIdx].Split('\n'))
         {
             var trimmed = line.Trim();
             if (trimmed.StartsWith("description:", StringComparison.OrdinalIgnoreCase))
-            {
-                var desc = trimmed["description:".Length..].Trim().Trim('"');
-                // Truncate long descriptions for display
-                if (desc.Length > 60)
-                    desc = desc[..57] + "...";
-                return desc;
-            }
+                return trimmed["description:".Length..].Trim().Trim('"');
         }
-
         return "";
+    }
+
+    /// <summary>
+    /// Agent-facing skill catalog: every skill's name plus its full routing
+    /// description, with usage pointers. Returned by <c>load_skill</c> with no
+    /// name (CLI and MCP) so an agent can discover which skill applies before
+    /// drilling into its SKILL.md. Pay-on-demand — not injected into every
+    /// session's tool description.
+    /// </summary>
+    public static string BuildSkillCatalog()
+    {
+        var sb = new StringBuilder();
+        sb.Append("# officecli skills\n\n");
+        sb.Append("Workflow guides for building documents. Match the triggers below, then:\n");
+        sb.Append("- `load_skill name=<name>` — the skill's full SKILL.md + a manifest of its bundled reference files\n");
+        sb.Append("- `load_skill name=<name> path=<relpath>` — one bundled reference file\n\n");
+        foreach (var (name, folder) in SkillMap)
+        {
+            var desc = GetFullSkillDescription(folder);
+            sb.Append($"## {name}\n{(desc.Length > 0 ? desc : "(no description)")}\n\n");
+        }
+        return sb.ToString().TrimEnd() + "\n";
     }
 
     /// <summary>

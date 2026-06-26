@@ -69,6 +69,7 @@ static partial class CommandBuilder
             ["load_skill"] = new[]
             {
                 "Usage:",
+                "  officecli load_skill                         List all skills with the triggers that say when to use each",
                 "  officecli load_skill <name>                 Print the skill's SKILL.md + a manifest of its bundled reference files",
                 "  officecli load_skill <name> --path <relpath> Print one bundled reference file (e.g. --path reference/decision-rules.md)",
                 "",

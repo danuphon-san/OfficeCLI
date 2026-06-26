@@ -711,13 +711,20 @@ public static class McpServer
                 // Agents that want disk-resident skills run `officecli skills install`
                 // themselves.
                 var skill = Arg("name");
-                if (string.IsNullOrEmpty(skill))
-                    throw new ArgumentException($"name= required. Available: {OfficeCli.Core.SkillInstaller.KnownSkillsList()}");
                 // path= fetches one bundled reference file (e.g.
                 // reference/decision-rules.md) named in the manifest that
                 // load_skill (no path) appends. Without it the SKILL.md body's
                 // reference pointers are dead links over MCP.
                 var skillPath = Arg("path");
+                // No name → return the skill catalog so an agent can discover
+                // which skill applies (each entry carries its Use-when / Trigger
+                // routing guidance). name= is required once a path= is given.
+                if (string.IsNullOrEmpty(skill))
+                {
+                    if (!string.IsNullOrEmpty(skillPath))
+                        throw new ArgumentException("name= required when path= is given.");
+                    return OfficeCli.Core.SkillInstaller.BuildSkillCatalog();
+                }
                 try
                 {
                     return string.IsNullOrEmpty(skillPath)
@@ -767,7 +774,7 @@ Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1.
 
     private const string ToolDescription = @"Create, read, and modify Office documents (.docx, .xlsx, .pptx).
 
-Commands: create (file), view (file, mode: text|annotated|outline|stats|issues|html|svg|screenshot|forms), get (file, path, depth), query (file, selector), set (file, path, props[]), add (file, parent, type, props[], index/after/before), remove (file, path), move (file, path, to, index/after/before), swap (file, path, path2), validate (file), batch (file, commands), raw (file, part), help (format: docx|xlsx|pptx, optional type=<element> for full schema), load_skill (name: pptx|word|excel|word-form|morph-ppt|morph-ppt-3d|pitch-deck|academic-paper|data-dashboard|financial-model — returns the skill's SKILL.md; add path=<relpath> to fetch a bundled reference file the SKILL.md points to, e.g. path=reference/decision-rules.md).
+Commands: create (file), view (file, mode: text|annotated|outline|stats|issues|html|svg|screenshot|forms), get (file, path, depth), query (file, selector), set (file, path, props[]), add (file, parent, type, props[], index/after/before), remove (file, path), move (file, path, to, index/after/before), swap (file, path, path2), validate (file), batch (file, commands), raw (file, part), help (format: docx|xlsx|pptx, optional type=<element> for full schema), load_skill (no name: lists all skills with the triggers that say when to use each; name=<pptx|word|excel|word-form|morph-ppt|morph-ppt-3d|pitch-deck|academic-paper|data-dashboard|financial-model>: returns that skill's SKILL.md + a manifest of its reference files; add path=<relpath> to fetch one reference file, e.g. path=reference/decision-rules.md).
 
 Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1. Props are key=value strings. Call help with format= to list elements, then help with format= and type= to drill into a specific element's schema (properties, aliases, examples).";
 
@@ -832,7 +839,7 @@ Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1. Props are key=val
         // format
         w.WriteStartObject("format"); w.WriteString("type", "string"); w.WriteString("description", "Document format for help: xlsx, pptx, docx"); w.WriteEndObject();
         // name (for load_skill)
-        w.WriteStartObject("name"); w.WriteString("type", "string"); w.WriteString("description", "Skill name for load_skill: pptx, word, excel, word-form, morph-ppt, morph-ppt-3d, pitch-deck, academic-paper, data-dashboard, financial-model. Pair with path= to fetch a bundled reference file listed in the skill's manifest (e.g. path=reference/decision-rules.md)."); w.WriteEndObject();
+        w.WriteStartObject("name"); w.WriteString("type", "string"); w.WriteString("description", "Skill name for load_skill: pptx, word, excel, word-form, morph-ppt, morph-ppt-3d, pitch-deck, academic-paper, data-dashboard, financial-model. Omit to list all skills with their when-to-use triggers. Pair with path= to fetch a bundled reference file listed in the skill's manifest (e.g. path=reference/decision-rules.md)."); w.WriteEndObject();
         w.WriteEndObject(); // end properties
         w.WriteStartArray("required"); w.WriteStringValue("command"); w.WriteEndArray();
         w.WriteEndObject(); // end inputSchema
