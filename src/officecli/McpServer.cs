@@ -603,6 +603,11 @@ public static class McpServer
                 if (items == null || items.Count == 0)
                     throw new ArgumentException("No commands found in input.");
                 using var handler = DocumentHandlerFactory.Open(file, editable: true);
+                // Defer per-mutation Document.Save() so N commands serialize the
+                // part once (at Dispose) instead of N times — mirrors the
+                // non-resident CLI batch path (CommandBuilder.Batch.cs). Without
+                // this the MCP batch is an O(N²) re-serialize on large replays.
+                if (handler is OfficeCli.Handlers.WordHandler mcpBatchWh) mcpBatchWh.DeferSave = true;
                 var results = new List<BatchResult>();
                 for (int bi = 0; bi < items.Count; bi++)
                 {
