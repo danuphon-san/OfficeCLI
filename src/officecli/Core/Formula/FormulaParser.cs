@@ -3110,7 +3110,9 @@ internal static class FormulaParser
         ("⊈", "\\nsubseteq "), ("⊉", "\\nsupseteq "),
         ("⊊", "\\subsetneq "), ("⊋", "\\supsetneq "),
         ("∄", "\\nexists "), ("⊨", "\\models "), ("⊢", "\\vdash "),
-        ("≠", "\\neq "), ("∉", "\\notin "),
+        // ("≠", "\\neq ") already mapped above (line ~3103); the second entry
+        // here was a dead no-op (first match wins) — removed.
+        ("∉", "\\notin "),
         ("∌", "\\not\\ni "), ("⊄", "\\not\\subset "), ("⊅", "\\not\\supset "),
         ("≢", "\\not\\equiv "), ("≁", "\\not\\sim "), ("≉", "\\not\\approx "),
         ("≇", "\\not\\cong "), ("∦", "\\nparallel "),
