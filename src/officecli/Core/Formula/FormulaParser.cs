@@ -456,6 +456,33 @@ internal static class FormulaParser
                 var bases = element.ChildElements.Where(e => e.LocalName == "e").ToList();
                 if (bases.Count == 1)
                 {
+                    // \pmod{n}: parens whose base is [mod-run, em-space, arg].
+                    // The forward parser (ParseCommand case "pmod") stores it
+                    // exactly this way, so reverse it to \pmod{<arg>} rather than
+                    // the generic "(\text{mod} n)". Keyed on the base's first run
+                    // text starting with "mod"; the modulus is whatever follows
+                    // the mod-run and the spacer run.
+                    if (begin == "(" && end == ")")
+                    {
+                        var modKids = bases[0].ChildElements
+                            .Where(e => e.LocalName != "argPr").ToList();
+                        var firstRun = modKids.FirstOrDefault(e => e.LocalName == "r");
+                        var firstRunText = firstRun?.ChildElements
+                            .FirstOrDefault(e => e.LocalName == "t")?.InnerText ?? "";
+                        if (firstRunText.StartsWith("mod", StringComparison.Ordinal))
+                        {
+                            var argEls = modKids
+                                .SkipWhile(e => e.LocalName == "r"
+                                    && ((e.ChildElements.FirstOrDefault(c => c.LocalName == "t")?.InnerText ?? "")
+                                        .StartsWith("mod", StringComparison.Ordinal)
+                                        || string.IsNullOrWhiteSpace(
+                                            e.ChildElements.FirstOrDefault(c => c.LocalName == "t")?.InnerText)))
+                                .ToList();
+                            var modArg = string.Concat(argEls.Select(ToLatexByName));
+                            return $"\\pmod{{{modArg}}}";
+                        }
+                    }
+
                     // Binomial: parens wrapping a single bar-less fraction. The
                     // forward parser stores \binom{a}{b} exactly this way, so
                     // reconstruct \binom (not literal "(\frac{a}{b})" — \frac has
