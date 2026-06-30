@@ -301,8 +301,22 @@ internal static class FormulaParser
                         // rather than \text{sin}. CONSISTENCY(formula-funcname):
                         // keep this set in sync with the upright-name list in
                         // ParseCommand's "lim or sin or cos ..." arm.
+                        //
+                        // A m:nor run carrying a weight/script axis is a
+                        // \textbf/\textit/\texttt/\textsf (the text-styling
+                        // family); reverse to the matching command. \emph
+                        // collapses to \textit (same italic axis), like other
+                        // canonical-equivalent collapses.
                         if (_uprightFunctionNames.Contains(text))
                             result = "\\" + text;
+                        else if (styVal == "b")
+                            result = $"\\textbf{{{EscapeLatex(text)}}}";
+                        else if (styVal == "i" || styVal == "bi")
+                            result = $"\\textit{{{EscapeLatex(text)}}}";
+                        else if (scrVal == "monospace")
+                            result = $"\\texttt{{{EscapeLatex(text)}}}";
+                        else if (scrVal == "sans-serif")
+                            result = $"\\textsf{{{EscapeLatex(text)}}}";
                         else
                             result = $"\\text{{{EscapeLatex(text)}}}";
                     }
@@ -466,6 +480,12 @@ internal static class FormulaParser
                             var casesContent = ToLatexByName(inner);
                             return $"\\begin{{cases}}{casesContent}\\end{{cases}}";
                         }
+                        // rcases: empty opening brace, "}" closing — mirror of cases.
+                        if (string.IsNullOrEmpty(begin) && end == "}")
+                        {
+                            var casesContent = ToLatexByName(inner);
+                            return $"\\begin{{rcases}}{casesContent}\\end{{rcases}}";
+                        }
                         var envName = (begin, end) switch
                         {
                             ("(", ")") => "pmatrix",
@@ -537,7 +557,13 @@ internal static class FormulaParser
                     "\u20D7" => "vec",
                     "\u0307" => "dot",
                     "\u0308" => "ddot",
+                    "\u20DB" => "dddot",
                     "\u0303" => "tilde",
+                    "\u0301" => "acute",
+                    "\u0300" => "grave",
+                    "\u030C" => "check",
+                    "\u0306" => "breve",
+                    "\u030A" => "mathring",
                     // Wide-accent combining chars have no narrow equivalent, so
                     // they round-trip to their own commands. \widehat (U+0302) and
                     // \widetilde (U+0303) share a codepoint with \hat/\tilde \u2014 OMML
@@ -1280,8 +1306,34 @@ internal static class FormulaParser
                     if (pos < tokens.Count) pos++; // skip }
                 }
 
+                // Starred matrix environments (matrix*/pmatrix*/…) take an
+                // OPTIONAL [l|c|r] alignment arg applied to ALL columns. Parse
+                // the bracket here, strip the star to reuse the non-star path,
+                // and feed the letter through as a uniform column spec (it is
+                // expanded per-column inside ParseMatrix). Default center if the
+                // bracket is absent.
+                string? starAlign = null;
+                if (envName is "matrix*" or "pmatrix*" or "bmatrix*"
+                    or "Bmatrix*" or "vmatrix*")
+                {
+                    if (pos < tokens.Count && tokens[pos].Type == TokenType.LBracket)
+                    {
+                        pos++; // skip [
+                        var spec = "";
+                        while (pos < tokens.Count && tokens[pos].Type != TokenType.RBracket)
+                        {
+                            spec += tokens[pos].Value;
+                            pos++;
+                        }
+                        if (pos < tokens.Count) pos++; // skip ]
+                        spec = spec.Trim();
+                        if (spec.Length > 0) starAlign = spec[..1];
+                    }
+                    envName = envName[..^1]; // drop trailing '*'
+                }
+
                 if (envName is "matrix" or "pmatrix" or "bmatrix" or "Bmatrix" or "vmatrix" or "cases"
-                    or "array" or "smallmatrix")
+                    or "rcases" or "array" or "smallmatrix")
                 {
                     // For array, read the column spec like {l|c|r} and honor the
                     // per-column justification letters (l/c/r) via m:mcJc. Vertical
@@ -1300,7 +1352,7 @@ internal static class FormulaParser
                         if (pos < tokens.Count) pos++; // skip }
                         arrayColSpec = spec;
                     }
-                    var matrixResult = ParseMatrix(envName, tokens, ref pos, arrayColSpec);
+                    var matrixResult = ParseMatrix(envName, tokens, ref pos, arrayColSpec, starAlign);
                     // array should render without implicit delimiters
                     if (envName == "array" && matrixResult is M.Delimiter arrDelim)
                     {
@@ -1310,8 +1362,24 @@ internal static class FormulaParser
                     }
                     return matrixResult;
                 }
+                // \begin{alignat}{n} takes a mandatory {n} column-count arg.
+                // Consume/skip it, then route through the same multi-alignment
+                // path as align (the >2-cell matrix branch below handles the
+                // multiple alignment points).
+                if (envName is "alignat" or "alignat*")
+                {
+                    if (pos < tokens.Count && tokens[pos].Type == TokenType.LBrace)
+                    {
+                        pos++; // skip {
+                        while (pos < tokens.Count && tokens[pos].Type != TokenType.RBrace) pos++;
+                        if (pos < tokens.Count) pos++; // skip }
+                    }
+                    envName = "align";
+                }
+
                 if (envName is "align" or "align*" or "aligned" or "gathered" or "eqnarray"
-                    or "eqnarray*" or "split")
+                    or "eqnarray*" or "split"
+                    or "gather" or "gather*" or "multline" or "multline*")
                 {
                     // Multi-line equation environments map to m:eqArr (equation
                     // array — a vertical stack of equations), NOT m:m. m:m is a
@@ -1554,15 +1622,42 @@ internal static class FormulaParser
                 );
             }
             case "text":
+            case "textrm":  // roman/upright — same as \text
+            case "textbf":  // bold
+            case "textit":  // italic
+            case "emph":    // emphasis → italic
+            case "texttt":  // monospace
+            case "textsf":  // sans-serif
             {
-                // \text{...} → M.Run with normal text properties (upright, not math italic)
+                // \text{...} family → upright text run (m:nor). The styled
+                // variants add the matching axis: \textbf sets m:sty=b, \textit/
+                // \emph sets m:sty=i, \texttt sets m:scr=monospace, \textsf sets
+                // m:scr=sans-serif. m:nor keeps the run upright (text, not math
+                // italic) like \text; \textit re-introduces italic via m:sty.
                 var content = ParseBracedArg(tokens, ref pos);
                 var text = ExtractText(content);
-                var run = new M.Run(
-                    new M.RunProperties(new M.NormalText()),
+                var rPr = new M.RunProperties(new M.NormalText());
+                switch (cmd)
+                {
+                    case "textbf":
+                        rPr.AppendChild(new M.Style { Val = M.StyleValues.Bold });
+                        break;
+                    case "textit":
+                    case "emph":
+                        rPr.AppendChild(new M.Style { Val = M.StyleValues.Italic });
+                        break;
+                    case "texttt":
+                        rPr.AppendChild(new M.Script { Val = M.ScriptValues.Monospace });
+                        break;
+                    case "textsf":
+                        rPr.AppendChild(new M.Script { Val = M.ScriptValues.SansSerif });
+                        break;
+                    // "text", "textrm": plain upright, no extra axis.
+                }
+                return new M.Run(
+                    rPr,
                     new M.Text(text) { Space = SpaceProcessingModeValues.Preserve }
                 );
-                return run;
             }
             case "overline":
             {
@@ -1582,7 +1677,8 @@ internal static class FormulaParser
             }
             case "hat" or "bar" or "vec" or "dot" or "ddot" or "tilde"
                 or "widehat" or "widetilde" or "overrightarrow" or "overleftarrow"
-                or "overleftrightarrow":
+                or "overleftrightarrow"
+                or "acute" or "grave" or "check" or "breve" or "mathring" or "dddot":
             {
                 // Wide accents (\widehat, \overrightarrow, ...) are the same m:acc
                 // construct as the narrow ones \u2014 only the combining char differs.
@@ -1597,7 +1693,13 @@ internal static class FormulaParser
                     "overleftrightarrow" => "\u20E1",  // combining left-right arrow above
                     "dot" => "\u0307",   // combining dot above
                     "ddot" => "\u0308",  // combining diaeresis
+                    "dddot" => "\u20db", // combining three dots above
                     "tilde" or "widetilde" => "\u0303", // combining tilde
+                    "acute" => "\u0301", // combining acute accent
+                    "grave" => "\u0300", // combining grave accent
+                    "check" => "\u030c", // combining caron
+                    "breve" => "\u0306", // combining breve
+                    "mathring" => "\u030a", // combining ring above
                     _ => "\u0302"
                 };
                 var arg = ParseBracedArg(tokens, ref pos);
@@ -1609,6 +1711,7 @@ internal static class FormulaParser
             case "lim" or "sin" or "cos" or "tan" or "log" or "ln" or "exp" or "min" or "max"
                 or "sup" or "inf" or "det" or "gcd" or "dim" or "ker" or "hom" or "deg"
                 or "arg" or "sec" or "csc" or "cot" or "sinh" or "cosh" or "tanh"
+                or "coth" or "sech" or "csch"
                 or "limsup" or "liminf" or "Pr" or "argmax" or "argmin":
             {
                 // Function names: render upright (non-italic) using M.NormalText
@@ -1984,6 +2087,33 @@ internal static class FormulaParser
                 // overlay (U+0338); it combines with whatever run follows.
                 return MakeMathRun("̸");
             }
+            case "displaystyle":
+            case "textstyle":
+            case "scriptstyle":
+            case "scriptscriptstyle":
+            case "mathstrut":
+            {
+                // Math-style switches and the invisible strut have no OMML
+                // equivalent (OMML does not model display/text sizing as a
+                // run switch). They take NO argument and affect the rest of
+                // the group, so render nothing here and let the following
+                // content flow through unchanged: "\displaystyle x" → x.
+                return MakeMathRun("");
+            }
+            case "smash":
+            {
+                // \smash{x} sets x's height/depth to zero — no OMML equivalent.
+                // Render the argument normally.
+                var arg = ParseBracedArg(tokens, ref pos);
+                return arg;
+            }
+            case "phantom":
+            {
+                // \phantom{x} reserves x's space but renders nothing. Consume
+                // the argument cleanly and emit an empty run.
+                ParseBracedArg(tokens, ref pos);
+                return MakeMathRun("");
+            }
             case "operatorname":
             {
                 // \operatorname{name} → upright function name with limit support
@@ -2068,7 +2198,7 @@ internal static class FormulaParser
     }
 
     private static OpenXmlElement ParseMatrix(string envName, List<Token> tokens, ref int pos,
-        string? arrayColSpec = null)
+        string? arrayColSpec = null, string? starAlign = null)
     {
         var rows = new List<List<List<OpenXmlElement>>>();
         var currentRow = new List<List<OpenXmlElement>>();
@@ -2207,6 +2337,32 @@ internal static class FormulaParser
             }
         }
 
+        // Starred matrix envs (matrix*/pmatrix*/…): apply the optional [l|c|r]
+        // alignment uniformly to every column via m:mcJc (default center if
+        // none was given). Reuses the same per-column mechanism as array/cases.
+        if (starAlign != null)
+        {
+            var j = starAlign switch
+            {
+                "l" => M.HorizontalAlignmentValues.Left,
+                "r" => M.HorizontalAlignmentValues.Right,
+                _ => M.HorizontalAlignmentValues.Center,
+            };
+            var mPr = matrix.GetFirstChild<M.MatrixProperties>();
+            if (mPr != null)
+            {
+                var colCount = rows.Count == 0 ? 0 : rows.Max(r => r.Count);
+                var mcs = new M.MatrixColumns();
+                for (int ci = 0; ci < colCount; ci++)
+                    mcs.AppendChild(new M.MatrixColumn(
+                        new M.MatrixColumnProperties(
+                            new M.MatrixColumnCount { Val = 1 },
+                            new M.MatrixColumnJustification { Val = j }
+                        )));
+                mPr.AppendChild(mcs);
+            }
+        }
+
         // Wrap with delimiter based on environment. matrix/smallmatrix render
         // with no implicit delimiters; smallmatrix differs only in glyph size,
         // which OMML does not model, so it is treated as a bare matrix.
@@ -2220,6 +2376,9 @@ internal static class FormulaParser
             "Bmatrix" => ("{", "}"),
             "vmatrix" => ("|", "|"),
             "cases" => ("{", ""),
+            // \begin{rcases}…\end{rcases}: brace on the RIGHT — the opening
+            // delimiter is empty and the closing one is "}". Mirror of cases.
+            "rcases" => ("", "}"),
             _ => ("(", ")")
         };
 
@@ -2229,8 +2388,8 @@ internal static class FormulaParser
         if (endChar != ")")
             dPr.AppendChild(new M.EndChar { Val = endChar });
 
-        // For cases: left-align cells
-        if (envName == "cases")
+        // For cases/rcases: left-align cells
+        if (envName is "cases" or "rcases")
         {
             // Set column justification to left for the matrix
             var mPr = matrix.ChildElements.FirstOrDefault(e => e.LocalName == "mPr") as M.MatrixProperties;
@@ -2549,6 +2708,27 @@ internal static class FormulaParser
         "iff" => "⟺",
         "implies" => "⟹",
         "impliedby" => "⟸",
+        "hookrightarrow" => "↪",
+        "hookleftarrow" => "↩",
+        "longrightarrow" => "⟶",
+        "longleftarrow" => "⟵",
+        "longleftrightarrow" => "⟷",
+        "Longrightarrow" => "⟹",
+        "Longleftarrow" => "⟸",
+        "Longleftrightarrow" => "⟺",
+        "longmapsto" => "⟼",
+        "nearrow" => "↗",
+        "searrow" => "↘",
+        "swarrow" => "↙",
+        "nwarrow" => "↖",
+        "rightharpoonup" => "⇀",
+        "rightharpoondown" => "⇁",
+        "leftharpoonup" => "↼",
+        "leftharpoondown" => "↽",
+        "twoheadrightarrow" => "↠",
+        "rightsquigarrow" => "⇝",
+        "curvearrowright" => "↷",
+        "curvearrowleft" => "↶",
         // Logic
         "land" or "wedge" => "∧",
         "lor" or "vee" => "∨",
@@ -2582,6 +2762,27 @@ internal static class FormulaParser
         "supseteq" => "⊇",
         "in" => "∈",
         "notin" => "∉",
+        // Additional relations
+        "propto" => "∝",
+        "cong" => "≅",
+        "simeq" => "≃",
+        "asymp" => "≍",
+        "doteq" => "≐",
+        "prec" => "≺",
+        "succ" => "≻",
+        "preceq" => "≼",
+        "succeq" => "≽",
+        "ll" => "≪",
+        "gg" => "≫",
+        "sqsubseteq" => "⊑",
+        "sqsupseteq" => "⊒",
+        "sqsubset" => "⊏",
+        "sqsupset" => "⊐",
+        "dashv" => "⊣",
+        "Vdash" => "⊩",
+        "bowtie" => "⋈",
+        "smile" => "⌣",
+        "frown" => "⌢",
         // Negated relations / set membership (precomposed Unicode where one exists)
         "nmid" => "∤",
         "nleq" or "nleqslant" => "≰",
@@ -2610,6 +2811,36 @@ internal static class FormulaParser
         "triangle" => "△",
         "prime" => "′",
         "hbar" => "ℏ",
+        // Misc symbols
+        "perp" or "bot" => "⊥",
+        "top" => "⊤",
+        "angle" => "∠",
+        "measuredangle" => "∡",
+        "sphericalangle" => "∢",
+        "backslash" => "∖",
+        "flat" => "♭",
+        "sharp" => "♯",
+        "natural" => "♮",
+        "square" or "Box" => "□",
+        "blacksquare" => "■",
+        "triangleleft" => "◁",
+        "triangleright" => "▷",
+        "bigtriangleup" => "△",
+        "bigtriangledown" => "▽",
+        "diamond" => "⋄",
+        "Diamond" => "◇",
+        "bigstar" => "★",
+        "clubsuit" => "♣",
+        "diamondsuit" => "♦",
+        "heartsuit" => "♥",
+        "spadesuit" => "♠",
+        "dagger" => "†",
+        "ddagger" => "‡",
+        "wr" => "≀",
+        "amalg" => "⨿",
+        "uplus" => "⊎",
+        "sqcup" => "⊔",
+        "sqcap" => "⊓",
         "cdots" => "⋯",
         "ldots" => "…",
         "vdots" => "⋮",
@@ -2645,7 +2876,19 @@ internal static class FormulaParser
         "beta" => "β",
         "gamma" => "γ",
         "delta" => "δ",
-        "epsilon" => "ε",
+        // \epsilon is the lunate epsilon (U+03F5 ϵ); \varepsilon the script
+        // form (U+03B5 ε). Keep them distinct so each round-trips to its own
+        // command rather than collapsing.
+        "epsilon" => "ϵ",
+        "varepsilon" => "ε",
+        "vartheta" => "ϑ",
+        // \phi is the loopy phi (U+03D5 ϕ); \varphi the open form (U+03C6 φ).
+        "varphi" => "φ",
+        "varrho" => "ϱ",
+        "varpi" => "ϖ",
+        "varsigma" => "ς",
+        "varkappa" => "ϰ",
+        "digamma" => "ϝ",
         "zeta" => "ζ",
         "eta" => "η",
         "theta" => "θ",
@@ -2660,7 +2903,7 @@ internal static class FormulaParser
         "sigma" => "σ",
         "tau" => "τ",
         "upsilon" => "υ",
-        "phi" => "φ",
+        "phi" => "ϕ",
         "chi" => "χ",
         "psi" => "ψ",
         "omega" => "ω",
@@ -2687,6 +2930,7 @@ internal static class FormulaParser
         "lim", "sin", "cos", "tan", "log", "ln", "exp", "min", "max",
         "sup", "inf", "det", "gcd", "dim", "ker", "hom", "deg",
         "arg", "sec", "csc", "cot", "sinh", "cosh", "tanh",
+        "coth", "sech", "csch",
         "limsup", "liminf", "Pr", "argmax", "argmin"
     };
 
@@ -2722,9 +2966,44 @@ internal static class FormulaParser
         ("ℵ", "\\aleph "), ("ℶ", "\\beth "), ("ℷ", "\\gimel "), ("ℸ", "\\daleth "),
         ("ℓ", "\\ell "), ("℘", "\\wp "), ("ℜ", "\\Re "), ("ℑ", "\\Im "),
         ("α", "\\alpha "), ("β", "\\beta "), ("γ", "\\gamma "), ("δ", "\\delta "),
-        ("ε", "\\epsilon "), ("θ", "\\theta "), ("λ", "\\lambda "), ("μ", "\\mu "),
-        ("π", "\\pi "), ("σ", "\\sigma "), ("φ", "\\phi "), ("ω", "\\omega "),
+        ("ϵ", "\\epsilon "), ("θ", "\\theta "), ("λ", "\\lambda "), ("μ", "\\mu "),
+        ("π", "\\pi "), ("σ", "\\sigma "), ("ϕ", "\\phi "), ("ω", "\\omega "),
         ("Σ", "\\Sigma "), ("Π", "\\Pi "), ("Δ", "\\Delta "), ("Ω", "\\Omega "),
+        // Variant Greek letters (distinct codepoints from the non-var forms above).
+        ("ε", "\\varepsilon "), ("ϑ", "\\vartheta "), ("φ", "\\varphi "),
+        ("ϱ", "\\varrho "), ("ϖ", "\\varpi "), ("ς", "\\varsigma "),
+        ("ϰ", "\\varkappa "), ("ϝ", "\\digamma "),
+        // Relations
+        ("∝", "\\propto "), ("≅", "\\cong "), ("≃", "\\simeq "), ("≍", "\\asymp "),
+        ("≐", "\\doteq "), ("≺", "\\prec "), ("≻", "\\succ "), ("≼", "\\preceq "),
+        ("≽", "\\succeq "), ("≪", "\\ll "), ("≫", "\\gg "),
+        ("⊑", "\\sqsubseteq "), ("⊒", "\\sqsupseteq "), ("⊏", "\\sqsubset "),
+        ("⊐", "\\sqsupset "), ("⊣", "\\dashv "), ("⊩", "\\Vdash "),
+        ("⋈", "\\bowtie "), ("⌣", "\\smile "), ("⌢", "\\frown "),
+        // Arrows
+        ("↪", "\\hookrightarrow "), ("↩", "\\hookleftarrow "),
+        ("⟶", "\\longrightarrow "), ("⟵", "\\longleftarrow "),
+        ("⟷", "\\longleftrightarrow "), ("⟼", "\\longmapsto "),
+        ("↗", "\\nearrow "), ("↘", "\\searrow "), ("↙", "\\swarrow "), ("↖", "\\nwarrow "),
+        ("⇀", "\\rightharpoonup "), ("⇁", "\\rightharpoondown "),
+        ("↼", "\\leftharpoonup "), ("↽", "\\leftharpoondown "),
+        ("↠", "\\twoheadrightarrow "), ("⇝", "\\rightsquigarrow "),
+        ("↷", "\\curvearrowright "), ("↶", "\\curvearrowleft "),
+        // \Longrightarrow/\Longleftarrow/\Longleftrightarrow collapse to
+        // \implies/\impliedby/\iff (same glyph) — handled below.
+        ("⟹", "\\implies "), ("⟸", "\\impliedby "), ("⟺", "\\iff "),
+        // Misc symbols (\perp/\bot share ⊥ → reverse picks \perp; \bigtriangleup
+        // shares △ with \triangle → reverse picks \triangle; \square/\Box share □).
+        ("⊥", "\\perp "), ("⊤", "\\top "), ("∠", "\\angle "),
+        ("∡", "\\measuredangle "), ("∢", "\\sphericalangle "), ("∖", "\\setminus "),
+        ("♭", "\\flat "), ("♯", "\\sharp "), ("♮", "\\natural "),
+        ("□", "\\square "), ("■", "\\blacksquare "),
+        ("◁", "\\triangleleft "), ("▷", "\\triangleright "), ("▽", "\\bigtriangledown "),
+        ("⋄", "\\diamond "), ("◇", "\\Diamond "), ("★", "\\bigstar "),
+        ("♣", "\\clubsuit "), ("♦", "\\diamondsuit "), ("♥", "\\heartsuit "),
+        ("♠", "\\spadesuit "), ("†", "\\dagger "), ("‡", "\\ddagger "),
+        ("≀", "\\wr "), ("⨿", "\\amalg "), ("⊎", "\\uplus "),
+        ("⊔", "\\sqcup "), ("⊓", "\\sqcap "),
     };
 
     // ==================== Unicode subscript/superscript ====================
