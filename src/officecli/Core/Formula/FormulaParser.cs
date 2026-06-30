@@ -198,7 +198,26 @@ internal static class FormulaParser
     {
         while (true)
         {
-            var idx = latex.IndexOf("\\over");
+            // R4-fuzz-1: match the STANDALONE \over primitive only, never the
+            // \over PREFIX of a longer command (\overbrace, \overline, \overset,
+            // \overleftarrow, \overrightarrow, \overleftrightarrow, …). A bare
+            // string IndexOf("\\over") matched those prefixes, splitting e.g.
+            // {\overbrace{x}} into \frac{}{...} and corrupting the math. The
+            // exact \over token is "\over" NOT immediately followed by an ASCII
+            // letter (it is followed by a space, '{', digit, '\', etc.). Scan
+            // forward past any prefix matches.
+            int idx = -1;
+            int searchFrom = 0;
+            while (true)
+            {
+                var cand = latex.IndexOf("\\over", searchFrom, StringComparison.Ordinal);
+                if (cand < 0) break;
+                int after = cand + 5;
+                char next = after < latex.Length ? latex[after] : '\0';
+                bool nextIsAsciiLetter = (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z');
+                if (!nextIsAsciiLetter) { idx = cand; break; }
+                searchFrom = cand + 5; // skip this \over... prefix and keep looking
+            }
             if (idx < 0) break;
 
             // Find the opening brace that contains \over
