@@ -511,7 +511,7 @@ public static partial class WordBatchEmitter
             if (TryEmitPictureRun(word, run, paraTargetPath, parentPath, targetIndex, items, ctx, sharedAttachPara)) continue;
             if (TryEmitNoteRefRun(word, run, paraTargetPath, items, ctx)) continue;
             if (TryEmitMixedBreakRun(word, run, parentPath, paraTargetPath, items, ctx)) continue;
-            EmitPlainOrHyperlinkRun(run, paraTargetPath, items, ctx, hlBaseline);
+            EmitPlainOrHyperlinkRun(word, run, paraTargetPath, items, ctx, hlBaseline);
         }
         // Flush any SDTs that sit after the last run (or whose rank could not be
         // recovered from the XML — int.MaxValue lands here).
@@ -848,7 +848,7 @@ public static partial class WordBatchEmitter
                     if ((run.Type == "run" || run.Type == "r")
                         && (run.Format.ContainsKey("url") || run.Format.ContainsKey("anchor")))
                     {
-                        EmitPlainOrHyperlinkRun(run, carrierPath, items, ctx, carrierHlBaseline);
+                        EmitPlainOrHyperlinkRun(word, run, carrierPath, items, ctx, carrierHlBaseline);
                         continue;
                     }
                     // BUG-R12C: tab / positional-tab runs round-trip through the
@@ -4296,7 +4296,7 @@ public static partial class WordBatchEmitter
         return Uri.TryCreate(url, UriKind.Relative, out _);
     }
 
-    private static void EmitPlainOrHyperlinkRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx = null, int hlBaseline = 0)
+    private static void EmitPlainOrHyperlinkRun(WordHandler word, DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx = null, int hlBaseline = 0)
     {
         // BUG-R12A(BUG1): a hyperlink wrapper with >1 run or any per-run rPr was
         // stashed by CoalesceHyperlinkRuns with its original runs in Children.
@@ -4310,7 +4310,7 @@ public static partial class WordBatchEmitter
         if (run.Format.TryGetValue("_hlStructured", out var hlsObj) && hlsObj is bool hlsB && hlsB
             && run.Children is { Count: > 0 } hlRuns)
         {
-            EmitStructuredHyperlink(hlRuns, paraTargetPath, items, ctx, hlBaseline);
+            EmitStructuredHyperlink(word, hlRuns, paraTargetPath, items, ctx, hlBaseline);
             return;
         }
         var rProps = FilterEmittableProps(run.Format);
@@ -4456,7 +4456,7 @@ public static partial class WordBatchEmitter
     // the current paragraph's hyperlinks re-index from 1. Subtracting the
     // baseline yields the wrapper's LIVE 1-based index inside this paragraph,
     // which is what the trailing `add r` rows must target.
-    private static void EmitStructuredHyperlink(List<DocumentNode> hlRuns, string paraTargetPath,
+    private static void EmitStructuredHyperlink(WordHandler word, List<DocumentNode> hlRuns, string paraTargetPath,
                                                 List<BatchItem> items, BodyEmitContext? ctx, int hlBaseline = 0)
     {
         // Build the wrapper add from the first run's props (url/anchor/tooltip/…
@@ -4478,7 +4478,7 @@ public static partial class WordBatchEmitter
         firstClone.Format.Remove("_hlStructured");
         int hlBefore = items.Count(it => it.Type == "hyperlink"
             && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
-        EmitPlainOrHyperlinkRun(firstClone, paraTargetPath, items, ctx);
+        EmitPlainOrHyperlinkRun(word, firstClone, paraTargetPath, items, ctx);
         int hlAfter = items.Count(it => it.Type == "hyperlink"
             && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
         // If the first run did not materialize a hyperlink row (bare wrapper with
@@ -4499,7 +4499,7 @@ public static partial class WordBatchEmitter
                 clone.Format.Remove("_hlStructured");
                 clone.Format.Remove("url");
                 clone.Format.Remove("anchor");
-                EmitPlainOrHyperlinkRun(clone, paraTargetPath, items, ctx);
+                EmitPlainOrHyperlinkRun(word, clone, paraTargetPath, items, ctx);
             }
             return;
         }
@@ -4508,6 +4508,39 @@ public static partial class WordBatchEmitter
         var hlPath = $"{paraTargetPath}/hyperlink[{hlAfter - hlBaseline}]";
         for (int k = 1; k < hlRuns.Count; k++)
         {
+            // BUG-DUMP-FOOTNOTE-IN-HYPERLINK: a footnote/endnote REFERENCE run
+            // nested INSIDE a hyperlink (e.g. a linked phrase that also carries a
+            // footnote) reaches here as a wrapped child. Emitting it as a bare
+            // `add r` drops the <w:footnoteReference> element AND fails to advance
+            // the per-reference note cursor — so a LATER note body (the highest id)
+            // silently disappears (the visible symptom is "the last footnote went
+            // missing"). Classify it and route through the note-reference emit
+            // (targeting the hyperlink path so the mark stays inside the link),
+            // advancing the cursor exactly like a top-level note ref.
+            if (ctx != null)
+            {
+                var khStyle = hlRuns[k].Format.TryGetValue("rStyle", out var khrs) ? khrs?.ToString() : null;
+                var khNote = ClassifyNoteRefRun(word, hlRuns[k], khStyle);
+                // AddFootnote/AddEndnote require a PARAGRAPH parent (they reject a
+                // hyperlink path), so anchor the note ref on paraTargetPath rather
+                // than hlPath. The reference lands in the host paragraph adjacent to
+                // the link instead of strictly inside it — the same "good enough"
+                // boundary trade-off the comment-in-SDT/oMath strips accept — but the
+                // note body + continuous numbering are preserved (cursor advances in
+                // document order), which is what was silently lost before.
+                if (khNote == NoteRefKind.Footnote)
+                {
+                    int fidx = ++ctx.FootnoteCursor.Index;
+                    EmitNoteReference(word, "footnote", fidx, fidx, paraTargetPath, items, hlRuns[k]);
+                    continue;
+                }
+                if (khNote == NoteRefKind.Endnote)
+                {
+                    int eidx = ++ctx.EndnoteCursor.Index;
+                    EmitNoteReference(word, "endnote", eidx, eidx, paraTargetPath, items, hlRuns[k]);
+                    continue;
+                }
+            }
             var rProps = FilterEmittableProps(hlRuns[k].Format);
             // The hyperlink-wrapper keys belong to the <w:hyperlink>, not its
             // child runs — strip them so `add r` doesn't choke / re-wrap.

@@ -1854,7 +1854,7 @@ public static partial class WordBatchEmitter
             // BUG-R13A: coalesce hyperlink runs so a hyperlink in the comment
             // body round-trips as a typed `add hyperlink` (was dropped as a
             // flat `add r` with unsupported url/isHyperlink props).
-            EmitContainerBodyRuns(firstParaRuns.Skip(commentSeedSkip).ToList(),
+            EmitContainerBodyRuns(word, firstParaRuns.Skip(commentSeedSkip).ToList(),
                 $"{targetCommentPath}/p[1]", items);
 
             // Additional paragraphs (paragraph [1] is the `add comment` body).
@@ -1874,7 +1874,7 @@ public static partial class WordBatchEmitter
                 // AddParagraph with no `text` produces an empty paragraph; emit
                 // each run so per-run formatting survives. The new paragraph is
                 // the (pi+1)-th paragraph of the comment.
-                EmitContainerBodyRuns(runs, $"{targetCommentPath}/p[{pi + 1}]", items);
+                EmitContainerBodyRuns(word, runs, $"{targetCommentPath}/p[{pi + 1}]", items);
             }
         }
 
@@ -1909,7 +1909,7 @@ public static partial class WordBatchEmitter
     // and rPr (italic/bold/color/size/font/…). Mirrors EmitPlainOrHyperlinkRun
     // for /body runs, minus the hyperlink/revision special-casing (comment
     // bodies don't carry those in the supported round-trip).
-    private static void EmitCommentRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, int hlBaseline = 0)
+    private static void EmitCommentRun(WordHandler word, DocumentNode run, string paraTargetPath, List<BatchItem> items, int hlBaseline = 0)
     {
         // BUG-R13A: a run flattened out of a <w:hyperlink> wrapper carries
         // url/anchor/isHyperlink (and _hyperlinkParent) Format keys that
@@ -1924,7 +1924,7 @@ public static partial class WordBatchEmitter
         if (run.Format.ContainsKey("url") || run.Format.ContainsKey("anchor")
             || run.Format.ContainsKey("isHyperlink"))
         {
-            EmitPlainOrHyperlinkRun(run, paraTargetPath, items, null, hlBaseline);
+            EmitPlainOrHyperlinkRun(word, run, paraTargetPath, items, null, hlBaseline);
             return;
         }
         // Tab-only run (<w:r><w:tab/></w:r>, Type=="tab", empty Text): the
@@ -1988,7 +1988,7 @@ public static partial class WordBatchEmitter
     // rPr intact. Reuses the body-paragraph walker's CoalesceHyperlinkRuns /
     // EmitPlainOrHyperlinkRun machinery (single source of truth for hyperlink
     // emit). Non-hyperlink runs pass through EmitCommentRun unchanged.
-    private static void EmitContainerBodyRuns(List<DocumentNode> runs, string paraTargetPath, List<BatchItem> items)
+    private static void EmitContainerBodyRuns(WordHandler word, List<DocumentNode> runs, string paraTargetPath, List<BatchItem> items)
     {
         // BUG-R14B: capture the hyperlink baseline ONCE for this container body
         // so multi-run hyperlinks re-index from 1 within it (mirrors the body
@@ -1996,7 +1996,7 @@ public static partial class WordBatchEmitter
         int hlBaseline = items.Count(it => it.Type == "hyperlink"
             && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
         foreach (var run in CoalesceHyperlinkRuns(runs))
-            EmitCommentRun(run, paraTargetPath, items, hlBaseline);
+            EmitCommentRun(word, run, paraTargetPath, items, hlBaseline);
     }
 
     // BUG-R9A(BUG1): fold a run's rPr format keys into the `add comment` prop
@@ -2392,7 +2392,7 @@ public static partial class WordBatchEmitter
         // BUG-R13A: coalesce hyperlink runs so a hyperlink inside a footnote/
         // endnote body round-trips as a typed `add hyperlink` (was dropped as a
         // flat `add r` carrying unsupported url/isHyperlink props).
-        EmitContainerBodyRuns(firstParaRuns.Skip(noteSeedSkip).ToList(),
+        EmitContainerBodyRuns(word, firstParaRuns.Skip(noteSeedSkip).ToList(),
             $"{targetNotePath}/p[1]", items);
 
         // BUG-DUMP-R27-5: walk the remaining DIRECT block children in document
@@ -2424,7 +2424,7 @@ public static partial class WordBatchEmitter
                 if (paraNode.Format.TryGetValue("tabs", out var subParaTabs))
                     EmitTabStops($"{targetNotePath}/p[{targetParaOrdinal}]", subParaTabs, items);
                 var runs = paraNode.Children.Where(c => IsRoundTrippableNoteRun(word, c)).ToList();
-                EmitContainerBodyRuns(runs, $"{targetNotePath}/p[{targetParaOrdinal}]", items);
+                EmitContainerBodyRuns(word, runs, $"{targetNotePath}/p[{targetParaOrdinal}]", items);
             }
             else // "tbl" — reuse the body table emitter against the note host.
             {
