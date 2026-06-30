@@ -702,28 +702,21 @@ public partial class WordHandler : IDocumentHandler, Rendering.IRenderModelHost
             int tcIdx = 0;
             foreach (var rc in row.ChildElements)
             {
-                if (rc is TableCell cellEl)
+                if (rc is TableCell)
                 {
                     tcIdx++;
-                    // BUG-DUMP-BLOCK-PERM: a <w:permStart>/<w:permEnd> that is a DIRECT
-                    // child of <w:tc> (between the cell's paragraphs, not inside one)
-                    // is also missed by the paragraph walk. Position it by the cell's
-                    // paragraph index.
-                    int cellParas = cellEl.Elements<Paragraph>().Count();
-                    int cpIdx = 0;
-                    foreach (var cc in cellEl.ChildElements)
-                    {
-                        if (cc is Paragraph) { cpIdx++; continue; }
-                        if (cc is PermStart || cc is PermEnd)
-                        {
-                            string crel, caction;
-                            if (cellParas == 0) { crel = $"w:tr[{trIdx}]/w:tc[{tcIdx}]"; caction = "append"; }
-                            else if (cpIdx == 0) { crel = $"w:tr[{trIdx}]/w:tc[{tcIdx}]/w:p[1]"; caction = "before"; }
-                            else if (cpIdx < cellParas) { crel = $"w:tr[{trIdx}]/w:tc[{tcIdx}]/w:p[{cpIdx + 1}]"; caction = "before"; }
-                            else { crel = $"w:tr[{trIdx}]/w:tc[{tcIdx}]/w:p[{cpIdx}]"; caction = "after"; }
-                            result.Add((cc.OuterXml, crel, caction));
-                        }
-                    }
+                    // BUG-DUMP-PERM-DUP: a cell-DIRECT <w:permStart>/<w:permEnd> (the
+                    // displacedByCustomXml="next" markers Word places at <w:tc> level
+                    // right before an inline <w:sdt>) is ALSO enumerated by
+                    // GetCellStructuralBookmarks, which EmitTable invokes per cell and
+                    // which emits each marker as its own faithful 1:1 raw-set op.
+                    // Scanning cell-direct perms here too double-emitted every such
+                    // permStart (22 vs 18 → duplicate ids → validate regression /
+                    // corrupted protection ranges) while the matching permEnd was
+                    // emitted once. Leave cell-direct markers to the per-cell helper;
+                    // only count the cell so tr-level positioning below stays correct.
+                    // The tbl-direct / tr-direct perms below are NOT inside a <w:tc>,
+                    // so the per-cell helper does not see them and they stay here.
                     continue;
                 }
                 if (rc is BookmarkStart || rc is BookmarkEnd || rc is PermStart || rc is PermEnd)
