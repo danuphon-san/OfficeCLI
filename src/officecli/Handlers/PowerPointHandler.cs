@@ -1627,6 +1627,29 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 return (srRid, parentPartPath);
             }
 
+            case "tablestyles":
+            {
+                // Re-create the presentation's custom table-style catalogue
+                // (ppt/tableStyles.xml). MUST use the TYPED TableStylesPart, not
+                // AddExtendedPart: tableStyles is a known OOXML part type, and a
+                // generic extended part with that content-type is pruned by the
+                // SDK on save (the part vanished and each table's custom
+                // <a:tableStyleId> GUID fell back to a built-in style —
+                // sample09). Props: xml (base64 of tableStyles.xml).
+                var tsPres = _doc.PresentationPart
+                    ?? throw new InvalidOperationException("presentation part missing");
+                if (properties == null
+                    || !properties.TryGetValue("xml", out var tsXmlB64) || string.IsNullOrEmpty(tsXmlB64))
+                    throw new ArgumentException("add-part tablestyles requires property 'xml' (base64)");
+                byte[] tsBytes;
+                try { tsBytes = Convert.FromBase64String(tsXmlB64); }
+                catch (FormatException) { throw new ArgumentException("add-part tablestyles: 'xml' is not valid base64"); }
+                var tsPart = tsPres.TableStylesPart ?? tsPres.AddNewPart<TableStylesPart>();
+                using (var tsStream = tsPart.GetStream(FileMode.Create, FileAccess.Write))
+                    tsStream.Write(tsBytes, 0, tsBytes.Length);
+                return ("tablestyles", parentPartPath);
+            }
+
             case "extpart":
             {
                 // Re-create an arbitrary binary part with a CUSTOM relationship

@@ -171,6 +171,15 @@ public static partial class PptxBatchEmitter
         // may go stale on replay; UnsupportedWarning surfaces that risk.
         EmitPresentationExtras(ppt, items, ctx);
 
+        // Custom table-style catalogue (ppt/tableStyles.xml). A table references
+        // its style by GUID (<a:tableStyleId>); when that GUID names a CUSTOM
+        // style defined only in tableStyles.xml, dropping the part leaves the
+        // GUID unresolvable and PowerPoint falls back to a built-in style with
+        // different banding/header fills (sample09: a header row gained a solid
+        // dark-blue fill the source's custom style did not have). Carry the part
+        // verbatim with a pinned rel so the GUID resolves.
+        EmitTableStyles(ppt, items);
+
         // R12a aux-parts: surface a warning per package part the dump surface
         // does not round-trip (tableStyles, viewProps, handoutMasters,
         // printerSettings, customXml, embedded fonts, programmability tags,
@@ -252,6 +261,36 @@ public static partial class PptxBatchEmitter
             "print.scaleToFitPaper", "print.frameSlides",
             "show.loop", "show.narration", "show.animation", "show.useTimings",
         };
+
+    // Relationship / content types for the presentation's tableStyles part.
+    private const string TableStylesRelType =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/tableStyles";
+    private const string TableStylesContentType =
+        "application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml";
+
+    private static void EmitTableStyles(PowerPointHandler ppt, List<BatchItem> items)
+    {
+        string xml;
+        try { xml = ppt.Raw("/ppt/tableStyles.xml"); }
+        catch { return; }
+        if (string.IsNullOrWhiteSpace(xml) || !xml.Contains("tblStyleLst", StringComparison.Ordinal))
+            return;
+        // Carry the part verbatim via a pinned extended-part relationship on the
+        // presentation. The blank replay deck has no tableStyles part, so this
+        // creates it; PowerPoint resolves each table's <a:tableStyleId> GUID
+        // against it. The rId is arbitrary (the presentation body does not
+        // reference tableStyles by id — PowerPoint discovers it via rel type).
+        items.Add(new BatchItem
+        {
+            Command = "add-part",
+            Parent = "/presentation",
+            Type = "tablestyles",
+            Props = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["xml"] = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(xml)),
+            },
+        });
+    }
 
     private static void EmitPresentationProps(PowerPointHandler ppt, List<BatchItem> items)
     {
