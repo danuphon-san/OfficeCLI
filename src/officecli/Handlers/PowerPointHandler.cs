@@ -921,6 +921,22 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
 
                 string? pinnedVideoRid = properties.TryGetValue("video-rid", out var vr) ? vr : null;
                 string? pinnedAudioRid = properties.TryGetValue("audio-rid", out var ar) ? ar : null;
+
+                // rel-only: a timing-tree / transition SOUND (<p:sndTgt r:embed>,
+                // <p:snd r:embed>) needs ONLY a bare `.../audio` relationship to a
+                // MediaDataPart with the source rId — NOT the <p:pic> media
+                // machinery (MediaReference + thumbnail). Without this the audio
+                // rId in the raw-passed-through timing tree dangled and PowerPoint
+                // refused the deck (0x80070570). Create the audio rel with the
+                // pinned rId and return; the timing slice already references it.
+                if (partType == "audio"
+                    && properties.TryGetValue("rel-only", out var relOnly) && IsTruthy(relOnly))
+                {
+                    var soundRid = !string.IsNullOrEmpty(pinnedAudioRid)
+                        ? mediaSlidePart.AddAudioReferenceRelationship(mediaDataPart, pinnedAudioRid).Id
+                        : mediaSlidePart.AddAudioReferenceRelationship(mediaDataPart).Id;
+                    return ($"audio={soundRid}", parentPartPath);
+                }
                 string? pinnedMediaRid = properties.TryGetValue("media-rid", out var mr) ? mr : null;
                 string? pinnedThumbRid = properties.TryGetValue("thumbnail-rid", out var tr) ? tr : null;
 
@@ -2709,6 +2725,72 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
             using var ms = new MemoryStream();
             s.CopyTo(ms);
             result.Add(new MasterImageInfo(idp.RelationshipId, img.ContentType, Convert.ToBase64String(ms.ToArray())));
+        }
+        return result;
+    }
+
+    // A sound relationship referenced from a slide's <p:timing> tree
+    // (<p:sndTgt r:embed>) or its <p:transition> (<p:snd r:embed>). The timing /
+    // transition XML is round-tripped verbatim via raw-set, so its literal rId
+    // must resolve on replay — but those rels are NOT part of the <p:pic> media
+    // pass, so without re-creating them the r:embed dangles and PowerPoint
+    // refuses the deck (0x80070570). Carry the bytes + content type + pinned rId.
+    internal readonly record struct TimingAudioRel(
+        string RelId, string ContentType, string Extension, byte[] Data);
+
+    internal IReadOnlyList<TimingAudioRel> GetTimingAudioRels(int slideIdx)
+    {
+        var result = new List<TimingAudioRel>();
+        var parts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > parts.Count) return result;
+        var slidePart = parts[slideIdx - 1];
+
+        string slideXml;
+        try
+        {
+            using var s = slidePart.GetStream(FileMode.Open, FileAccess.Read);
+            using var r = new StreamReader(s);
+            slideXml = r.ReadToEnd();
+        }
+        catch { return result; }
+
+        // Collect rIds referenced by sound elements (timing sndTgt + transition snd).
+        var rids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+            slideXml, @"<p:snd(?:Tgt)?\b[^>]*\br:embed=""([^""]+)"""))
+        {
+            rids.Add(m.Groups[1].Value);
+        }
+        if (rids.Count == 0) return result;
+
+        // Sound rels are DATA-PART reference relationships (media), not regular
+        // part relationships — GetPartById throws on them. Resolve the DataPart
+        // via the slide's DataPartReferenceRelationships keyed by rId.
+        var byId = new Dictionary<string, DocumentFormat.OpenXml.Packaging.DataPart>(StringComparer.Ordinal);
+        foreach (var dpr in slidePart.DataPartReferenceRelationships)
+            if (dpr.Id is { } id && !byId.ContainsKey(id)) byId[id] = dpr.DataPart;
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var rid in rids)
+        {
+            if (!seen.Add(rid)) continue;
+            if (!byId.TryGetValue(rid, out var dataPart) || dataPart == null) continue;
+            try
+            {
+                byte[] bytes;
+                using (var ps = dataPart.GetStream(FileMode.Open, FileAccess.Read))
+                using (var ms = new MemoryStream())
+                {
+                    ps.CopyTo(ms);
+                    bytes = ms.ToArray();
+                }
+                if (bytes.Length == 0) continue;
+                var ct = string.IsNullOrEmpty(dataPart.ContentType) ? "audio/wav" : dataPart.ContentType;
+                var ext = Path.GetExtension(dataPart.Uri?.OriginalString ?? "").ToLowerInvariant();
+                if (string.IsNullOrEmpty(ext)) ext = ".wav";
+                result.Add(new TimingAudioRel(rid, ct, ext, bytes));
+            }
+            catch { /* dangling in source too — skip */ }
         }
         return result;
     }

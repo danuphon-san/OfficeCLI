@@ -822,6 +822,30 @@ public static partial class PptxBatchEmitter
         // passthrough. The typed walk skipped video/audio children above.
         EmitMediaForSlide(ppt, slideNum, slidePath, items, ctx);
 
+        // Timing / transition SOUND relationships: <p:sndTgt r:embed> in the
+        // raw-passed-through <p:timing> tree (and <p:snd r:embed> in a
+        // <p:transition>) reference a bare `.../audio` rel that the media pass
+        // above does NOT recreate (it only handles <p:pic> media). Without the
+        // rel the literal rId in the timing slice dangles → PowerPoint refuses
+        // the deck (0x80070570). Recreate each with its pinned rId + bytes.
+        foreach (var ta in ppt.GetTimingAudioRels(slideNum))
+        {
+            items.Add(new BatchItem
+            {
+                Command = "add-part",
+                Parent = slidePath,
+                Type = "audio",
+                Props = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["rel-only"] = "true",
+                    ["audio-rid"] = ta.RelId,
+                    ["content-type"] = ta.ContentType,
+                    ["extension"] = ta.Extension,
+                    ["data"] = Convert.ToBase64String(ta.Data),
+                },
+            });
+        }
+
         // Phase 3c-3d: am3d 3D-model AlternateContent blocks with their
         // underlying ExtendedPart .glb + thumbnail ImagePart, mirroring
         // the video/audio passthrough. The typed walk skipped
