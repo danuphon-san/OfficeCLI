@@ -1334,8 +1334,10 @@ internal static partial class ChartHelper
     /// <summary>
     /// Build a fill element: solid if single color, gradient if contains '-'.
     /// Gradient format: "color1-color2[:angle]" or "color1-color2-color3[:angle]"
+    /// Internal so the cx (ExtendedChart) builder can share the exact same fill
+    /// vocabulary (solid / gradient / pattern / none) as regular cCharts.
     /// </summary>
-    private static OpenXmlElement BuildFillElement(string value)
+    internal static OpenXmlElement BuildFillElement(string value)
     {
         if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
             return new Drawing.NoFill();
