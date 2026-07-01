@@ -1870,14 +1870,39 @@ public partial class WordHandler
                 node.Children.Add(symNode);
                 fnSymIdx++;
             }
-            int fnEqIdx = 0;
-            foreach (var fnEq in fnEl.Descendants<M.OfficeMath>())
-            {
-                node.Children.Add(ElementToNode(fnEq, $"{path}/equation[{fnEqIdx + 1}]", depth - 1));
-                fnEqIdx++;
-            }
+            AddNoteEquationChildren(fnEl, node, path, depth);
         }
         return node;
+    }
+
+    // Emit RESOLVABLE child paths for equations inside a footnote/endnote. The
+    // former flat `Descendants<M.OfficeMath>()` + `equation[N]` labelling produced
+    // paths (/footnotes/footnote[N]/equation[K]) that no element matches — the
+    // resolver keys off LocalName. Walk per host paragraph and emit the same
+    // resolvable segments AddEquation returns: p[@paraId=X]/oMath[K] (inline) and
+    // p[@paraId=X]/oMathPara[K] (display, wrapper w:p added by the R5 fix),
+    // including hyperlink-nested math.
+    private void AddNoteEquationChildren(OpenXmlElement noteEl, DocumentNode node, string path, int depth)
+    {
+        int pIdx = 0;
+        foreach (var p in noteEl.Elements<Paragraph>())
+        {
+            pIdx++;
+            var seg = BuildParaPathSegment(p, pIdx);
+            void EmitFrom(OpenXmlElement container, string cSeg)
+            {
+                int di = 0;
+                foreach (var disp in container.Elements<M.Paragraph>())
+                    node.Children.Add(ElementToNode(disp, $"{cSeg}/oMathPara[{++di}]", depth - 1));
+                int ii = 0;
+                foreach (var inl in container.Elements<M.OfficeMath>())
+                    node.Children.Add(ElementToNode(inl, $"{cSeg}/oMath[{++ii}]", depth - 1));
+            }
+            EmitFrom(p, $"{path}/{seg}");
+            var hyperlinks = p.Elements<Hyperlink>().ToList();
+            for (int h = 0; h < hyperlinks.Count; h++)
+                EmitFrom(hyperlinks[h], $"{path}/{seg}/hyperlink[{h + 1}]");
+        }
     }
 
     private DocumentNode EndnoteToNode(Endnote enEl, DocumentNode node, string path, int depth)
@@ -1924,12 +1949,7 @@ public partial class WordHandler
                 node.Children.Add(symNode);
                 enSymIdx++;
             }
-            int enEqIdx = 0;
-            foreach (var enEq in enEl.Descendants<M.OfficeMath>())
-            {
-                node.Children.Add(ElementToNode(enEq, $"{path}/equation[{enEqIdx + 1}]", depth - 1));
-                enEqIdx++;
-            }
+            AddNoteEquationChildren(enEl, node, path, depth);
         }
         return node;
     }
