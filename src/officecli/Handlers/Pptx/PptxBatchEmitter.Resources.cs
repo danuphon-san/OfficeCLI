@@ -247,7 +247,15 @@ public static partial class PptxBatchEmitter
         // the presentation<->master1 sharing. Masters 2..N have no scaffold theme,
         // so without this they collapse onto theme1, losing their own theme
         // content and producing a deck PowerPoint refuses.
-        if (idx >= 2)
+        //
+        // EXCEPTION for idx==1: sldMasterIdLst order decides enumeration, so the
+        // first-enumerated master is not necessarily the one sharing the
+        // presentation's theme (sample04: master order [m2, m1], m2 owns its own
+        // theme2 while the presentation shares m1's theme1). When master[1]'s
+        // ThemePart is DISTINCT from the presentation's, the shared-scaffold
+        // assumption is wrong — emit its own theme too; the add-part handler
+        // detaches the scaffold share first, restoring the source topology.
+        if (idx >= 2 || ppt.MasterThemeIsDistinct(idx))
         {
             try
             {

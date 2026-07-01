@@ -509,8 +509,58 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
             }
             seen += declaredCount;
         }
-        // targetGlobalIdx is beyond every master's declared range; caller will
-        // raise the canonical "not found" error after we return.
+        // targetGlobalIdx is beyond every master's declared range. Real decks
+        // can carry MORE layout parts than the master's sldLayoutIdLst declares
+        // (rel-linked but undeclared "orphan" layouts — e.g. sample02 declares
+        // 1 layout yet ships 11). The emitter enumerates SlideLayoutParts (rels,
+        // 11) so raw-set targets /slideLayout[2..11]; grow the shortfall as
+        // stub parts under the last master. Unlike the source's orphan form,
+        // DECLARE each grown part in sldLayoutIdLst: a replayed slide may bind
+        // any of these layouts (the source slide could only ever bind a
+        // declared one), and PowerPoint refuses a deck whose slide references
+        // a layout missing from its master's sldLayoutIdLst (0x80070570).
+        var lastMaster = masters.LastOrDefault();
+        if (lastMaster == null) return;
+        var idList = lastMaster.SlideMaster?.SlideLayoutIdList;
+        if (idList == null && lastMaster.SlideMaster != null)
+        {
+            idList = new SlideLayoutIdList();
+            lastMaster.SlideMaster.SlideLayoutIdList = idList;
+        }
+        uint nextLayoutId = 2147483649; // min valid sldLayoutId id
+        var usedIds = presentationPart.SlideMasterParts
+            .Select(m => m.SlideMaster?.SlideLayoutIdList)
+            .Where(l => l != null)
+            .SelectMany(l => l!.Elements<SlideLayoutId>())
+            .Select(e => e.Id?.Value ?? 0)
+            .ToHashSet();
+        int totalExisting = masters.Sum(m => m.SlideLayoutParts.Count());
+        for (int i = totalExisting; i < targetGlobalIdx; i++)
+        {
+            var extraPart = lastMaster.AddNewPart<SlideLayoutPart>();
+            extraPart.SlideLayout = new SlideLayout(
+                new CommonSlideData(
+                    new ShapeTree(
+                        new NonVisualGroupShapeProperties(
+                            new NonVisualDrawingProperties { Id = 1, Name = "" },
+                            new NonVisualGroupShapeDrawingProperties(),
+                            new ApplicationNonVisualDrawingProperties()),
+                        new GroupShapeProperties()))
+            ) { Type = SlideLayoutValues.Blank };
+            extraPart.SlideLayout.Save();
+            extraPart.AddPart(lastMaster);
+            if (idList != null)
+            {
+                while (usedIds.Contains(nextLayoutId)) nextLayoutId++;
+                idList.AppendChild(new SlideLayoutId
+                {
+                    Id = nextLayoutId,
+                    RelationshipId = lastMaster.GetIdOfPart(extraPart),
+                });
+                usedIds.Add(nextLayoutId);
+            }
+        }
+        if (lastMaster.SlideMaster != null) lastMaster.SlideMaster.Save();
     }
 
     // CONSISTENCY(grow-on-rawset): mirror of GrowSlideLayoutParts for the
@@ -2149,6 +2199,24 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         var themePart = master.ThemePart;
         if (themePart?.Theme == null) return null;
         return (master.GetIdOfPart(themePart), themePart.Theme.OuterXml);
+    }
+
+    /// <summary>
+    /// True when the master's ThemePart is a DIFFERENT part from the
+    /// presentation's primary ThemePart. sldMasterIdLst order decides master
+    /// enumeration, so master[1] is not necessarily the master that shares the
+    /// presentation's theme — a deck whose first-enumerated master carries its
+    /// own theme must get an add-part theme on replay or it collapses onto the
+    /// scaffold's shared theme (wrong colours for every styleRef on its slides).
+    /// </summary>
+    internal bool MasterThemeIsDistinct(int masterIdx)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return false;
+        var masters = pp.SlideMasterParts.ToList();
+        if (masterIdx < 1 || masterIdx > masters.Count) return false;
+        var mt = masters[masterIdx - 1].ThemePart;
+        return mt != null && !ReferenceEquals(mt, pp.ThemePart);
     }
 
     /// <summary>The notes master's own ThemePart (rel id + XML), or null.</summary>
