@@ -22,7 +22,13 @@ namespace OfficeCli.Core.Diagram;
 /// </summary>
 public static class MermaidParser
 {
-    private const string Id = @"([A-Za-z0-9_]+)";
+    // Node identifiers accept Unicode letters/digits, not just ASCII — mermaid
+    // itself allows them, and CJK / accented ids (开始, 判断, café) are common in
+    // non-English flowcharts. \p{L} = any letter, \p{N} = any digit. Without
+    // this a fully-Chinese flowchart parses to zero nodes ("diagram has no
+    // nodes"). The ASCII-only edge-id / class-attach patterns below are left as
+    // they were — those name mermaid-internal constructs, not user labels.
+    private const string Id = @"([\p{L}\p{N}_]+)";
 
     // node-shape wrappers, most-specific first
     private static readonly (FlowShape Shape, Regex Pat)[] ShapePats =
