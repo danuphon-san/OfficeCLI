@@ -1763,8 +1763,16 @@ public partial class WordHandler
     {
         string resultPath;
         OpenXmlElement? newElement;
-        if (!properties.TryGetValue("formula", out var formula) && !properties.TryGetValue("text", out formula))
-            throw new ArgumentException("'formula' (or 'text') property is required for equation type");
+        // Accept `latex=` and `math=` as property aliases for `formula=` — both
+        // are pervasive in docs/usage and read naturally for an equation, and the
+        // TrackingPropertyDictionary marks them consumed so no false
+        // unsupported_property warning fires (handler-as-truth).
+        if (!properties.TryGetValue("formula", out var formula)
+            && !properties.TryGetValue("text", out formula)
+            && !properties.TryGetValue("latex", out formula)
+            && !properties.TryGetValue("math", out formula))
+            throw new ArgumentException(
+                "'formula' (or 'text' / 'latex' / 'math') property is required for equation type");
 
         // A run (w:r) cannot host m:oMath/m:oMathPara — appending one produced a
         // schema-invalid file Word refuses to open. Reject with a clear message
