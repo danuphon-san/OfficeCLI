@@ -14,6 +14,7 @@ examples/
 │   ├── formulas.{md,sh,py,docx}             # LaTeX math/chemistry/physics formulas
 │   ├── tables.{md,sh,py,docx}               # styled tables
 │   ├── textbox.{md,sh,py,docx}              # formatted text boxes
+│   ├── charts.{md,sh,py,docx}               # inline charts (14 types incl. treemap/waterfall)
 │   ├── run-formatting.{md,sh,py,docx}       # run/character property surface
 │   ├── paragraph-formatting.{md,sh,py,docx} # paragraph property surface
 │   ├── document-formatting.{md,sh,py,docx}  # document-level property surface
@@ -22,6 +23,7 @@ examples/
 ├── excel/                                 # 📊 Excel examples — *.{md,sh,py,xlsx}
 │   ├── cell-formatting.{md,sh,py,xlsx}      # full cell property surface (fonts/fills/borders/numFmt/data)
 │   ├── conditional-formatting.{md,sh,py,xlsx}
+│   ├── data-validation.{md,sh,py,xlsx}        # dropdown lists, number/date/text/custom rules, input & error messages
 │   ├── workbook-settings.{md,sh,py,xlsx}
 │   ├── pivot-tables.{md,sh,py,xlsx}
 │   ├── charts.{md,sh,py,xlsx}               # master chart showcase
@@ -47,6 +49,7 @@ examples/
     ├── textboxes/                           # textboxes-<topic>.{md,sh,py,pptx}
     │       (basic, advanced)
     ├── pictures/                            # pictures-basic.{md,sh,py,pptx}
+    ├── ole/                                 # ole-embed.{md,sh,py,pptx} — embedded Excel/Word OLE objects
     └── templates/styles/*/build*.sh         # full-deck template generators (.sh only)
 ```
 
