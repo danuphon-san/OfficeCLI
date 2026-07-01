@@ -5748,6 +5748,39 @@ public partial class WordHandler
         return node;
     }
 
+    // A wpg:wgp group (e.g. a `diagram`) read back as a clean "group" node:
+    // the user-facing /body/group[N] path plus x/y/width/height, instead of the
+    // raw wgp/grpSpPr/wsp internals the generic builder would emit. Mirrors the
+    // pptx group readback so an agent can read the size, compute a target, and
+    // `set /body/group[N] --prop width/height`. Node text stays at /body/textbox[K].
+    private DocumentNode WgpGroupToNode(OpenXmlElement wgp, DocumentNode node, string path)
+    {
+        node.Type = "group";
+        node.Path = System.Text.RegularExpressions.Regex.Replace(path, @"/wgp\[(\d+)\]$", "/group[$1]");
+
+        OpenXmlElement? Child(OpenXmlElement? p, string local) =>
+            p?.ChildElements.FirstOrDefault(e => e.LocalName == local);
+
+        var ext = Child(Child(Child(wgp, "grpSpPr"), "xfrm"), "ext");
+        if (ext != null)
+        {
+            if (ReadUnqualifiedLong(ext, "cx") is { } cx) node.Format["width"] = Core.EmuConverter.FormatEmu(cx);
+            if (ReadUnqualifiedLong(ext, "cy") is { } cy) node.Format["height"] = Core.EmuConverter.FormatEmu(cy);
+        }
+        var anchor = wgp.Ancestors().FirstOrDefault(e => e.LocalName is "anchor" or "inline");
+        if (anchor != null)
+        {
+            long? PosOffset(string dir)
+            {
+                var off = Child(Child(anchor, dir), "posOffset");
+                return long.TryParse(off?.InnerText, out var v) ? v : null;
+            }
+            if (PosOffset("positionH") is { } x) node.Format["x"] = Core.EmuConverter.FormatEmu(x);
+            if (PosOffset("positionV") is { } y) node.Format["y"] = Core.EmuConverter.FormatEmu(y);
+        }
+        return node;
+    }
+
     private DocumentNode ElementToNode(OpenXmlElement element, string path, int depth)
     {
         var node = new DocumentNode { Path = path, Type = element.LocalName };
@@ -5793,6 +5826,9 @@ public partial class WordHandler
             return SdtBlockToNode(sdtBlockNode, node);
         else if (element is SdtRun sdtRunNode)
             return SdtRunToNode(sdtRunNode, node);
+        else if (element.LocalName == "wgp"
+                 && element.NamespaceUri == "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup")
+            return WgpGroupToNode(element, node, path);
         else if (element.LocalName == "oMathPara" || element is M.Paragraph)
         {
             node.Type = "equation";
