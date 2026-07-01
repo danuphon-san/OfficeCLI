@@ -1725,6 +1725,18 @@ public partial class WordHandler
         parent is Body or SdtBlock or Footnote or Endnote or Header or Footer
               or TextBoxContent or Comment or SdtContentBlock;
 
+    // A plain-text SDT (<w:text/> in sdtPr) may legally hold only a single run of
+    // plain text — adding an equation (math / a block paragraph) makes the file
+    // one Word refuses to open, even though the SDK validator does not flag it.
+    // Adding an equation implies rich content, so drop the <w:text/> restriction,
+    // turning it into a rich-text SDT that accepts block-level content.
+    private static void UpgradeTextSdtForBlockContent(OpenXmlElement parent)
+    {
+        var sdt = (parent as SdtContentBlock)?.Parent as SdtBlock
+                  ?? parent.Ancestors<SdtBlock>().FirstOrDefault();
+        sdt?.SdtProperties?.GetFirstChild<SdtContentText>()?.Remove();
+    }
+
     // BUG-DUMP-COMMENT-IN-MATH: remove comment-range markers (commentRangeStart /
     // commentRangeEnd / commentReference, any prefix) from a verbatim math fragment
     // before it is reconstructed. These carry stale source comment ids that no
@@ -1753,6 +1765,18 @@ public partial class WordHandler
         OpenXmlElement? newElement;
         if (!properties.TryGetValue("formula", out var formula) && !properties.TryGetValue("text", out formula))
             throw new ArgumentException("'formula' (or 'text') property is required for equation type");
+
+        // A run (w:r) cannot host m:oMath/m:oMathPara — appending one produced a
+        // schema-invalid file Word refuses to open. Reject with a clear message
+        // rather than silently corrupting (exit 0).
+        if (parent is Run)
+            throw new ArgumentException(
+                "Cannot add an equation to a run (w:r). Valid parents: /body, a paragraph, "
+                + "a hyperlink, footnote, endnote, header/footer, textbox, comment, or sdtContent.");
+
+        // If the equation lands in a plain-text SDT, relax it to rich-text so the
+        // file stays openable in Word (see UpgradeTextSdtForBlockContent).
+        UpgradeTextSdtForBlockContent(parent);
 
         // R2-fuzz-3: validate `mode` like Set does. Accept inline/display
         // case-insensitively (mode=INLINE works); any other value is reported
@@ -2073,8 +2097,17 @@ public partial class WordHandler
                 {
                     AppendToParent(insertTarget, wrapPara);
                 }
+                // When the caller targeted a PARAGRAPH inside the container
+                // (insertAfter set), parentPath points at that child paragraph,
+                // not the container — strip the trailing segment so the result is
+                // /header/p[@paraId=X]/oMathPara[1], not the doubly-nested
+                // /header/p[target]/p[@paraId=X]/oMathPara[1] (unresolvable).
+                // Mirrors the Body branch's bodyPath derivation.
+                var containerPath = insertAfter != null
+                    ? parentPath.Substring(0, parentPath.LastIndexOf('/'))
+                    : parentPath;
                 var pIdx = insertTarget.Elements<Paragraph>().Count();
-                resultPath = $"{parentPath}/{BuildParaPathSegment(wrapPara, pIdx)}/oMathPara[1]";
+                resultPath = $"{containerPath}/{BuildParaPathSegment(wrapPara, pIdx)}/oMathPara[1]";
             }
             else
             {
