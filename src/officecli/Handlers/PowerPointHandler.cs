@@ -1842,6 +1842,70 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 return (axRid, parentPartPath);
             }
 
+            case "chartex":
+            {
+                // Carry a chartEx part (cx: extension charts — funnel, sunburst,
+                // treemap, …) for round-trip: chartEx{N}.xml with a pinned rId
+                // matching the AlternateContent slice's <cx:chart r:id>, plus its
+                // typed children (colors / style sidecars and the embedded xlsx
+                // workbook) with pinned rIds matching the chartEx XML's internal
+                // references. Without the parts the slice's rIds dangle and
+                // PowerPoint refuses the deck (0x80070570, funnel-pp1). Typed
+                // ExtendedChartPart is REQUIRED — a generic AddExtendedPart of a
+                // known part type gets pruned on save (tableStyles lesson).
+                var cxm = System.Text.RegularExpressions.Regex.Match(parentPartPath, @"^/slide\[(\d+)\]$");
+                if (!cxm.Success)
+                    throw new ArgumentException("add-part chartex: parent must be /slide[N]");
+                var cxIdx = int.Parse(cxm.Groups[1].Value);
+                var cxParts = GetSlideParts().ToList();
+                if (cxIdx < 1 || cxIdx > cxParts.Count)
+                    throw new ArgumentException($"slide index {cxIdx} out of range");
+                var cxSlide = cxParts[cxIdx - 1];
+
+                if (properties == null
+                    || !properties.TryGetValue("rid", out var cxRid) || string.IsNullOrEmpty(cxRid))
+                    throw new ArgumentException("add-part chartex requires property 'rid'");
+                if (!properties.TryGetValue("xml", out var cxXmlB64) || string.IsNullOrEmpty(cxXmlB64))
+                    throw new ArgumentException("add-part chartex requires property 'xml' (base64)");
+                byte[] cxXmlBytes;
+                try { cxXmlBytes = Convert.FromBase64String(cxXmlB64); }
+                catch (FormatException) { throw new ArgumentException("add-part chartex: 'xml' is not valid base64"); }
+
+                if (cxSlide.Parts.Any(p => p.RelationshipId == cxRid))
+                    return (cxRid, parentPartPath);
+                ReHomeCollidingRel(cxSlide, cxRid);
+                var cxPart = cxSlide.AddNewPart<ExtendedChartPart>(cxRid);
+                using (var cxs = new MemoryStream(cxXmlBytes)) cxPart.FeedData(cxs);
+
+                void FeedChild<T>(string ridKey, string dataKey) where T : OpenXmlPart, IFixedContentTypePart
+                {
+                    if (!properties.TryGetValue(ridKey, out var crid) || string.IsNullOrEmpty(crid)) return;
+                    if (!properties.TryGetValue(dataKey, out var cb64) || string.IsNullOrEmpty(cb64)) return;
+                    byte[] cb;
+                    try { cb = Convert.FromBase64String(cb64); } catch (FormatException) { return; }
+                    var child = cxPart.AddNewPart<T>(crid);
+                    using var cs = new MemoryStream(cb);
+                    child.FeedData(cs);
+                }
+                FeedChild<ChartColorStylePart>("colors-rid", "colors");
+                FeedChild<ChartStylePart>("style-rid", "style");
+                if (properties.TryGetValue("package-rid", out var pkgRid) && !string.IsNullOrEmpty(pkgRid)
+                    && properties.TryGetValue("package", out var pkgB64) && !string.IsNullOrEmpty(pkgB64))
+                {
+                    byte[] pkgBytes;
+                    try { pkgBytes = Convert.FromBase64String(pkgB64); } catch (FormatException) { pkgBytes = Array.Empty<byte>(); }
+                    if (pkgBytes.Length > 0)
+                    {
+                        var pkgCT = properties.GetValueOrDefault("package-content-type",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+                        var pkgPart = cxPart.AddNewPart<EmbeddedPackagePart>(pkgCT, pkgRid);
+                        using var ps = new MemoryStream(pkgBytes);
+                        pkgPart.FeedData(ps);
+                    }
+                }
+                return (cxRid, parentPartPath);
+            }
+
             case "extrel":
             {
                 // Re-create an EXTERNAL relationship (TargetMode=External) with a
@@ -3523,6 +3587,60 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     }
 
     /// <summary>
+    /// chartEx (cx: extension chart) parts referenced from a slide by rId —
+    /// payload for the emitter's `add-part chartex` carrier. Each entry is the
+    /// chartEx XML plus its typed children (colors / style sidecars, embedded
+    /// xlsx workbook) with their rIds, all base64.
+    /// </summary>
+    internal readonly record struct ChartExInfo(
+        string RelId,
+        string XmlBase64,
+        string? ColorsRelId, string? ColorsBase64,
+        string? StyleRelId, string? StyleBase64,
+        string? PackageRelId, string? PackageBase64, string? PackageContentType);
+
+    internal IReadOnlyList<ChartExInfo> GetChartExPartsByRelId(int slideIdx, IEnumerable<string> rids)
+    {
+        var result = new List<ChartExInfo>();
+        var parts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > parts.Count) return result;
+        var slidePart = parts[slideIdx - 1];
+
+        static string ReadB64(OpenXmlPart p)
+        {
+            using var s = p.GetStream();
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            return Convert.ToBase64String(ms.ToArray());
+        }
+
+        foreach (var rid in rids)
+        {
+            OpenXmlPart? part = null;
+            try { part = slidePart.GetPartById(rid); } catch { }
+            if (part is not ExtendedChartPart cxPart) continue;
+
+            string? colorsRid = null, colorsB64 = null, styleRid = null, styleB64 = null;
+            string? pkgRid = null, pkgB64 = null, pkgCT = null;
+            foreach (var pair in cxPart.Parts)
+            {
+                switch (pair.OpenXmlPart)
+                {
+                    case ChartColorStylePart ccs:
+                        colorsRid = pair.RelationshipId; colorsB64 = ReadB64(ccs); break;
+                    case ChartStylePart cst:
+                        styleRid = pair.RelationshipId; styleB64 = ReadB64(cst); break;
+                    case EmbeddedPackagePart epp:
+                        pkgRid = pair.RelationshipId; pkgB64 = ReadB64(epp); pkgCT = epp.ContentType; break;
+                }
+            }
+            result.Add(new ChartExInfo(rid, ReadB64(cxPart),
+                colorsRid, colorsB64, styleRid, styleB64, pkgRid, pkgB64, pkgCT));
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Per-slide am3d 3D-model info for PptxBatchEmitter Phase 3c-3d
     /// passthrough. Returns one entry per &lt;mc:AlternateContent&gt; block
     /// whose &lt;mc:Choice Requires="am3d"&gt; carries an &lt;am3d:model3d&gt;
@@ -4181,7 +4299,13 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     // dropped on dump->replay before this hook.
     // CONSISTENCY: mirrors GetShapeCNvPrHyperlinkInfo's path-resolution
     // preamble (group-chain + @id= / positional shape index).
-    internal (string Xml, int SpOrdinal)? GetShapeStyleXmlWithOrdinal(string shapePath)
+    // expectId: when the caller knows the source node's cNvPr id, verify the
+    // path-resolved shape IS that shape. A node emitted with a positional path
+    // can resolve to a DIFFERENT sp at that ordinal and steal its <p:style> —
+    // bnc889755's sldNum placeholder duplicated TextBox 10's style onto the
+    // same replayed sp, and the doubled <p:style> child made PowerPoint refuse
+    // the deck (0x80070570).
+    internal (string Xml, int SpOrdinal)? GetShapeStyleXmlWithOrdinal(string shapePath, uint? expectId = null)
     {
         var m = Regex.Match(shapePath,
             @"^/slide\[(\d+)\]((?:/group\[(?:@id=)?\d+\])*)/(?:shape|textbox|title|equation|placeholder)\[(@id=)?(\d+)\]$");
@@ -4230,6 +4354,9 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
             shape = shapes[shapeIdx - 1];
             ordinal = shapeIdx;
         }
+        if (expectId.HasValue
+            && shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value != expectId.Value)
+            return null;
         var styleEl = shape.GetFirstChild<ShapeStyle>();
         if (styleEl == null) return null;
         return (styleEl.OuterXml, ordinal);

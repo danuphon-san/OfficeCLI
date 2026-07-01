@@ -598,6 +598,45 @@ public static partial class PptxBatchEmitter
             foreach (System.Text.RegularExpressions.Match rm in
                      System.Text.RegularExpressions.Regex.Matches(slice, @"r:(?:embed|link)=""(rId\d+)"""))
                 altRids.Add(rm.Groups[1].Value);
+
+            // chartEx blocks (cx: extension charts — funnel/sunburst/treemap):
+            // the Choice's <cx:chart r:id> references an ExtendedChartPart that
+            // no other pass re-creates; carry it (plus colors/style sidecars
+            // and the embedded xlsx) or the verbatim slice's rId dangles and
+            // PowerPoint refuses the deck (funnel-pp1).
+            if (slice.Contains("chartex", StringComparison.OrdinalIgnoreCase))
+            {
+                var cxRids = new HashSet<string>(StringComparer.Ordinal);
+                foreach (System.Text.RegularExpressions.Match rm in
+                         System.Text.RegularExpressions.Regex.Matches(slice, @"r:id=""(rId\d+)"""))
+                    cxRids.Add(rm.Groups[1].Value);
+                foreach (var cx in ppt.GetChartExPartsByRelId(slideNum, cxRids))
+                {
+                    var cxProps = new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["rid"] = cx.RelId,
+                        ["xml"] = cx.XmlBase64,
+                    };
+                    if (cx.ColorsRelId != null && cx.ColorsBase64 != null)
+                    { cxProps["colors-rid"] = cx.ColorsRelId; cxProps["colors"] = cx.ColorsBase64; }
+                    if (cx.StyleRelId != null && cx.StyleBase64 != null)
+                    { cxProps["style-rid"] = cx.StyleRelId; cxProps["style"] = cx.StyleBase64; }
+                    if (cx.PackageRelId != null && cx.PackageBase64 != null)
+                    {
+                        cxProps["package-rid"] = cx.PackageRelId;
+                        cxProps["package"] = cx.PackageBase64;
+                        if (cx.PackageContentType != null) cxProps["package-content-type"] = cx.PackageContentType;
+                    }
+                    items.Add(new BatchItem
+                    {
+                        Command = "add-part",
+                        Parent = slidePath,
+                        Type = "chartex",
+                        Props = cxProps,
+                    });
+                }
+            }
+
             if (altRids.Count > 0)
             {
                 foreach (var img in ppt.GetSlideImagePartsByRelId(slideNum, altRids))

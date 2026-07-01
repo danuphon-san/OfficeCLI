@@ -319,7 +319,9 @@ public static partial class PptxBatchEmitter
                 @"^/slide\[\d+\]((?:/group\[\d+\])*)/(?:shape|textbox|title|equation|placeholder)\[(\d+)\]$")
             is { Success: true } shStyleM)
         {
-            var styleProbe = ppt.GetShapeStyleXmlWithOrdinal(shapeNode.Path ?? "");
+            uint? shStyleExpectId = fullShape.Format.TryGetValue("id", out var shIdObj)
+                && uint.TryParse(shIdObj?.ToString(), out var shIdVal) ? shIdVal : null;
+            var styleProbe = ppt.GetShapeStyleXmlWithOrdinal(shapeNode.Path ?? "", shStyleExpectId);
             if (styleProbe.HasValue)
             {
                 var (styleXml, spOrd) = styleProbe.Value;
@@ -330,13 +332,17 @@ public static partial class PptxBatchEmitter
                          System.Text.RegularExpressions.Regex.Matches(
                              shStyleM.Groups[1].Value, @"/group\[(\d+)\]"))
                     styleXpath.Append($"/p:grpSp[{gm.Groups[1].Value}]");
-                styleXpath.Append($"/p:sp[{spOrd}]");
+                // Schema: p:sp children order is nvSpPr, spPr, style, txBody.
+                // Replayed shapes always carry a seeded <p:txBody>, so append
+                // would land the style AFTER it — schema-invalid, PowerPoint
+                // refuses some such decks (bnc889755). Insert before txBody.
+                styleXpath.Append($"/p:sp[{spOrd}]/p:txBody");
                 items.Add(new BatchItem
                 {
                     Command = "raw-set",
                     Part = slideRoot,
                     Xpath = styleXpath.ToString(),
-                    Action = "append",
+                    Action = "insertbefore",
                     Xml = styleXml,
                 });
             }
@@ -434,7 +440,9 @@ public static partial class PptxBatchEmitter
                 @"^/slide\[\d+\]((?:/group\[\d+\])*)/(?:shape|textbox|title|equation|placeholder)\[(\d+)\]$")
             is { Success: true } phStyleM)
         {
-            var phStyleProbe = ppt.GetShapeStyleXmlWithOrdinal(phNode.Path ?? "");
+            uint? phStyleExpectId = full.Format.TryGetValue("id", out var phIdObj)
+                && uint.TryParse(phIdObj?.ToString(), out var phIdVal) ? phIdVal : null;
+            var phStyleProbe = ppt.GetShapeStyleXmlWithOrdinal(phNode.Path ?? "", phStyleExpectId);
             if (phStyleProbe.HasValue)
             {
                 var (phStyleXml, phSpOrd) = phStyleProbe.Value;
@@ -445,13 +453,15 @@ public static partial class PptxBatchEmitter
                          System.Text.RegularExpressions.Regex.Matches(
                              phStyleM.Groups[1].Value, @"/group\[(\d+)\]"))
                     phStyleXpath.Append($"/p:grpSp[{gm.Groups[1].Value}]");
-                phStyleXpath.Append($"/p:sp[{phSpOrd}]");
+                // Same schema-order rationale as the shape hook above: insert
+                // before the seeded <p:txBody> (style must precede it).
+                phStyleXpath.Append($"/p:sp[{phSpOrd}]/p:txBody");
                 items.Add(new BatchItem
                 {
                     Command = "raw-set",
                     Part = phSlideRoot,
                     Xpath = phStyleXpath.ToString(),
-                    Action = "append",
+                    Action = "insertbefore",
                     Xml = phStyleXml,
                 });
             }
