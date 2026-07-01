@@ -3246,27 +3246,39 @@ public partial class WordHandler
         {
             long preCx = ReadUnqualifiedLong(ext, "cx") ?? 0;
             long preCy = ReadUnqualifiedLong(ext, "cy") ?? 0;
+
+            long? newCx = widthRaw  != null ? ParseDrawingSize(widthRaw,  preCx > 0 ? preCx : 914_400) : null;
+            long? newCy = heightRaw != null ? ParseDrawingSize(heightRaw, preCy > 0 ? preCy : 914_400) : null;
+            // Reject non-positive: a negative <a:ext> is dropped by the SDK and
+            // corrupts the file (schema MinInclusive); zero makes an invisible
+            // group. Mirrors the pptx group's rejection.
+            if (newCx is <= 0) throw new ArgumentException($"Invalid width '{widthRaw}': width must be a positive size.");
+            if (newCy is <= 0) throw new ArgumentException($"Invalid height '{heightRaw}': height must be a positive size.");
+            // Single dimension → scale the OTHER proportionally so the diagram
+            // stays aspect-correct (a lone width/height squashes the group). Both
+            // given → exact box (the caller's explicit choice).
+            if (newCx != null && newCy == null && preCx > 0)
+                newCy = (long)Math.Round(preCy * (newCx.Value / (double)preCx));
+            else if (newCy != null && newCx == null && preCy > 0)
+                newCx = (long)Math.Round(preCx * (newCy.Value / (double)preCy));
+
             // The anchor wrapper carries the matching <wp:extent> for the whole group.
             var wpExtent = wgp.Ancestors()
                 .FirstOrDefault(e => e.LocalName == "anchor" || e.LocalName == "inline")
                 ?.Descendants().FirstOrDefault(e => e.LocalName == "extent" && e.NamespaceUri == WpNs);
-            if (widthRaw != null)
+            if (newCx != null)
             {
-                long cx = ParseDrawingSize(widthRaw, preCx > 0 ? preCx : 914_400);
-                ext.SetAttribute(new OpenXmlAttribute("cx", "", cx.ToString()));
-                wpExtent?.SetAttribute(new OpenXmlAttribute("cx", "", cx.ToString()));
+                ext.SetAttribute(new OpenXmlAttribute("cx", "", newCx.Value.ToString()));
+                wpExtent?.SetAttribute(new OpenXmlAttribute("cx", "", newCx.Value.ToString()));
             }
-            if (heightRaw != null)
+            if (newCy != null)
             {
-                long cy = ParseDrawingSize(heightRaw, preCy > 0 ? preCy : 914_400);
-                ext.SetAttribute(new OpenXmlAttribute("cy", "", cy.ToString()));
-                wpExtent?.SetAttribute(new OpenXmlAttribute("cy", "", cy.ToString()));
+                ext.SetAttribute(new OpenXmlAttribute("cy", "", newCy.Value.ToString()));
+                wpExtent?.SetAttribute(new OpenXmlAttribute("cy", "", newCy.Value.ToString()));
             }
-            long postCx = ReadUnqualifiedLong(ext, "cx") ?? preCx;
-            long postCy = ReadUnqualifiedLong(ext, "cy") ?? preCy;
             if (preCx > 0 && preCy > 0)
             {
-                double ratio = Math.Min((double)postCx / preCx, (double)postCy / preCy);
+                double ratio = Math.Min((newCx ?? preCx) / (double)preCx, (newCy ?? preCy) / (double)preCy);
                 if (Math.Abs(ratio - 1.0) > 1e-6) ScaleGroupFontHalfPts(wgp, ratio);
             }
         }

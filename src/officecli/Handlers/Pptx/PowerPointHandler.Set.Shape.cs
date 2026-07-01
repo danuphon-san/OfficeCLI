@@ -657,15 +657,24 @@ public partial class PowerPointHandler
                     break;
             }
         }
-        // Re-bake child font sizes to match the net group resize (see snapshot
-        // above). fontRatio = min(width-ratio, height-ratio): an unchanged
-        // dimension contributes ratio 1.0, so a width-only shrink still scales
-        // font down (avoiding horizontal overflow) and a one-dimension grow
-        // leaves font untouched. This keeps font in step with the ext/chExt
-        // geometry scale — for uniform resizes the two stay exactly proportional.
         var postExt = grp.GroupShapeProperties?.TransformGroup?.Extents;
         if (postExt != null && preCx > 0 && preCy > 0)
         {
+            bool hasW = properties.Keys.Any(k => k.Equals("width", StringComparison.OrdinalIgnoreCase));
+            bool hasH = properties.Keys.Any(k => k.Equals("height", StringComparison.OrdinalIgnoreCase));
+            // Single dimension given → scale the OTHER proportionally so the
+            // diagram stays aspect-correct. A lone width/height would leave the
+            // other extent untouched and visibly squash the group (boxes become
+            // slivers). Both given → exact box (the caller's explicit choice).
+            if (hasW && !hasH) postExt.Cy = (long)Math.Round(preCy * ((postExt.Cx ?? preCx) / (double)preCx));
+            else if (hasH && !hasW) postExt.Cx = (long)Math.Round(preCx * ((postExt.Cy ?? preCy) / (double)preCy));
+
+            if ((postExt.Cx ?? 0) <= 0 || (postExt.Cy ?? 0) <= 0)
+                throw new ArgumentException("Invalid group size: width and height must be positive.");
+
+            // Re-bake child font sizes to match the net resize. fontRatio =
+            // min(width-ratio, height-ratio); with aspect preserved above the two
+            // ratios agree, so text stays exactly proportional to the geometry.
             double fontRatio = Math.Min((postExt.Cx ?? preCx) / (double)preCx,
                                         (postExt.Cy ?? preCy) / (double)preCy);
             if (Math.Abs(fontRatio - 1.0) > 1e-6)
