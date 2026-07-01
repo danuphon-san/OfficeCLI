@@ -270,17 +270,27 @@ public static class FlowchartLayout
 
         var srcPt = new Dictionary<WEdge, Pt>();
         var tgtPt = new Dictionary<WEdge, Pt>();
-        foreach (var grp in valid.GroupBy(e => (e.From, e.SSide)))
+        // Distribute ports per (node, side) over BOTH the source ends and target ends
+        // that land there. Grouping source- and target-attachments separately (the
+        // old bug) gave each a lone-on-its-side centre port, so a node with one
+        // incoming AND one outgoing edge on the same side (every cycle: e.g. a state
+        // that is both entered and left on its left face) collided both at the centre,
+        // producing overlapping collinear segments. One combined group → distinct ports.
+        var reqs = new List<(WNode node, string side, WEdge e, bool src, Pt refp)>();
+        foreach (var e in valid)
         {
-            bool cross0 = grp.Key.SSide is "t" or "b";
-            var es = grp.OrderBy(e => cross0 ? e.SRef.X : e.SRef.Y).ToList();
-            for (int k = 0; k < es.Count; k++) srcPt[es[k]] = Attach(nodes[es[k].From], grp.Key.SSide, k, es.Count);
+            reqs.Add((nodes[e.From], e.SSide, e, true, e.SRef));
+            reqs.Add((nodes[e.To], e.TSide, e, false, e.TRef));
         }
-        foreach (var grp in valid.GroupBy(e => (e.To, e.TSide)))
+        foreach (var grp in reqs.GroupBy(r => (r.node.Id, r.side)))
         {
-            bool cross0 = grp.Key.TSide is "t" or "b";
-            var es = grp.OrderBy(e => cross0 ? e.TRef.X : e.TRef.Y).ToList();
-            for (int k = 0; k < es.Count; k++) tgtPt[es[k]] = Attach(nodes[es[k].To], grp.Key.TSide, k, es.Count);
+            bool horiz = grp.Key.side is "t" or "b"; // horizontal face → order along X
+            var rs = grp.OrderBy(r => horiz ? r.refp.X : r.refp.Y).ToList();
+            for (int k = 0; k < rs.Count; k++)
+            {
+                var pt = Attach(rs[k].node, rs[k].side, k, rs.Count);
+                if (rs[k].src) srcPt[rs[k].e] = pt; else tgtPt[rs[k].e] = pt;
+            }
         }
 
         // Pass A: build each edge's polyline; jog corners get a nudge-able coordinate
