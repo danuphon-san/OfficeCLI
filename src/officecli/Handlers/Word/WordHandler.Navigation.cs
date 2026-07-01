@@ -1669,9 +1669,62 @@ public partial class WordHandler
         var body = _doc.MainDocumentPart?.Document?.Body;
         if (body == null) return null;
         var hostPara = mathEl.Ancestors<Paragraph>().FirstOrDefault();
-        if (hostPara == null || !ReferenceEquals(hostPara.Parent, body)) return null;
+        if (hostPara == null) return null;
 
         bool isDisplay = mathEl is M.Paragraph || mathEl.LocalName == "oMathPara";
+
+        // Shared tail: given the resolved paragraph-path prefix, append the
+        // immediate container (/hyperlink[H] when the math sits in a hyperlink)
+        // and the math index (/oMathPara[K] display, /oMath[K] inline).
+        string? MathTail(string paraPrefix)
+        {
+            var container = mathEl.Parent!;
+            var prefix = paraPrefix;
+            if (container is Hyperlink hlC)
+            {
+                int hIdx = hostPara.Elements<Hyperlink>().ToList()
+                    .FindIndex(h => ReferenceEquals(h, hlC)) + 1;
+                if (hIdx <= 0) return null;
+                prefix += $"/hyperlink[{hIdx}]";
+            }
+            else if (!ReferenceEquals(container, hostPara)) return null;
+            if (isDisplay)
+            {
+                int k = container.Elements<M.Paragraph>().ToList()
+                    .FindIndex(e => ReferenceEquals(e, mathEl)) + 1;
+                return k > 0 ? $"{prefix}/oMathPara[{k}]" : null;
+            }
+            int kk = container.Elements<M.OfficeMath>().ToList()
+                .FindIndex(e => ReferenceEquals(e, mathEl)) + 1;
+            return kk > 0 ? $"{prefix}/oMath[{kk}]" : null;
+        }
+
+        // Footnote/endnote-hosted equations: build the note-scoped path
+        // (/footnotes/footnote[N]/p[@paraId=X]/…) so a mode switch inside a note
+        // reports a resolvable path instead of the stale pre-switch one. N
+        // enumerates user notes (Id>0), matching the resolver and Add.
+        if (hostPara.Parent is Footnote or Endnote)
+        {
+            var noteEl = hostPara.Parent!;
+            bool isFn = noteEl is Footnote;
+            var siblings = (isFn
+                ? (noteEl.Parent as Footnotes)?.Elements<Footnote>()
+                    .Where(f => f.Id?.Value > 0).Cast<OpenXmlElement>()
+                : (noteEl.Parent as Endnotes)?.Elements<Endnote>()
+                    .Where(e => e.Id?.Value > 0).Cast<OpenXmlElement>())?.ToList();
+            if (siblings == null) return null;
+            int nIdx = siblings.FindIndex(n => ReferenceEquals(n, noteEl)) + 1;
+            if (nIdx <= 0) return null;
+            int pIdx0 = noteEl.Elements<Paragraph>().ToList()
+                .FindIndex(p => ReferenceEquals(p, hostPara)) + 1;
+            var seg = BuildParaPathSegment(hostPara, pIdx0);
+            var notePrefix = isFn
+                ? $"/footnotes/footnote[{nIdx}]"
+                : $"/endnotes/endnote[{nIdx}]";
+            return MathTail($"{notePrefix}/{seg}");
+        }
+
+        if (!ReferenceEquals(hostPara.Parent, body)) return null;
 
         // Pure oMathPara-wrapper paragraphs are addressed at body level as
         // /body/oMathPara[N]; the wrapped m:oMathPara IS the target itself.
@@ -1698,37 +1751,11 @@ public partial class WordHandler
         {
             if (IsOMathParaWrapperParagraph(el)) continue; // counted under oMathPara[N]
             pIdx++;
+            // The math element sits directly in the paragraph OR nested inside a
+            // w:hyperlink child (dump→batch round-trips equations in a hyperlink);
+            // MathTail handles both and returns the resolvable /body/p[N]/… path.
             if (ReferenceEquals(el, hostPara))
-            {
-                // The math element sits directly in the paragraph OR nested inside
-                // a w:hyperlink child (dump→batch round-trips equations inside a
-                // hyperlink). Locate its immediate container and include the
-                // /hyperlink[H] segment when present — otherwise the index lookup
-                // fails (mathEl isn't a direct child of hostPara) and the caller
-                // keeps the stale pre-move path.
-                var container = mathEl.Parent!;
-                var prefix = $"/body/p[{pIdx}]";
-                if (container is Hyperlink hl)
-                {
-                    int hIdx = hostPara.Elements<Hyperlink>().ToList()
-                        .FindIndex(h => ReferenceEquals(h, hl)) + 1;
-                    if (hIdx <= 0) return null;
-                    prefix += $"/hyperlink[{hIdx}]";
-                }
-                else if (!ReferenceEquals(container, hostPara))
-                {
-                    return null; // nesting we don't address
-                }
-                if (isDisplay)
-                {
-                    int k = container.Elements<M.Paragraph>().ToList()
-                        .FindIndex(e => ReferenceEquals(e, mathEl)) + 1;
-                    return k > 0 ? $"{prefix}/oMathPara[{k}]" : null;
-                }
-                int kk = container.Elements<M.OfficeMath>().ToList()
-                    .FindIndex(e => ReferenceEquals(e, mathEl)) + 1;
-                return kk > 0 ? $"{prefix}/oMath[{kk}]" : null;
-            }
+                return MathTail($"/body/p[{pIdx}]");
         }
         return null;
     }
