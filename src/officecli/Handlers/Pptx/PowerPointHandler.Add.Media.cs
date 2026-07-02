@@ -419,16 +419,37 @@ public partial class PowerPointHandler
                     var picGeomName = "rect";
                     if (properties.TryGetValue("geometry", out var picGeom) || properties.TryGetValue("shape", out picGeom))
                         picGeomName = picGeom;
+                    var picGeomPreset = ParsePresetShape(picGeomName);
+                    var picAvLst = new Drawing.AdjustValueList();
+                    // Preset adjust handles (crop-shape corner radius etc.) —
+                    // mirror AddShape's adj= consumption.
+                    if (properties.TryGetValue("adj", out var picAdjSpec)
+                        && !string.IsNullOrWhiteSpace(picAdjSpec))
+                        ApplyAdjustHandles(picAvLst, picAdjSpec, picGeomPreset);
                     picture.ShapeProperties.AppendChild(
-                        new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = ParsePresetShape(picGeomName) }
+                        new Drawing.PresetGeometry(picAvLst) { Preset = picGeomPreset }
                     );
                 }
 
                 // Shape fill on the picture frame (paints wherever the image
                 // doesn't cover — negative srcRect outsets, sample17).
+                // Schema order within spPr: geom → fill → ln → effectLst.
                 if (properties.TryGetValue("frameFill", out var picFrameFill)
                     && !string.IsNullOrWhiteSpace(picFrameFill))
                     picture.ShapeProperties.AppendChild(BuildSolidFill(picFrameFill));
+
+                // Picture border — verbatim <a:ln> from PictureToNode's
+                // lineRaw (the white frame around a crop-to-shape picture).
+                if (properties.TryGetValue("lineRaw", out var picLnRaw)
+                    && !string.IsNullOrWhiteSpace(picLnRaw))
+                    picture.ShapeProperties.AppendChild(new Drawing.Outline(picLnRaw));
+
+                // Verbatim <a:effectLst> — byte-faithful shadow/glow replay
+                // (the semantic shadow= backfills dist/dir defaults the
+                // source may not carry).
+                if (properties.TryGetValue("effectsRaw", out var picFxRaw)
+                    && !string.IsNullOrWhiteSpace(picFxRaw))
+                    picture.ShapeProperties.AppendChild(new Drawing.EffectList(picFxRaw));
 
                 // 3D on the picture's spPr — verbatim <a:scene3d>/<a:sp3d>
                 // carriers from PictureToNode (a 3D-rotated picture replayed

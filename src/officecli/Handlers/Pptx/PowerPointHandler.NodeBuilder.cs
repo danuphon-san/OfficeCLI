@@ -2707,7 +2707,23 @@ public partial class PowerPointHandler
         var picPresetName = pic.ShapeProperties?
             .GetFirstChild<Drawing.PresetGeometry>()?.Preset?.InnerText;
         if (!string.IsNullOrEmpty(picPresetName) && picPresetName != "rect")
+        {
             node.Format["geometry"] = picPresetName;
+            // Preset adjust handles on the crop shape — mirror ShapeToNode's
+            // adj readback (round2DiagRect corner radius etc.); dropping them
+            // reverts the crop to default proportions (custom-shape-bitmap-fill).
+            var picAvLst = pic.ShapeProperties?
+                .GetFirstChild<Drawing.PresetGeometry>()?.GetFirstChild<Drawing.AdjustValueList>();
+            if (picAvLst != null)
+            {
+                var picGuides = picAvLst.Elements<Drawing.ShapeGuide>()
+                    .Where(g => g.Name?.HasValue == true && g.Formula?.HasValue == true)
+                    .Select(g => $"{g.Name!.Value}:{g.Formula!.Value}")
+                    .ToList();
+                if (picGuides.Count > 0)
+                    node.Format["adj"] = string.Join(",", picGuides);
+            }
+        }
 
         // Crop-to-CUSTOM-shape: a picture cropped to a freeform carries
         // <a:custGeom> instead of prstGeom (sample11). Surface the verbatim
@@ -2881,7 +2897,19 @@ public partial class PowerPointHandler
                 var glowOpacity = glowAlpha?.Val?.HasValue == true ? $"{glowAlpha.Val.Value / 1000.0:0.##}" : "75";
                 node.Format["glow"] = $"{glowColor}-{radiusPt}-{glowOpacity}";
             }
+            // Semantic shadow= backfills defaults for absent dist/dir (a
+            // source outerShdw with only blurRad+algn replays with dist=3pt
+            // dir=45° added). Carry the verbatim effectLst so replay is
+            // byte-faithful; the emitter suppresses the semantic keys.
+            node.Format["effectsRaw"] = picEffectList.OuterXml;
         }
+
+        // Picture border: <a:ln> on the pic's spPr (the white frame around a
+        // crop-to-shape picture, custom-shape-bitmap-fill). No readback
+        // existed — carry verbatim.
+        var picLn = pic.ShapeProperties?.GetFirstChild<Drawing.Outline>();
+        if (picLn != null)
+            node.Format["lineRaw"] = picLn.OuterXml;
 
         // Crop
         var srcRect = pic.BlipFill?.GetFirstChild<Drawing.SourceRectangle>();
