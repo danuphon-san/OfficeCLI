@@ -220,6 +220,9 @@ public static partial class ExcelBatchEmitter
             props["scope"] = string.IsNullOrEmpty(scope) ? "workbook" : scope!;
             if (nr.Format.TryGetValue("comment", out var cm) && cm is string cs && cs.Length > 0)
                 props["comment"] = cs;
+            // volatile (DefinedName.Function) — AddNamedRange consumes it.
+            if (nr.Format.TryGetValue("volatile", out var vol) && IsTruthyFormatValue(vol))
+                props["volatile"] = "true";
             try
             {
                 items.Add(new BatchItem { Command = "add", Parent = "/", Type = "namedrange", Props = props });
