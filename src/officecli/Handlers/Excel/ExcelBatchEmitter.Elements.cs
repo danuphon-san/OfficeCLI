@@ -73,7 +73,12 @@ public static partial class ExcelBatchEmitter
                 if (!string.IsNullOrEmpty(tokens))
                     props["totalsRowFunction"] = tokens!;
             }
-            CopyBool(t, "bandedRows", props, "bandedRows");
+            // AddTable defaults ShowRowStripes=true, ShowColumnStripes/
+            // ShowFirstColumn/ShowLastColumn=false. bandedRows is thus the one
+            // with an ON default: emit it only when FALSE (the non-default).
+            // The other three keep the emit-when-true form.
+            if (t.Format.TryGetValue("bandedRows", out var brv) && brv is bool brB && !brB)
+                props["bandedRows"] = "false";
             CopyBool(t, "bandedCols", props, "bandedCols");
             CopyBool(t, "firstCol", props, "firstCol");
             CopyBool(t, "lastCol", props, "lastCol");
