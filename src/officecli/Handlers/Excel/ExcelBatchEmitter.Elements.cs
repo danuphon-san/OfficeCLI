@@ -280,13 +280,22 @@ public static partial class ExcelBatchEmitter
             var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             CopyString(c, "ref", props, "ref");
             CopyString(c, "author", props, "author");
-            if (!string.IsNullOrEmpty(c.Text)) props["text"] = c.Text!;
-            CopyBool(c, "font.bold", props, "font.bold");
-            CopyBool(c, "font.italic", props, "font.italic");
-            CopyString(c, "font.underline", props, "font.underline");
-            CopyString(c, "font.color", props, "font.color");
-            CopyString(c, "font.size", props, "font.size");
-            CopyString(c, "font.name", props, "font.name");
+            // Multi-run comments replay via runs=<json>; single-run comments
+            // keep the text=/font.* path. Only one of the two carries content.
+            if (c.Format.TryGetValue("runs", out var cRuns) && cRuns is string cRunsJson && cRunsJson.Length > 2)
+            {
+                props["runs"] = cRunsJson;
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(c.Text)) props["text"] = c.Text!;
+                CopyBool(c, "font.bold", props, "font.bold");
+                CopyBool(c, "font.italic", props, "font.italic");
+                CopyString(c, "font.underline", props, "font.underline");
+                CopyString(c, "font.color", props, "font.color");
+                CopyString(c, "font.size", props, "font.size");
+                CopyString(c, "font.name", props, "font.name");
+            }
             if (!props.ContainsKey("ref")) continue;
             items.Add(new BatchItem { Command = "add", Parent = sheetPath, Type = "comment", Props = props });
         }
