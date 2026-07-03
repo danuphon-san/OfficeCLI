@@ -1466,7 +1466,14 @@ public partial class WordHandler
                 "ref" or "noteref" => $"\u00AB{refBookmarkName}\u00BB",
                 "styleref" => $"\u00AB{styleRefName}\u00BB",
                 "docproperty" => $"\u00AB{docPropertyName}\u00BB",
-                "if" => properties.GetValueOrDefault("trueText", ""),
+                "if" => EvaluateIfFieldPlaceholder(properties),
+                // SEQ: Word caches the sequence number on insert. Count prior
+                // SEQ fields with the same identifier so the appended field
+                // seeds with its actual position (Figure 1, Figure 2, …).
+                // Previously the cached run stayed empty and get/view showed
+                // blank where the number belongs.
+                "seq" => CountExistingSeqFields(seqIdentifier).ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
                 // DATE/TIME family: seed with DateTime.Now formatted via the
                 // user's `\@` format switch (if any), otherwise Word-like
                 // defaults. The "1" fallback for unrecognized fields is
@@ -2750,6 +2757,56 @@ public partial class WordHandler
         if (!IsTruthy(properties?.GetValueOrDefault("hyperlink"))) return "";
         if (System.Text.RegularExpressions.Regex.IsMatch(switchesBlob, @"\\h\b")) return "";
         return " \\h";
+    }
+
+    // R52-bt-1: the IF field's cached run was seeded with trueText
+    // unconditionally, so `IF 2 = 1 "T" "F"` displayed T until a real Word
+    // re-evaluation. Statically evaluate literal comparisons (numbers or
+    // quoted strings, operators = <> < > <= >=); expressions referencing
+    // other fields aren't decidable here — seed empty so the `evaluated`
+    // protocol reports field_not_evaluated instead of fabricating a result.
+    private static string EvaluateIfFieldPlaceholder(Dictionary<string, string> properties)
+    {
+        var trueText = properties.GetValueOrDefault("trueText", properties.GetValueOrDefault("truetext", ""));
+        var falseText = properties.GetValueOrDefault("falseText", properties.GetValueOrDefault("falsetext", ""));
+        var expr = properties.GetValueOrDefault("expression", properties.GetValueOrDefault("condition", ""));
+        var m = System.Text.RegularExpressions.Regex.Match(expr.Trim(),
+            @"^(?:""(?<ls>[^""]*)""|(?<ln>-?\d+(?:\.\d+)?))\s*(?<op><>|<=|>=|=|<|>)\s*(?:""(?<rs>[^""]*)""|(?<rn>-?\d+(?:\.\d+)?))$");
+        if (!m.Success) return "";
+        bool result;
+        var op = m.Groups["op"].Value;
+        if (m.Groups["ln"].Success && m.Groups["rn"].Success)
+        {
+            var l = double.Parse(m.Groups["ln"].Value, System.Globalization.CultureInfo.InvariantCulture);
+            var r = double.Parse(m.Groups["rn"].Value, System.Globalization.CultureInfo.InvariantCulture);
+            result = op switch { "=" => l == r, "<>" => l != r, "<" => l < r, ">" => l > r, "<=" => l <= r, _ => l >= r };
+        }
+        else
+        {
+            var l = m.Groups["ls"].Success ? m.Groups["ls"].Value : m.Groups["ln"].Value;
+            var r = m.Groups["rs"].Success ? m.Groups["rs"].Value : m.Groups["rn"].Value;
+            var cmp = string.Compare(l, r, StringComparison.OrdinalIgnoreCase);
+            result = op switch { "=" => cmp == 0, "<>" => cmp != 0, "<" => cmp < 0, ">" => cmp > 0, "<=" => cmp <= 0, _ => cmp >= 0 };
+        }
+        return result ? trueText : falseText;
+    }
+
+    // Count SEQ fields already carrying this identifier so a newly appended
+    // one caches its 1-based position in the sequence.
+    private int CountExistingSeqFields(string? identifier)
+    {
+        if (string.IsNullOrEmpty(identifier)) return 1;
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body == null) return 1;
+        int count = 0;
+        foreach (var instr in body.Descendants<DocumentFormat.OpenXml.Wordprocessing.FieldCode>())
+        {
+            var text = instr.Text ?? "";
+            var im = System.Text.RegularExpressions.Regex.Match(text, @"^\s*SEQ\s+(\S+)");
+            if (im.Success && im.Groups[1].Value.Equals(identifier, StringComparison.OrdinalIgnoreCase))
+                count++;
+        }
+        return count + 1;
     }
 
     private static string QuoteFieldNameIfNeeded(string name)
