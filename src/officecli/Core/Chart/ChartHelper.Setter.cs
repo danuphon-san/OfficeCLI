@@ -45,7 +45,13 @@ internal static partial class ChartHelper
         // matching what a freshly-built N-series chart would use for slot N —
         // not the cloned neighbor's color.
         newSer.GetFirstChild<C.ShapeProperties>()?.Remove();
-        ApplySeriesColor(newSer, DefaultSeriesColors[(int)(newIdx % (uint)DefaultSeriesColors.Length)]);
+        // color=… (same lenient vocabulary as `set series color=`) overrides
+        // the palette default — the schema declares color add:true, so
+        // silently dropping it violated the help contract.
+        var color = properties.GetValueOrDefault("color");
+        ApplySeriesColor(newSer, !string.IsNullOrEmpty(color)
+            ? color
+            : DefaultSeriesColors[(int)(newIdx % (uint)DefaultSeriesColors.Length)]);
 
         // Renumber c:idx / c:order on the clone.
         if (newSer.GetFirstChild<C.Index>() is { } ix) ix.Val = newIdx;

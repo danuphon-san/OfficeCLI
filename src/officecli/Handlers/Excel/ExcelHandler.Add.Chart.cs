@@ -356,22 +356,26 @@ public partial class ExcelHandler
 
         // Resolve range-reference values/categories against the workbook so
         // AddSeries seeds literal data (which becomes the cached snapshot).
-        var addProps = new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase);
+        // Mutate `properties` in place instead of copying: enumerating a
+        // TrackingPropertyDictionary into a fresh dict marks EVERY key as
+        // consumed (see TrackingPropertyDictionary.GetEnumerator), which
+        // silently swallows unsupported_property reporting for unknown keys.
+        // TryGetValue / indexer / Remove are the tracked access routes.
         string? valuesRef = null, categoriesRef = null;
         List<string>? cachedCats = null;
-        if (addProps.TryGetValue("values", out var valRaw) && ChartHelper.IsRangeReference(valRaw))
+        if (properties.TryGetValue("values", out var valRaw) && ChartHelper.IsRangeReference(valRaw))
         {
             valuesRef = ChartHelper.NormalizeRangeReference(valRaw, sheetName);
             var cells = ResolveRangeToCellValues(valRaw, sheetName);
             if (cells != null)
-                addProps["values"] = string.Join(",", cells.Select(v =>
+                properties["values"] = string.Join(",", cells.Select(v =>
                     double.TryParse(v, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : 0));
             else
-                addProps.Remove("values");
+                properties.Remove("values");
         }
-        if (addProps.TryGetValue("categories", out var catRaw))
+        if (properties.TryGetValue("categories", out var catRaw))
         {
-            addProps.Remove("categories"); // ChartHelper.AddSeries doesn't consume it
+            properties.Remove("categories"); // ChartHelper.AddSeries doesn't consume it
             if (ChartHelper.IsRangeReference(catRaw))
             {
                 categoriesRef = ChartHelper.NormalizeRangeReference(catRaw, sheetName);
@@ -379,7 +383,7 @@ public partial class ExcelHandler
             }
         }
 
-        var newIdx = ChartHelper.AddSeries(chartPart, addProps);
+        var newIdx = ChartHelper.AddSeries(chartPart, properties);
         if (newIdx == 0)
             throw new ArgumentException(
                 "Cannot add a series: the chart has no existing series to derive structure from. Recreate the chart with the desired series instead.");
