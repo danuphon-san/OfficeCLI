@@ -1485,6 +1485,12 @@ public partial class WordHandler
                     => FormatDateForField(dateFmtVal, "M/d/yyyy"),
                 "time" => FormatDateForField(dateFmtVal, "h:mm tt"),
                 _ when isExpressionField => "",
+                // NOTE(R54-bt-1, by design): a raw `instruction=SEQ …` field is
+                // verbatim authoring and stays UNEVALUATED until an explicit
+                // `set / recalcFields=seq` (or Word F9) — the SeqEval engine
+                // owns \r/\c/\s semantics a naive insert-time count would get
+                // wrong. Only the structured fieldType=seq convenience path
+                // seeds at insert.
                 // BUG-R8A(BUG3): keep the intentional "1" only for numeric page
                 // fields. The old `_ => "1"` arm leaked to every unrecognized raw
                 // `instruction=` field (SYMBOL/EQ/ADVANCE/TC/...), fabricating a
