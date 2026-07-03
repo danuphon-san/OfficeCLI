@@ -272,8 +272,18 @@ internal class ExcelStyleManager
                         break;
                     }
                     case "indent":
-                        alignment.Indent = ParseHelpers.SafeParseUint(value, "indent");
+                    {
+                        var indentVal = ParseHelpers.SafeParseUint(value, "indent");
+                        // ST_CellAlignmentIndent caps at 255; larger values
+                        // pass silently but fail schema validation (real
+                        // Excel repairs/strips them). Mirror the rotation
+                        // bounds check above.
+                        if (indentVal > 255)
+                            throw new ArgumentException(
+                                $"Invalid 'indent' value '{value}'. Must be 0..255 (Excel's alignment indent cap).");
+                        alignment.Indent = indentVal;
                         break;
+                    }
                     case "shrinktofit" or "shrink":
                         alignment.ShrinkToFit = IsTruthy(value);
                         break;
