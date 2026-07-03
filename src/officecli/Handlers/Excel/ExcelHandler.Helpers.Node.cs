@@ -521,7 +521,26 @@ public partial class ExcelHandler
                             else
                             {
                                 var pf = fill.PatternFill;
-                                if (pf?.ForegroundColor?.Rgb?.Value != null)
+                                // Non-solid pattern fills (lightGray, darkGrid, …)
+                                // carry a pattern type plus fg/bg colors that must
+                                // all survive round-trip. Solid/none keep the
+                                // legacy single-color `fill` readback so existing
+                                // behavior is unchanged.
+                                var patType = pf?.PatternType?.Value;
+                                bool nonSolidPattern = patType != null
+                                    && patType != PatternValues.Solid
+                                    && patType != PatternValues.None;
+                                if (nonSolidPattern)
+                                {
+                                    // Emit the OOXML wire name (e.g. "lightGray"),
+                                    // not the enum struct's ToString.
+                                    node.Format["fillPattern"] = pf!.PatternType!.InnerText;
+                                    if (pf!.ForegroundColor?.Rgb?.Value != null)
+                                        node.Format["fill"] = ParseHelpers.FormatHexColor(pf.ForegroundColor.Rgb.Value);
+                                    if (pf.BackgroundColor?.Rgb?.Value != null)
+                                        node.Format["fillBg"] = ParseHelpers.FormatHexColor(pf.BackgroundColor.Rgb.Value);
+                                }
+                                else if (pf?.ForegroundColor?.Rgb?.Value != null)
                                     node.Format["fill"] = ParseHelpers.FormatHexColor(pf.ForegroundColor.Rgb.Value);
                                 else if (pf?.ForegroundColor?.Theme?.Value != null)
                                 {

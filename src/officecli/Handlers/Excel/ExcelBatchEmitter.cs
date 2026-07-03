@@ -49,7 +49,7 @@ public static partial class ExcelBatchEmitter
     };
     private static readonly HashSet<string> CellStyleKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "fill", "numberformat", "strike", "underline", "superscript", "subscript",
+        "fill", "fillPattern", "fillBg", "numberformat", "strike", "underline", "superscript", "subscript",
     };
     // Cell Format keys the emitter consumes through dedicated channels or
     // intentionally drops (derived/readonly state).
