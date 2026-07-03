@@ -73,6 +73,9 @@ public partial class ExcelHandler
                     break;
                 case "datarange" or "range":
                 {
+                    // Same shape guard as Add: garbage landed verbatim in
+                    // <xne:f> and real Excel refused the file.
+                    ValidateSparklineRange(value);
                     var newRangeRef = value.Contains('!') ? value : $"{spkSheet}!{value}";
                     foreach (var spk in spkGroup.Descendants<X14.Sparkline>())
                     {

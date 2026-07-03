@@ -397,6 +397,51 @@ public partial class ExcelHandler
 
     internal static bool IsCanonicalNumericText(string text) => CanonicalNumericLiteral.IsMatch(text);
 
+    /// <summary>Shape-check a sparkline data range ("A1:E1" or
+    /// "Sheet1!A1:E1", whole rows/cols allowed). Arbitrary strings written
+    /// into &lt;xne:f&gt; make real Excel refuse the file while schema
+    /// validation stays green.</summary>
+    internal static void ValidateSparklineRange(string range)
+    {
+        var r = (range ?? "").Trim();
+        var bang = r.LastIndexOf('!');
+        if (bang >= 0) r = r[(bang + 1)..];
+        r = r.Replace("$", "");
+        var ok = r.Length > 0 && r.Split(':').All(tok =>
+            System.Text.RegularExpressions.Regex.IsMatch(tok.Trim(), @"^([A-Za-z]{1,3}\d+|[A-Za-z]{1,3}|\d+)$"));
+        if (!ok)
+            throw new ArgumentException(
+                $"Invalid sparkline range '{range}'. Expected an A1 range like A1:E1 (optionally sheet-qualified).");
+    }
+
+    /// <summary>Sanity-check a defined-name body. Full formula validation is
+    /// out of scope, but a sheet-qualified reference must name an existing
+    /// sheet and carry a plausible range/name after the '!' — garbage like
+    /// "乱码!!!" written verbatim makes real Excel refuse the file.</summary>
+    internal void ValidateDefinedNameRef(string refText)
+    {
+        // Defined-name bodies are full formulas — validating them properly
+        // is out of scope (functions, unions, cross-part brackets, escaped
+        // apostrophes are all legal). Reject only the empirically fatal
+        // patterns that pass schema validation but make real Excel refuse
+        // the file: doubled/trailing '!' ("乱码!!!") and stray '#' outside
+        // the known error literals ("乱码###").
+        var body = (refText ?? "").TrimStart('=').Trim();
+        if (body.Length == 0) return;
+        if (body.Contains('"')) return; // string literals — leave to Excel
+        // Strip the known error literals first: "#REF!" legitimately ends
+        // with '!' and must not trip the dangling-bang check below.
+        var probe = System.Text.RegularExpressions.Regex.Replace(body,
+            @"#(REF!|N/A|NAME\?|DIV/0!|VALUE!|NULL!|NUM!|SPILL!|CALC!|GETTING_DATA)",
+            "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (probe.Contains('#'))
+            throw new ArgumentException(
+                $"Defined name ref '{refText}' contains '#' outside a known error literal — not valid formula text.");
+        if (probe.Contains("!!") || probe.EndsWith("!", StringComparison.Ordinal))
+            throw new ArgumentException(
+                $"Defined name ref '{refText}' has a dangling '!' — a sheet qualifier must be followed by a range (e.g. Sheet1!$A$1:$B$5).");
+    }
+
     /// <summary>Text to store in a numeric cell's &lt;v&gt;: the literal digits
     /// when already canonical (preserves >15-significant-digit values that
     /// double cannot represent), else the parsed double re-serialized.</summary>

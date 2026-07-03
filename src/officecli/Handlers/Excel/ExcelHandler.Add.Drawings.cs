@@ -951,7 +951,11 @@ public partial class ExcelHandler
             spkGroup.LineWeight = lw;
 
         // Build the Sparkline element
-        // Ensure range includes sheet reference
+        // Ensure range includes sheet reference. Validate the range shape
+        // first: an arbitrary string ("NOTAREF!!!") landed verbatim in
+        // <xne:f> and real Excel refused the file (0x800A03EC) while schema
+        // validation stayed green.
+        ValidateSparklineRange(spkRange);
         var spkFormulaRef = spkRange.Contains('!') ? spkRange : $"{spkSheetName}!{spkRange}";
         var sparkline = new X14.Sparkline
         {

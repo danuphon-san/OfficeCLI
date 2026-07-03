@@ -100,6 +100,11 @@ public partial class ExcelHandler
             throw new ArgumentException(
                 $"Cross-workbook references like '{refVal}' require an externalLinks part which officecli doesn't expose; use raw-set for this case");
 
+        // Sheet-qualified refs must name an existing sheet with a plausible
+        // range — garbage like "乱码!!!" written verbatim made real Excel
+        // refuse the file while schema validation stayed green.
+        ValidateDefinedNameRef(refVal);
+
         var workbook = GetWorkbook();
         // CONSISTENCY(workbook-child-order): helper inserts <definedNames>
         // in schema-correct position (before calcPr/oleSize/...).
@@ -369,7 +374,11 @@ public partial class ExcelHandler
         // NOTE: multi-region sqref ("A1:A5 C1:C5") is legal and opens fine in
         // real Excel — a fuzz report claiming otherwise was a render-service
         // cache false positive (fresh-content retest and an openpyxl gold
-        // sample both open cleanly). Do not add a guard.
+        // sample both open cleanly). Do not add a guard for multi-region —
+        // but DO validate each token's A1 shape: an arbitrary string landed
+        // verbatim in sqref= and real Excel refused the file (0x800A03EC)
+        // while schema validation stayed green.
+        ValidateSqref(dvSqref, "validation ref");
 
         var dv = new DataValidation
         {

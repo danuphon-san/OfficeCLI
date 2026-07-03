@@ -43,7 +43,12 @@ public partial class ExcelHandler
         {
             switch (key.ToLowerInvariant())
             {
-                case "ref": dn.Text = value; break;
+                case "ref":
+                    // Same guard as AddNamedRange: sheet-qualified refs must
+                    // name an existing sheet with a plausible range.
+                    ValidateDefinedNameRef(value);
+                    dn.Text = value;
+                    break;
                 case "name": dn.Name = value; break;
                 case "comment": dn.Comment = value; break;
                 case "volatile":
