@@ -22,13 +22,30 @@ public static partial class ExcelBatchEmitter
         EmitConditionalFormats(xl, sheetPath, counts.Cfs, items, warnings);
         EmitValidations(xl, sheetPath, counts.Validations, items, warnings);
         EmitComments(xl, sheetPath, counts.Comments, items, warnings);
-        EmitCharts(xl, sheetPath, counts.Charts, items, warnings);
+        // Charts replay LAST (see EmitChartsPass) — a series can reference a
+        // range on a sheet emitted later in the workbook; adding the chart
+        // before that sheet's data exists leaves numRef with an empty numCache
+        // (re-dump shows an empty series). Deferred to the final pass.
         EmitSparklines(xl, sheetPath, counts.Sparklines, items, warnings);
         var drawingCounts = xl.GetDumpDrawingCounts(sheetName);
         EmitPictures(xl, sheetName, sheetPath, drawingCounts.Pictures, items, warnings);
         EmitShapes(xl, sheetPath, drawingCounts.Shapes, items, warnings);
-        EmitChartExCharts(xl, sheetName, sheetPath, items, warnings);
         EmitOles(xl, sheetName, sheetPath, items, warnings);
+    }
+
+    /// <summary>
+    /// Emit all charts across every sheet AFTER every sheet's data baseline
+    /// has been imported. Cross-sheet series references (Sheet2!$B$2:$B$5 on a
+    /// chart living on Sheet1) need the referenced sheet's cells to already
+    /// exist so the numCache is populated on replay.
+    /// </summary>
+    internal static void EmitChartsPass(ExcelHandler xl, string sheetName,
+        List<BatchItem> items, List<UnsupportedWarning> warnings)
+    {
+        var sheetPath = "/" + sheetName;
+        var counts = xl.GetDumpElementCounts(sheetName);
+        EmitCharts(xl, sheetPath, counts.Charts, items, warnings);
+        EmitChartExCharts(xl, sheetName, sheetPath, items, warnings);
     }
 
     // ==================== Tables ====================

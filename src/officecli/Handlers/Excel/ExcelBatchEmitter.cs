@@ -113,6 +113,13 @@ public static partial class ExcelBatchEmitter
         for (int i = 0; i < sheetNames.Count; i++)
             EmitSheet(xl, sheetNames[i], renameFirstSheet: i == 0, items, warnings);
 
+        // Charts replay after every sheet's data baseline exists so that
+        // cross-sheet series references (a chart on Sheet1 pointing at
+        // Sheet2!$B$2:$B$5) resolve their numCache on replay instead of
+        // keeping an empty numRef.
+        foreach (var sheetName in sheetNames)
+            EmitChartsPass(xl, sheetName, items, warnings);
+
         // Pivot tables replay LAST, after every sheet's data exists — a
         // pivot's source range routinely lives on a different sheet than the
         // pivot itself (including sheets emitted later).
