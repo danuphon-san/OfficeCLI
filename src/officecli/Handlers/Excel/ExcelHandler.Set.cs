@@ -1222,6 +1222,12 @@ public partial class ExcelHandler
                     }
                     else
                     {
+                        // Validate as a real A1 cell/range before writing —
+                        // an arbitrary string ("badrange") landed verbatim in
+                        // ref=, silently producing a dead filter. Same rule
+                        // as printarea/freeze.
+                        foreach (var afCell in trimmed.Replace("$", "").Split(':'))
+                            ParseCellReference(afCell.Trim());
                         if (existingAf != null)
                         {
                             existingAf.Reference = trimmed.ToUpperInvariant();

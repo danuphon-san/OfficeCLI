@@ -493,6 +493,10 @@ public partial class ExcelHandler
                 case var k1 when k1.StartsWith("font."):
                     break;
                 case "ref":
+                    // Validate as a real A1 reference (same check add uses):
+                    // an arbitrary string here passes schema validation but
+                    // real Excel refuses the whole file (0x800A03EC).
+                    ParseCellReference(value);
                     cmtElement.Reference = value.ToUpperInvariant();
                     break;
                 case "author":

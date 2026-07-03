@@ -625,6 +625,27 @@ internal class ExcelStyleManager
             throw new ArgumentException(
                 $"number format is {formatCode.Length} chars; Excel's limit is 255.");
 
+        // Unbalanced [brackets] (e.g. formatCode="[") pass schema validation
+        // but real Excel refuses the whole file (0x800A03EC). Count outside
+        // quoted literals; escaped \[ is a literal char.
+        int nfBracketDepth = 0;
+        bool nfBrQuote = false;
+        for (int i = 0; i < formatCode.Length; i++)
+        {
+            var c = formatCode[i];
+            if (c == '"') nfBrQuote = !nfBrQuote;
+            else if (!nfBrQuote && c == '\\') i++;
+            else if (!nfBrQuote && c == '[') nfBracketDepth++;
+            else if (!nfBrQuote && c == ']')
+            {
+                nfBracketDepth--;
+                if (nfBracketDepth < 0) break;
+            }
+        }
+        if (nfBracketDepth != 0)
+            throw new ArgumentException(
+                $"number format has unbalanced square brackets: '{formatCode}'. Bracket codes ([Red], [>=100], [h]) must be closed; writing an unbalanced bracket makes Excel refuse to open the file.");
+
         // Check built-in formats
         var builtinMap = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase)
         {
