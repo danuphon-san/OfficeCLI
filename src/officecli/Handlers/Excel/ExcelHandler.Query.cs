@@ -1000,6 +1000,13 @@ public partial class ExcelHandler
             if (Regex.IsMatch(cellRef, @"^\d+$"))
                 throw new ArgumentException($"Invalid cell reference: '{cellRef}'. Expected format like 'A1', 'B2'.");
 
+            // Excel-style whole-column/row references (B:B, 1:1) are not
+            // paths — point at the col[X]/row[N] syntax instead of the bare
+            // generic-XML not-found. CONSISTENCY(axis-ref-hint): same in Set.
+            if (SuggestAxisRefSyntax(cellRef) is { } axisHint)
+                throw new ArgumentException(
+                    $"Element not found: {cellRef}. Whole-column/row references use bracket syntax — try /{sheetNameFromPath}/{axisHint}.");
+
             // Generic XML fallback: navigate worksheet XML tree
             var xmlSegments = GenericXmlQuery.ParsePathSegments(cellRef);
             var target = GenericXmlQuery.NavigateByPath(GetSheet(worksheet), xmlSegments);

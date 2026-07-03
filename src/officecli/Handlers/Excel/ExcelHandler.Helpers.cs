@@ -15,6 +15,37 @@ namespace OfficeCli.Handlers;
 
 public partial class ExcelHandler
 {
+    /// <summary>
+    /// When a path segment is an Excel-style whole-column (`B:B`, `A:C`) or
+    /// whole-row (`1:1`, `2:5`) reference, return the equivalent CLI path
+    /// syntax to suggest (`col[B]` / `row[1]`); null otherwise. Used to
+    /// upgrade the bare "Element not found: B:B" error into an actionable
+    /// hint — column/row axes are addressed via col[X]/row[N], not A1-style
+    /// axis spans.
+    /// </summary>
+    private static string? SuggestAxisRefSyntax(string cellRef)
+    {
+        var colRef = System.Text.RegularExpressions.Regex.Match(
+            cellRef, @"^([A-Za-z]{1,3}):([A-Za-z]{1,3})$");
+        if (colRef.Success)
+        {
+            var from = colRef.Groups[1].Value.ToUpperInvariant();
+            var to = colRef.Groups[2].Value.ToUpperInvariant();
+            return from == to
+                ? $"col[{from}]"
+                : $"col[{from}] (one column at a time; repeat for {from}..{to})";
+        }
+        var rowRef = System.Text.RegularExpressions.Regex.Match(cellRef, @"^(\d+):(\d+)$");
+        if (rowRef.Success)
+        {
+            var from = rowRef.Groups[1].Value;
+            var to = rowRef.Groups[2].Value;
+            return from == to
+                ? $"row[{from}]"
+                : $"row[{from}] (one row at a time; repeat for {from}..{to})";
+        }
+        return null;
+    }
 
     /// <summary>
     /// Parse a print-margin value into inches (PageMargins schema unit).

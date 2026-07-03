@@ -249,6 +249,13 @@ public partial class ExcelHandler
             }
         }
 
+        // Excel-style whole-column/row references (B:B, 1:1) are not paths —
+        // point at the col[X]/row[N] syntax instead of the bare generic-XML
+        // not-found. CONSISTENCY(axis-ref-hint): same hint in Query.
+        if (SuggestAxisRefSyntax(cellRef) is { } axisHint)
+            throw new ArgumentException(
+                $"Element not found: {cellRef}. Whole-column/row references use bracket syntax — try /{sheetName}/{axisHint}.");
+
         // Check if path is a cell reference or generic XML path
         var firstPart = cellRef.Split('/')[0].Split('[')[0];
         bool isCellRef = Regex.IsMatch(firstPart, @"^[A-Z]+\d+", RegexOptions.IgnoreCase);
