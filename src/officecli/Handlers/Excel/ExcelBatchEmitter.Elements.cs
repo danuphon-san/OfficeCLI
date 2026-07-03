@@ -176,6 +176,29 @@ public static partial class ExcelBatchEmitter
                     CopyString(cf, "text", props, "text");
                     CopyDxfStyle(cf, props);
                     break;
+                // Blank/error/text-operator family — the add vocabulary routes
+                // these via `--type cf --prop type=<name>` (AddCf → cfextended).
+                case "containsBlanks":
+                case "notContainsBlanks":
+                case "containsErrors":
+                case "notContainsErrors":
+                    addType = "cf";
+                    props["type"] = type;
+                    CopyDxfStyle(cf, props);
+                    break;
+                case "beginsWith":
+                case "endsWith":
+                    addType = "cf";
+                    props["type"] = type;
+                    CopyString(cf, "text", props, "text");
+                    CopyDxfStyle(cf, props);
+                    break;
+                case "notContainsText":
+                    addType = "cf";
+                    props["type"] = "notcontains";
+                    CopyString(cf, "text", props, "text");
+                    CopyDxfStyle(cf, props);
+                    break;
                 case "timePeriod":
                     addType = "dateoccurring";
                     CopyString(cf, "period", props, "period");

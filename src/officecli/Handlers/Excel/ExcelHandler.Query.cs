@@ -726,6 +726,17 @@ public partial class ExcelHandler
                     if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
                 }
 
+                // Text-operator variants (beginsWith/endsWith/notContainsText) keep
+                // their InnerText type from the canonical emit above; surface the
+                // rule text so dump can round-trip them like containsText.
+                if (rule.Type?.Value == ConditionalFormatValues.BeginsWith
+                    || rule.Type?.Value == ConditionalFormatValues.EndsWith
+                    || rule.Type?.Value == ConditionalFormatValues.NotContainsText)
+                {
+                    if (rule.Text?.HasValue == true) cfNode.Format["text"] = rule.Text.Value;
+                    if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
+                }
+
                 // CellIs (operator-based comparison: between/equal/greaterThan/...)
                 if (rule.Type?.Value == ConditionalFormatValues.CellIs)
                 {

@@ -2694,6 +2694,30 @@ public partial class ExcelHandler
         // Find existing column definition or create one
         var col = columns.Elements<Column>()
             .FirstOrDefault(c => c.Min?.Value <= colIdx && c.Max?.Value >= colIdx);
+        // A multi-column <col min max> range (e.g. a shared width for A:C)
+        // must be split before mutating, otherwise a set targeting one column
+        // bleeds the property onto every column in the range.
+        if (col != null && (col.Min!.Value < colIdx || col.Max!.Value > colIdx))
+        {
+            var rangeMin = col.Min.Value;
+            var rangeMax = col.Max.Value;
+            if (rangeMin < colIdx)
+            {
+                var left = (Column)col.CloneNode(true);
+                left.Min = rangeMin;
+                left.Max = colIdx - 1;
+                col.InsertBeforeSelf(left);
+            }
+            if (rangeMax > colIdx)
+            {
+                var right = (Column)col.CloneNode(true);
+                right.Min = colIdx + 1;
+                right.Max = rangeMax;
+                col.InsertAfterSelf(right);
+            }
+            col.Min = colIdx;
+            col.Max = colIdx;
+        }
         if (col == null)
         {
             // Leave width/customWidth unset on implicit creation — `add column`
