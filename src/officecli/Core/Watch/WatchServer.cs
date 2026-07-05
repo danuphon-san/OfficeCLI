@@ -1860,7 +1860,7 @@ internal class WatchServer : IDisposable
                 return;
             }
 
-            if (requestLine.StartsWith("POST /api/edit", StringComparison.Ordinal))
+            if (requestLine.StartsWith("POST /api/send", StringComparison.Ordinal))
             {
                 if (!IsOriginAllowed(headers))
                 {
@@ -1868,7 +1868,20 @@ internal class WatchServer : IDisposable
                     client.Close();
                     return;
                 }
-                await HandlePostEditAsync(stream, headers, bodyPrefix, token);
+                await HandlePostSendAsync(stream, headers, bodyPrefix, token);
+                client.Close();
+                return;
+            }
+
+            if (requestLine.StartsWith("POST /api/batch", StringComparison.Ordinal))
+            {
+                if (!IsOriginAllowed(headers))
+                {
+                    await WriteForbiddenAsync(stream, ForbiddenOriginMessage(headers), token);
+                    client.Close();
+                    return;
+                }
+                await HandlePostBatchAsync(stream, headers, bodyPrefix, token);
                 client.Close();
                 return;
             }
@@ -2152,11 +2165,15 @@ internal class WatchServer : IDisposable
     }
 
     /// <summary>
-    /// Handle POST /api/edit — spawn officecli set as a child process to modify the file.
-    /// The set command will notify the watch server via named pipe, triggering an SSE refresh.
-    /// WatchServer never opens the file directly (see CLAUDE.md "Watch Server Rules").
+    /// Handle POST /api/send — spawn officecli set/add/remove as a child process
+    /// to modify the file, mirroring the SDKs' send(item) (one batch-item, this
+    /// call's own status is the result). That command auto-notifies the watch
+    /// server via named pipe, triggering an SSE refresh. WatchServer never opens
+    /// the file directly — widening this beyond `set` must stay a child-process
+    /// spawn, not an in-process handler call, so this can never become a second
+    /// writer racing a live resident.
     /// </summary>
-    private async Task HandlePostEditAsync(NetworkStream stream, Dictionary<string, string> headers, string bodyPrefix, CancellationToken token)
+    private async Task HandlePostSendAsync(NetworkStream stream, Dictionary<string, string> headers, string bodyPrefix, CancellationToken token)
     {
         int statusCode = 204;
         string statusText = "No Content";
@@ -2186,13 +2203,14 @@ internal class WatchServer : IDisposable
                 body = sb.ToString();
             }
 
-            // Parse: {"path": "...", "prop": "text", "value": "Hello"}
-            // or:    {"path": "...", "props": {"x": "10pt", "y": "20pt"}}
+            // Same batch-item vocabulary as CLI batch / the SDKs' send(item)
+            // {"command": "set"|"add"|"remove", ...}.
+            // Bare {"path", "props"} or legacy {"path", "prop", "value"} with
+            // no "command" field default to "set" for pre-existing callers.
             using var doc = System.Text.Json.JsonDocument.Parse(body);
             var root = doc.RootElement;
-            var path = root.GetProperty("path").GetString() ?? "";
+            var command = root.TryGetProperty("command", out var cmdEl) ? cmdEl.GetString() ?? "set" : "set";
 
-            // Spawn officecli set as child process
             var exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName
                 ?? (OperatingSystem.IsWindows() ? "officecli.exe" : "officecli");
             var psi = new System.Diagnostics.ProcessStartInfo
@@ -2203,29 +2221,59 @@ internal class WatchServer : IDisposable
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
-            psi.ArgumentList.Add("set");
-            psi.ArgumentList.Add(_filePath);
-            psi.ArgumentList.Add(path);
-            if (root.TryGetProperty("props", out var propsEl) && propsEl.ValueKind == System.Text.Json.JsonValueKind.Object)
+
+            switch (command.ToLowerInvariant())
             {
-                foreach (var kv in propsEl.EnumerateObject())
+                case "add":
                 {
-                    psi.ArgumentList.Add("--prop");
-                    psi.ArgumentList.Add($"{kv.Name}={kv.Value.GetString() ?? ""}");
+                    var parent = root.GetProperty("parent").GetString() ?? "";
+                    psi.ArgumentList.Add("add");
+                    psi.ArgumentList.Add(_filePath);
+                    psi.ArgumentList.Add(parent);
+                    if (root.TryGetProperty("type", out var typeEl) && typeEl.GetString() is { } type)
+                    {
+                        psi.ArgumentList.Add("--type");
+                        psi.ArgumentList.Add(type);
+                    }
+                    AppendProps(psi, root);
+                    break;
+                }
+                case "remove":
+                {
+                    var path = root.GetProperty("path").GetString() ?? "";
+                    psi.ArgumentList.Add("remove");
+                    psi.ArgumentList.Add(_filePath);
+                    psi.ArgumentList.Add(path);
+                    break;
+                }
+                case "set":
+                default:
+                {
+                    var path = root.GetProperty("path").GetString() ?? "";
+                    psi.ArgumentList.Add("set");
+                    psi.ArgumentList.Add(_filePath);
+                    psi.ArgumentList.Add(path);
+                    if (root.TryGetProperty("props", out var propsEl) && propsEl.ValueKind == System.Text.Json.JsonValueKind.Object)
+                    {
+                        AppendProps(psi, root);
+                    }
+                    else
+                    {
+                        // Legacy shape: {"path", "prop", "value"} (single property, no "props" object).
+                        var prop = root.GetProperty("prop").GetString() ?? "text";
+                        var value = root.GetProperty("value").GetString() ?? "";
+                        psi.ArgumentList.Add("--prop");
+                        psi.ArgumentList.Add($"{prop}={value}");
+                    }
+                    break;
                 }
             }
-            else
-            {
-                var prop = root.GetProperty("prop").GetString() ?? "text";
-                var value = root.GetProperty("value").GetString() ?? "";
-                psi.ArgumentList.Add("--prop");
-                psi.ArgumentList.Add($"{prop}={value}");
-            }
+
             using var proc = System.Diagnostics.Process.Start(psi);
             if (proc != null)
             {
                 await proc.WaitForExitAsync(token);
-                // set command auto-notifies watch via named pipe → SSE refresh
+                // command auto-notifies watch via named pipe → SSE refresh
             }
         }
         catch
@@ -2235,6 +2283,91 @@ internal class WatchServer : IDisposable
         var resp = Encoding.UTF8.GetBytes(
             $"HTTP/1.1 {statusCode} {statusText}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         await stream.WriteAsync(resp, token);
+    }
+
+    /// <summary>
+    /// Handle POST /api/batch — spawn officecli batch as a child process,
+    /// mirroring the SDKs' batch(items). The posted
+    /// body is a JSON array of the same batch-item shape /api/send accepts;
+    /// `officecli batch --commands` already takes that array verbatim, so
+    /// unlike /api/send there is no per-command arg-building here — the
+    /// whole body passes straight through. Same child-process-spawn
+    /// constraint as /api/send — never touch the document in-process.
+    /// </summary>
+    private async Task HandlePostBatchAsync(NetworkStream stream, Dictionary<string, string> headers, string bodyPrefix, CancellationToken token)
+    {
+        int statusCode = 200;
+        string statusText = "OK";
+        string responseBody = "";
+        try
+        {
+            int contentLength = 0;
+            if (headers.TryGetValue("Content-Length", out var clStr) && int.TryParse(clStr, out var cl))
+                contentLength = cl;
+            if (contentLength > MaxSelectionBodyBytes) throw new InvalidDataException("body too large");
+
+            var body = bodyPrefix;
+            if (contentLength > body.Length)
+            {
+                var sb = new StringBuilder(body);
+                var buf = new byte[4096];
+                int have = Encoding.UTF8.GetByteCount(body);
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                cts.CancelAfter(PostBodyReadTimeout);
+                while (have < contentLength)
+                {
+                    var n = await stream.ReadAsync(buf, cts.Token);
+                    if (n == 0) break;
+                    sb.Append(Encoding.UTF8.GetString(buf, 0, n));
+                    have += n;
+                }
+                body = sb.ToString();
+            }
+
+            var exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName
+                ?? (OperatingSystem.IsWindows() ? "officecli.exe" : "officecli");
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = exe,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            psi.ArgumentList.Add("batch");
+            psi.ArgumentList.Add(_filePath);
+            psi.ArgumentList.Add("--commands");
+            psi.ArgumentList.Add(body);
+            psi.ArgumentList.Add("--json");
+
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc != null)
+            {
+                responseBody = await proc.StandardOutput.ReadToEndAsync(token);
+                await proc.WaitForExitAsync(token);
+                // batch auto-notifies watch via named pipe → SSE refresh
+            }
+        }
+        catch
+        {
+            statusCode = 400; statusText = "Bad Request";
+        }
+        var bodyBytes = Encoding.UTF8.GetBytes(responseBody);
+        var headerBytes = Encoding.UTF8.GetBytes(
+            $"HTTP/1.1 {statusCode} {statusText}\r\nContent-Type: application/json\r\nContent-Length: {bodyBytes.Length}\r\nConnection: close\r\n\r\n");
+        await stream.WriteAsync(headerBytes, token);
+        await stream.WriteAsync(bodyBytes, token);
+    }
+
+    private static void AppendProps(System.Diagnostics.ProcessStartInfo psi, System.Text.Json.JsonElement root)
+    {
+        if (!root.TryGetProperty("props", out var propsEl) || propsEl.ValueKind != System.Text.Json.JsonValueKind.Object)
+            return;
+        foreach (var kv in propsEl.EnumerateObject())
+        {
+            psi.ArgumentList.Add("--prop");
+            psi.ArgumentList.Add($"{kv.Name}={kv.Value.GetString() ?? ""}");
+        }
     }
 
     private void BroadcastSelectionUpdate(List<string> paths)
