@@ -42,6 +42,7 @@ examples/
 └── ppt/                                   # 🎨 PowerPoint examples — *.{md,sh,py,pptx}
     ├── presentation.{md,sh,py,pptx}
     ├── presentation-settings.{md,sh,py,pptx}
+    ├── diagram.{md,sh,py,pptx}              # Mermaid diagrams — native editable shapes + full-fidelity PNG
     ├── animations.{md,sh,py,pptx}
     ├── video.{md,sh,py,pptx}
     ├── 3d-model.{md,sh,py,pptx}
@@ -120,6 +121,7 @@ bash presentation.sh         # Morph transitions / full deck
 bash animations.sh           # Animation effects
 python video.py              # Video embedding
 bash 3d-model.sh             # 3D model embedding
+bash diagram.sh              # Mermaid diagrams — render=native (editable shapes) + render=image (PNG)
 python charts/charts-column.py      # PowerPoint chart examples (any charts/charts-<type>.py)
 bash tables/tables-basic.sh         # Tables — minimal create + populate
 bash tables/tables-styled.sh        # 9 built-in styles + banding flags + rowHeight/name=
@@ -167,6 +169,7 @@ python pictures/pictures-basic.py            # picture src/crop/rotation/links (
 - Slide / shape construction
 - Morph transitions and animations
 - Video and 3D model embedding
+- Mermaid diagrams — `render=native` (editable flowchart / sequence shapes + connectors) and `render=image` (full-fidelity PNG via mermaid.js, covering every mermaid type); `mermaid` / `text` / `dsl` / `src` source, placement box, `get` / `set` / `remove` the whole diagram as one group
 - Native chart examples (column, bar, line, pie, doughnut, area, scatter, bubble, radar, stock, combo, waterfall, 3D, advanced)
 - Tables — basic, built-in styles, merged cells, borders, row/column ops, real-world financial deck
 - Slide transitions — all 59 schema tokens covered across 9 trios: basic, directional, shape, band, dynamic 3D (p14), modern (p15 — Page Curl, Airplane, Origami, …), random, timing, and Morph
