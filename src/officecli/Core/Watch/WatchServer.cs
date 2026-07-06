@@ -1868,7 +1868,7 @@ internal class WatchServer : IDisposable
                     client.Close();
                     return;
                 }
-                await HandlePostSendAsync(stream, headers, bodyPrefix, token);
+                await HandlePostSendAsync(stream, headers, bodyPrefix, WantsJson(requestLine), token);
                 client.Close();
                 return;
             }
@@ -1881,7 +1881,7 @@ internal class WatchServer : IDisposable
                     client.Close();
                     return;
                 }
-                await HandlePostBatchAsync(stream, headers, bodyPrefix, token);
+                await HandlePostBatchAsync(stream, headers, bodyPrefix, WantsJson(requestLine), token);
                 client.Close();
                 return;
             }
@@ -2173,10 +2173,8 @@ internal class WatchServer : IDisposable
     /// spawn, not an in-process handler call, so this can never become a second
     /// writer racing a live resident.
     /// </summary>
-    private async Task HandlePostSendAsync(NetworkStream stream, Dictionary<string, string> headers, string bodyPrefix, CancellationToken token)
+    private async Task HandlePostSendAsync(NetworkStream stream, Dictionary<string, string> headers, string bodyPrefix, bool json, CancellationToken token)
     {
-        int statusCode = 204;
-        string statusText = "No Content";
         try
         {
             // Read body (same pattern as selection handler)
@@ -2230,12 +2228,25 @@ internal class WatchServer : IDisposable
                     psi.ArgumentList.Add("add");
                     psi.ArgumentList.Add(_filePath);
                     psi.ArgumentList.Add(parent);
-                    if (root.TryGetProperty("type", out var typeEl) && typeEl.GetString() is { } type)
+                    // --from clones an existing element (shape/slide); it is
+                    // mutually exclusive with --type/--prop (see `add`), so when
+                    // present it is the whole command.
+                    if (root.TryGetProperty("from", out var fromEl) && fromEl.GetString() is { } from)
                     {
-                        psi.ArgumentList.Add("--type");
-                        psi.ArgumentList.Add(type);
+                        psi.ArgumentList.Add("--from");
+                        psi.ArgumentList.Add(from);
                     }
-                    AppendProps(psi, root);
+                    else
+                    {
+                        if (root.TryGetProperty("type", out var typeEl) && typeEl.GetString() is { } type)
+                        {
+                            psi.ArgumentList.Add("--type");
+                            psi.ArgumentList.Add(type);
+                        }
+                        AppendProps(psi, root);
+                    }
+                    // Position hints apply to both clone and typed add.
+                    AppendPositionArgs(psi, root);
                     break;
                 }
                 case "remove":
@@ -2244,6 +2255,42 @@ internal class WatchServer : IDisposable
                     psi.ArgumentList.Add("remove");
                     psi.ArgumentList.Add(_filePath);
                     psi.ArgumentList.Add(path);
+                    break;
+                }
+                case "get":
+                {
+                    // Read-only: spawn `officecli get <path>` (served from the
+                    // resident's current in-memory state). Used by the editor to
+                    // read a property's prior value / capture an element before
+                    // deletion for undo. Still a child process — no in-process
+                    // document access, so the watch red line holds.
+                    var path = root.GetProperty("path").GetString() ?? "";
+                    psi.ArgumentList.Add("get");
+                    psi.ArgumentList.Add(_filePath);
+                    psi.ArgumentList.Add(path);
+                    break;
+                }
+                case "move":
+                {
+                    var path = root.GetProperty("path").GetString() ?? "";
+                    psi.ArgumentList.Add("move");
+                    psi.ArgumentList.Add(_filePath);
+                    psi.ArgumentList.Add(path);
+                    if (root.TryGetProperty("to", out var toEl) && toEl.GetString() is { } to)
+                    { psi.ArgumentList.Add("--to"); psi.ArgumentList.Add(to); }
+                    AppendPositionArgs(psi, root);
+                    break;
+                }
+                case "swap":
+                {
+                    var path1 = root.GetProperty("path").GetString() ?? "";
+                    // Canonical second path is "path2"; accept legacy "to".
+                    var path2 = root.TryGetProperty("path2", out var p2El) ? p2El.GetString() ?? ""
+                        : root.TryGetProperty("to", out var toEl2) ? toEl2.GetString() ?? "" : "";
+                    psi.ArgumentList.Add("swap");
+                    psi.ArgumentList.Add(_filePath);
+                    psi.ArgumentList.Add(path1);
+                    psi.ArgumentList.Add(path2);
                     break;
                 }
                 case "set":
@@ -2269,20 +2316,25 @@ internal class WatchServer : IDisposable
                 }
             }
 
+            // --json is the CLI's opt-in for the structured envelope; omit it
+            // for plain text. The flag only changes what officecli prints, i.e.
+            // what ends up inside the comm envelope's `message`.
+            if (json) psi.ArgumentList.Add("--json");
+
+            string output = "";
             using var proc = System.Diagnostics.Process.Start(psi);
             if (proc != null)
             {
+                output = await proc.StandardOutput.ReadToEndAsync(token);
                 await proc.WaitForExitAsync(token);
                 // command auto-notifies watch via named pipe → SSE refresh
             }
+            await WriteCommEnvelopeAsync(stream, true, output.TrimEnd('\n', '\r'), token);
         }
-        catch
+        catch (System.Exception ex)
         {
-            statusCode = 400; statusText = "Bad Request";
+            await WriteCommEnvelopeAsync(stream, false, ex.Message, token);
         }
-        var resp = Encoding.UTF8.GetBytes(
-            $"HTTP/1.1 {statusCode} {statusText}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-        await stream.WriteAsync(resp, token);
     }
 
     /// <summary>
@@ -2294,11 +2346,8 @@ internal class WatchServer : IDisposable
     /// whole body passes straight through. Same child-process-spawn
     /// constraint as /api/send — never touch the document in-process.
     /// </summary>
-    private async Task HandlePostBatchAsync(NetworkStream stream, Dictionary<string, string> headers, string bodyPrefix, CancellationToken token)
+    private async Task HandlePostBatchAsync(NetworkStream stream, Dictionary<string, string> headers, string bodyPrefix, bool json, CancellationToken token)
     {
-        int statusCode = 200;
-        string statusText = "OK";
-        string responseBody = "";
         try
         {
             int contentLength = 0;
@@ -2338,24 +2387,79 @@ internal class WatchServer : IDisposable
             psi.ArgumentList.Add(_filePath);
             psi.ArgumentList.Add("--commands");
             psi.ArgumentList.Add(body);
-            psi.ArgumentList.Add("--json");
+            // --json opts into the structured envelope; omit for plain text.
+            if (json) psi.ArgumentList.Add("--json");
 
+            string output = "";
             using var proc = System.Diagnostics.Process.Start(psi);
             if (proc != null)
             {
-                responseBody = await proc.StandardOutput.ReadToEndAsync(token);
+                output = await proc.StandardOutput.ReadToEndAsync(token);
                 await proc.WaitForExitAsync(token);
                 // batch auto-notifies watch via named pipe → SSE refresh
             }
+            await WriteCommEnvelopeAsync(stream, true, output.TrimEnd('\n', '\r'), token);
         }
-        catch
+        catch (System.Exception ex)
         {
-            statusCode = 400; statusText = "Bad Request";
+            await WriteCommEnvelopeAsync(stream, false, ex.Message, token);
         }
-        var bodyBytes = Encoding.UTF8.GetBytes(responseBody);
-        var headerBytes = Encoding.UTF8.GetBytes(
-            $"HTTP/1.1 {statusCode} {statusText}\r\nContent-Type: application/json\r\nContent-Length: {bodyBytes.Length}\r\nConnection: close\r\n\r\n");
-        await stream.WriteAsync(headerBytes, token);
+    }
+
+    /// <summary>
+    /// Parse the <c>?json</c> query flag off the request line. Absent, or any
+    /// value other than <c>0</c>/<c>false</c> =&gt; true (structured, the
+    /// default); <c>?json=0</c> / <c>?json=false</c> =&gt; plain text. Mirrors
+    /// the CLI's <c>--json</c> opt-in.
+    /// </summary>
+    private static bool WantsJson(string requestLine)
+    {
+        int q = requestLine.IndexOf('?');
+        if (q < 0) return true;
+        int sp = requestLine.IndexOf(' ', q);
+        string query = sp < 0 ? requestLine.Substring(q + 1) : requestLine.Substring(q + 1, sp - q - 1);
+        foreach (var pair in query.Split('&'))
+        {
+            int eq = pair.IndexOf('=');
+            string k = eq < 0 ? pair : pair.Substring(0, eq);
+            if (k == "json")
+            {
+                string v = eq < 0 ? "1" : pair.Substring(eq + 1);
+                return !(v == "0" || v.Equals("false", System.StringComparison.OrdinalIgnoreCase));
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Write the /api/send + /api/batch response as a communication envelope:
+    /// <c>{ "success": bool, "message"|"error": string }</c>. <c>success</c>
+    /// reflects the transport/process layer only (did the request reach
+    /// officecli and run without crashing) — NOT officecli's business verdict,
+    /// which rides inside <c>message</c> (its own <c>--json</c> envelope, or
+    /// plain text). Callers unwrap this: on success take <c>message</c>
+    /// (officecli's raw stdout); on failure, <c>error</c>. Always HTTP 200 —
+    /// the envelope's <c>success</c> is the status signal.
+    /// </summary>
+    private static async Task WriteCommEnvelopeAsync(NetworkStream stream, bool success, string content, CancellationToken token)
+    {
+        // Trim/AOT-safe JSON build via Utf8JsonWriter (no reflection) — mirrors
+        // CommandBuilder.PrintBatchResults. `content` is escaped by WriteString.
+        byte[] bodyBytes;
+        using (var ms = new System.IO.MemoryStream())
+        {
+            using (var w = new System.Text.Json.Utf8JsonWriter(ms))
+            {
+                w.WriteStartObject();
+                w.WriteBoolean("success", success);
+                w.WriteString(success ? "message" : "error", content);
+                w.WriteEndObject();
+            }
+            bodyBytes = ms.ToArray();
+        }
+        var header = Encoding.UTF8.GetBytes(
+            $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {bodyBytes.Length}\r\nConnection: close\r\n\r\n");
+        await stream.WriteAsync(header, token);
         await stream.WriteAsync(bodyBytes, token);
     }
 
@@ -2368,6 +2472,20 @@ internal class WatchServer : IDisposable
             psi.ArgumentList.Add("--prop");
             psi.ArgumentList.Add($"{kv.Name}={kv.Value.GetString() ?? ""}");
         }
+    }
+
+    /// <summary>
+    /// Append the shared insert-position hints (--index / --after / --before)
+    /// that add and move accept. Order-neutral; officecli resolves precedence.
+    /// </summary>
+    private static void AppendPositionArgs(System.Diagnostics.ProcessStartInfo psi, System.Text.Json.JsonElement root)
+    {
+        if (root.TryGetProperty("index", out var idxEl) && idxEl.ValueKind == System.Text.Json.JsonValueKind.Number)
+        { psi.ArgumentList.Add("--index"); psi.ArgumentList.Add(idxEl.GetInt32().ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+        if (root.TryGetProperty("after", out var afEl) && afEl.GetString() is { } af)
+        { psi.ArgumentList.Add("--after"); psi.ArgumentList.Add(af); }
+        if (root.TryGetProperty("before", out var beEl) && beEl.GetString() is { } be)
+        { psi.ArgumentList.Add("--before"); psi.ArgumentList.Add(be); }
     }
 
     private void BroadcastSelectionUpdate(List<string> paths)
