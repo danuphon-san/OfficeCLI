@@ -3146,6 +3146,15 @@ public partial class WordHandler
                     if (key.Contains('.')
                         && Core.TypedAttributeFallback.TrySet(tblPr, key, value))
                         break;
+                    // Row/cell-scoped props at table level (issue #178): name the
+                    // scoped alternative instead of the generic valid-props list,
+                    // so an agent can self-correct. Mirrors the Add-side hints in
+                    // StyleUnsupportedHints.
+                    if (Core.StyleUnsupportedHints.TryGetHint(key, out var scopedHint))
+                    {
+                        unsupported.Add($"{key} ({scopedHint})");
+                        break;
+                    }
                     if (!GenericXmlQuery.TryCreateTypedChild(tblPr, key, value))
                         unsupported.Add(unsupported.Count == 0
                             ? $"{key} (valid table props: width, alignment, style, indent, cellspacing, layout, padding, border*, colWidths, firstRow, lastRow, firstCol, lastCol, bandedRows, bandedCols, caption, description)"

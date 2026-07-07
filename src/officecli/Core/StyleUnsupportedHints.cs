@@ -4,8 +4,10 @@
 namespace OfficeCli.Core;
 
 /// <summary>
-/// Targeted hints for Word style props that the curated <c>add /styles</c> /
-/// <c>set /styles/&lt;id&gt;</c> surface does not (yet) accept.
+/// Targeted hints for Word props rejected by a curated surface — originally
+/// <c>add /styles</c> / <c>set /styles/&lt;id&gt;</c>, now also the table-level
+/// redirects for row/cell-scoped props (all Word add paths route their
+/// UNSUPPORTED list through <see cref="Format"/>).
 ///
 /// Two design rules:
 ///   1. Never recommend <c>raw-set</c>. It is an escape hatch, not a normal
@@ -29,6 +31,14 @@ internal static class StyleUnsupportedHints
         // run, and cell paths — entries removed once verified to write
         // schema-valid <w:shd>/<w:u> XML. `tabs` removed once the curated
         // POS:ALIGN[:LEADER] parser landed.
+
+        // Row/cell-scoped table props rejected at table level (issue #178):
+        // OOXML stores these on w:trPr / w:tcPr, so the table surface warns
+        // UNSUPPORTED by design — name the scoped alternative so an agent can
+        // self-correct without consulting help.
+        ["cantSplit"] = "row-scoped: add --type row --prop cantSplit=true, or set …/tbl[N]/tr[R] --prop cantSplit=true",
+        ["noWrap"] = "cell-scoped: add --type cell --prop noWrap=true, or set …/tbl[N]/tr[R]/tc[C] --prop noWrap=true",
+        ["hideMark"] = "cell-scoped: add --type cell --prop hideMark=true, or set …/tbl[N]/tr[R]/tc[C] --prop hideMark=true",
     };
 
     /// <summary>
@@ -38,6 +48,13 @@ internal static class StyleUnsupportedHints
     /// in the message ("/styles", "/body/p[…]", etc.) so the user knows
     /// where the rejection happened; pass null for a generic phrasing.
     /// </summary>
+    /// <summary>
+    /// Per-key lookup for surfaces that build their own message string
+    /// (e.g. the Set table default branch embeds the hint in the key entry).
+    /// </summary>
+    public static bool TryGetHint(string prop, out string hint)
+        => Hints.TryGetValue(prop, out hint!);
+
     public static string? Format(IEnumerable<string> unsupported, string? scope = null)
     {
         var list = unsupported.Where(p => !string.IsNullOrEmpty(p)).Distinct().ToList();

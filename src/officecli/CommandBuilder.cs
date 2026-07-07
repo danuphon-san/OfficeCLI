@@ -1186,6 +1186,15 @@ static partial class CommandBuilder
         var parts = new List<string>();
         foreach (var prop in unsupported)
         {
+            // Word scoped-alternative hints (e.g. cantSplit rejected at table
+            // level → "row-scoped: …"). Mirrors the resident add path, which
+            // routes through StyleUnsupportedHints.Format directly.
+            if (scope == "word" && !prop.Contains('(')
+                && OfficeCli.Core.StyleUnsupportedHints.TryGetHint(prop, out var scopedHint))
+            {
+                parts.Add($"{prop} ({scopedHint})");
+                continue;
+            }
             var suggestion = SuggestPropertyScoped(prop, scope);
             parts.Add(suggestion != null ? $"{prop} (did you mean: {suggestion}?)" : prop);
         }
