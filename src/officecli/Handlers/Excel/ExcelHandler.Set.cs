@@ -417,8 +417,17 @@ public partial class ExcelHandler
                         Console.Error.WriteLine(
                             "Warning: Both value= and formula= supplied — using formula, value ignored.");
                     }
-                    // Auto-detect formula: value starting with '=' is treated as formula
-                    if (effectiveValue.StartsWith('=') && effectiveValue.Length > 1)
+                    // Auto-detect formula: value starting with '=' is treated as
+                    // formula — UNLESS the caller forced text via the leading
+                    // apostrophe (quotePrefixForce) or an explicit type=string.
+                    // Without the gate, '=TEXT and type=string both got coerced
+                    // into a #NAME? formula, and dump→batch replay of any string
+                    // cell starting with '=' (which the emitter pins via the
+                    // apostrophe idiom) reproduced the corruption.
+                    var setForcedString = quotePrefixForce
+                        || (properties.TryGetValue("type", out var setTypeVal)
+                            && setTypeVal.Equals("string", StringComparison.OrdinalIgnoreCase));
+                    if (!setForcedString && effectiveValue.StartsWith('=') && effectiveValue.Length > 1)
                         goto case "formula";
                     // CONSISTENCY(text-escape-boundary): \n / \t resolution is
                     // applied at the CLI --prop parse boundary

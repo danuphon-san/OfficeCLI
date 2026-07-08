@@ -477,8 +477,13 @@ public partial class ExcelHandler
                 Console.Error.WriteLine(
                     "Warning: Both value= and formula= supplied — using formula, value ignored.");
             }
-            // Auto-detect formula: value starting with '=' is treated as formula
-            if (value.StartsWith('=') && value.Length > 1)
+            // Auto-detect formula: value starting with '=' is treated as
+            // formula — UNLESS type=string was supplied (explicitly, or forced
+            // by the apostrophe branch above). Mirrors the Set-path gate; see
+            // ExcelHandler.Set.cs case "value".
+            var addForcedString = properties.TryGetValue("type", out var addTypeVal)
+                && addTypeVal.Equals("string", StringComparison.OrdinalIgnoreCase);
+            if (!addForcedString && value.StartsWith('=') && value.Length > 1)
             {
                 RejectCrossWorkbookFormula(value);
                 ValidateFormulaCellRefs(value);
