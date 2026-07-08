@@ -683,6 +683,36 @@ internal class ExcelStyleManager
             throw new ArgumentException(
                 $"number format has unbalanced square brackets: '{formatCode}'. Bracket codes ([Red], [>=100], [h]) must be closed; writing an unbalanced bracket makes Excel refuse to open the file.");
 
+        // Unquoted letters outside Excel's token alphabet (date/time/era/
+        // General letters) make real Excel refuse the whole file
+        // (0x800A03EC) while schema validation stays green — e.g. a typoed
+        // numfmt=invalid_fmt instead of "invalid_fmt"0. Excel's grammar is
+        // quirky enough (abc opens, xyz does not) that a hard reject risks
+        // false positives on locale codes, so warn instead of block.
+        {
+            const string TokenLetters = "abcdeghlmnprsty";
+            bool warnQuote = false;
+            int warnBracket = 0;
+            char? suspect = null;
+            for (int i = 0; i < formatCode.Length && suspect == null; i++)
+            {
+                var c = formatCode[i];
+                if (c == '"') { warnQuote = !warnQuote; continue; }
+                if (warnQuote) continue;
+                if (c == '\\' || c == '_' || c == '*') { i++; continue; }
+                if (c == '[') { warnBracket++; continue; }
+                if (c == ']') { warnBracket--; continue; }
+                if (warnBracket > 0) continue;
+                if (char.IsLetter(c) && !TokenLetters.Contains(char.ToLowerInvariant(c)))
+                    suspect = c;
+            }
+            if (suspect != null)
+                Console.Error.WriteLine(
+                    $"Warning: number format '{formatCode}' contains the unquoted letter '{suspect}', " +
+                    "which real Excel may reject when opening the file (0x800A03EC). " +
+                    "Quote literal text, e.g. \"text\"0.00.");
+        }
+
         // Check built-in formats
         var builtinMap = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase)
         {
