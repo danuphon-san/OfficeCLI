@@ -700,6 +700,27 @@ public partial class ExcelHandler
                 throw new ArgumentException($"PivotTable index {ptIdx} out of range (1..{pivotParts.Count})");
             var pivotPart = pivotParts[ptIdx - 1];
 
+            // Referencing-slicer guard — a slicer cache names its pivot table
+            // via SlicerCachePivotTables; deleting the pivot underneath it
+            // leaves a dangling reference that passes schema validation but
+            // real Excel refuses (0x800A03EC). Mirrors the sheet-remove
+            // pivot-source protection.
+            var removedPivotName = pivotPart.PivotTableDefinition?.Name?.Value;
+            if (!string.IsNullOrEmpty(removedPivotName) && _doc.WorkbookPart != null)
+            {
+                foreach (var scPart in _doc.WorkbookPart.GetPartsOfType<SlicerCachePart>())
+                {
+                    var refsPivot = scPart.SlicerCacheDefinition?
+                        .GetFirstChild<X14.SlicerCachePivotTables>()?
+                        .Elements<X14.SlicerCachePivotTable>()
+                        .Any(pt => string.Equals(pt.Name?.Value, removedPivotName, StringComparison.OrdinalIgnoreCase)) == true;
+                    if (refsPivot)
+                        throw new ArgumentException(
+                            $"Cannot remove pivottable '{removedPivotName}': it is referenced by slicer cache " +
+                            $"'{scPart.SlicerCacheDefinition?.Name?.Value}'. Remove the slicer first.");
+                }
+            }
+
             // Capture the cache-definition part (if any) so we can clean up
             // workbook-level PivotCache registration after removing the pivot.
             var cachePart = pivotPart.PivotTableCacheDefinitionPart;
