@@ -73,8 +73,19 @@ public partial class ExcelHandler
         }
 
         if (seriesData.Count == 0)
+        {
+            // A supplied-but-consumed dataRange must not get the generic
+            // "requires a data property" message: with a single-column range
+            // and no explicit categories=, the sole column is reserved as
+            // the category column, leaving zero series — say so.
+            if (properties.ContainsKey("dataRange") || properties.ContainsKey("datarange"))
+                throw new ArgumentException(
+                    "dataRange resolved to 0 series columns: a single-column range is consumed as the " +
+                    "category column by default. Pass categories= explicitly (e.g. categories=Sheet1!A1:A5) " +
+                    "to plot that column as a series, or widen the dataRange to include a values column.");
             throw new ArgumentException("Chart requires a 'data' property. Use: data=\"Series1:1,2,3;Series2:4,5,6\" " +
                 "or dataRange=\"Sheet1!A1:D5\" or series1=\"Revenue:100,200,300\"");
+        }
 
         // Validate the chart type BEFORE any part is created: an unknown type
         // used to throw inside the builder AFTER the DrawingsPart and its
