@@ -1117,6 +1117,17 @@ public partial class ExcelHandler
         var (endCol, endRow) = ParseCellReference(rangeParts[1]);
         var startColIdx = ColumnNameToIndex(startCol);
         var endColIdx = ColumnNameToIndex(endCol);
+        // Inverted ranges (D3:A1) used to flow into a negative column count
+        // and surface as a raw internal_error from an array-size computation.
+        // Normalize per axis, matching the drawing-anchor convention for a
+        // backwards drag-select.
+        if (endColIdx < startColIdx)
+        {
+            (startColIdx, endColIdx) = (endColIdx, startColIdx);
+            (startCol, endCol) = (endCol, startCol);
+        }
+        if (endRow < startRow) (startRow, endRow) = (endRow, startRow);
+        rangeRef = $"{startCol}{startRow}:{endCol}{endRow}";
         var colCount = endColIdx - startColIdx + 1;
 
         // T5-ext: autoExpand=true probes the sheet for contiguous
