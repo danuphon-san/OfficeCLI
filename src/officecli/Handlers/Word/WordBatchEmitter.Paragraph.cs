@@ -2215,7 +2215,10 @@ public static partial class WordBatchEmitter
                 var sb = new System.Text.StringBuilder();
                 foreach (var mp in markerPaths)
                 {
-                    var mx = word.GetElementXml(mp);
+                    // Entries starting with '<' are pre-synthesized verbatim XML
+                    // (bookmarkStart/End interleaved with the markers — their
+                    // node paths don't resolve here); the rest are source paths.
+                    var mx = mp.StartsWith('<') ? mp : word.GetElementXml(mp);
                     if (!string.IsNullOrEmpty(mx)) sb.Append(mx);
                 }
                 if (sb.Length > 0)

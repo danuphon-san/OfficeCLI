@@ -609,6 +609,26 @@ public static partial class WordBatchEmitter
                         FlushMarkers();
                         result.Add(sc);
                     }
+                    else if ((sc.Type == "bookmark" || sc.Type == "bookmarkEnd")
+                             && sc.Format.TryGetValue("id", out var bmIdObj)
+                             && bmIdObj?.ToString() is { Length: > 0 } bmId)
+                    {
+                        // A bookmarkStart/End interleaved with the field markers
+                        // (Word wraps INCLUDEPICTURE results in a bookmark so REF
+                        // fields can target the image). The bookmarkStart node's
+                        // path (/bookmark[@name=…]) does not resolve through
+                        // GetElementXml in the marker-slice pass, so the anchor
+                        // silently vanished, leaving an orphan bookmarkEnd.
+                        // Synthesize the verbatim XML from the node's own id/name
+                        // instead of a path; inline entries are distinguished
+                        // from source paths by the leading '<'.
+                        var bmName = sc.Format.TryGetValue("name", out var bmNameObj)
+                            ? bmNameObj?.ToString() : null;
+                        const string wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+                        pendingMarkers.Add(sc.Type == "bookmark" && !string.IsNullOrEmpty(bmName)
+                            ? $"<w:bookmarkStart w:id=\"{System.Security.SecurityElement.Escape(bmId)}\" w:name=\"{System.Security.SecurityElement.Escape(bmName)}\" xmlns:w=\"{wNs}\" />"
+                            : $"<w:bookmarkEnd w:id=\"{System.Security.SecurityElement.Escape(bmId)}\" xmlns:w=\"{wNs}\" />");
+                    }
                     else if (!string.IsNullOrEmpty(sc.Path))
                     {
                         pendingMarkers.Add(sc.Path);
