@@ -1952,6 +1952,14 @@ public class ResidentServer : IDisposable
         var textFilter = req.GetArgOrNull("find");
         if (!string.IsNullOrEmpty(textFilter))
             results = results.Where(n => n.Text != null && AttributeFilter.MatchesTextFilter(n.Text, textFilter)).ToList();
+        // --compact: same line renderer as direct mode (CommandBuilder owns the
+        // format contract); short-circuits before JSON hydration.
+        if (req.GetArgOrNull("compact") == "true")
+        {
+            foreach (var w2 in warnings) Console.Error.WriteLine(w2.Message);
+            Console.WriteLine(CommandBuilder.FormatNodesCompact(_handler, results, req.GetArgOrNull("fields")));
+            return;
+        }
         // CONSISTENCY(query-json-children): hydrate Children from Get(path, depth=1)
         // for JSON output so consumers see the same shape as `get --json`. Mirrors
         // the post-processing in CommandBuilder.GetQuery.cs.

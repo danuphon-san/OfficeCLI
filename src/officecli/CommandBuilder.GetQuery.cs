@@ -171,18 +171,26 @@ static partial class CommandBuilder
         var selectorArg = new Argument<string>("selector") { Description = "CSS-like selector (e.g. paragraph[style=Normal] > run[font!=Arial])" };
 
         var queryFindOpt = new Option<string?>("--find") { Description = "Filter results to elements containing this text (case-insensitive substring)" };
+        var queryCompactOpt = new Option<bool>("--compact") { Description = "One line per element: path<TAB>[label]<TAB>\"text(truncated)\" plus a final 'total: N of M elements' line for read-completeness accounting. pptx/docx only (for xlsx use 'view text --range'). Add columns with --fields." };
+        var queryFieldsOpt = new Option<string?>("--fields") { Description = "Comma-separated Format keys appended as extra k=v columns in --compact output (e.g. x,y,width)" };
 
         var queryCommand = new Command("query", "Query document elements with CSS-like selectors");
         queryCommand.Add(queryFileArg);
         queryCommand.Add(selectorArg);
         queryCommand.Add(jsonOption);
         queryCommand.Add(queryFindOpt);
+        queryCommand.Add(queryCompactOpt);
+        queryCommand.Add(queryFieldsOpt);
 
         queryCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(queryFileArg)!;
             var selector = MsysPathHint.Restore(result.GetValue(selectorArg)!)!;
             var textFilter = result.GetValue(queryFindOpt);
+            var compact = result.GetValue(queryCompactOpt);
+            var fields = result.GetValue(queryFieldsOpt);
+            if (compact && json)
+                throw new OfficeCli.Core.CliException("--compact is a plain-text line format; drop --json (or drop --compact for the JSON tree).") { Code = "invalid_value" };
 
             if (TryResident(file.FullName, req =>
             {
@@ -190,6 +198,8 @@ static partial class CommandBuilder
                 req.Json = json;
                 req.Args["selector"] = selector;
                 if (textFilter != null) req.Args["find"] = textFilter;
+                if (compact) req.Args["compact"] = "true";
+                if (fields != null) req.Args["fields"] = fields;
             }, json) is {} rc) return rc;
 
             var format = json ? OutputFormat.Json : OutputFormat.Text;
@@ -209,6 +219,12 @@ static partial class CommandBuilder
             var (results, warnings) = OfficeCli.Core.AttributeFilter.FilterSelector(selector, handler.Query, keyResolver);
             if (!string.IsNullOrEmpty(textFilter))
                 results = results.Where(n => n.Text != null && OfficeCli.Core.AttributeFilter.MatchesTextFilter(n.Text, textFilter)).ToList();
+            if (compact)
+            {
+                foreach (var w in warnings) Console.Error.WriteLine(w.Message);
+                Console.WriteLine(FormatNodesCompact(handler, results, fields));
+                return 0;
+            }
             if (json)
             {
                 // CONSISTENCY(query-json-children): Query returns nodes with empty
@@ -260,5 +276,109 @@ static partial class CommandBuilder
         }, json); });
 
         return queryCommand;
+    }
+
+    /// <summary>
+    /// `query --compact` line format. STABILITY CONTRACT — this output is
+    /// consumed programmatically (parsed line-by-line, counted for
+    /// read-completeness accounting); treat every token below as API:
+    /// column order, the TAB separator, the `…` truncation mark, `(empty)`,
+    /// the `[label]` bracket form, and the total-line shape may only gain
+    /// NEW trailing columns, never change or reorder existing ones. Any
+    /// change lands in the CHANGELOG.
+    ///
+    ///   {path}\t[{label}]\t"{text ≤60 chars, \t/\n/"/\\ escaped}"
+    ///   {path}\t[table {R}x{C}]                     (tables fold; no text col)
+    ///   {path}\t[{label}]\t(empty)                  (no text)
+    ///   ...--fields k1,k2 appends \tk1=v1\tk2=v2 columns (missing key → k=)
+    ///   total: {N} of {M} elements / {K} slides     (pptx)
+    ///   total: {N} of {M} elements                  (docx)
+    ///
+    /// N = exactly the number of lines above the total line (post-filter;
+    /// a folded table counts as 1) so `lineCount - 1 == N` proves the reader
+    /// saw the whole result. M = all top-level frames in the document
+    /// (pptx: shapes/pictures/tables/charts/connectors/groups across slides;
+    /// docx: body-level blocks). The total line is always emitted (N=0
+    /// included) and is always the last line, exactly once.
+    /// </summary>
+    internal static string FormatNodesCompact(IDocumentHandler handler, List<DocumentNode> results, string? fields)
+    {
+        if (handler is ExcelHandler)
+            throw new OfficeCli.Core.CliException(
+                "--compact is not supported for xlsx: 'view text' is already the compact per-row form ([/Sheet1/row[N]] A1=v ...). Use 'view text' or 'view text --range Sheet1!A1:C10'.")
+            { Code = "invalid_value" };
+
+        var fieldList = string.IsNullOrWhiteSpace(fields)
+            ? null
+            : fields.Split(',').Select(f => f.Trim()).Where(f => f.Length > 0).ToList();
+
+        var sb = new System.Text.StringBuilder();
+        foreach (var n in results)
+        {
+            sb.Append(n.Path);
+            if (n.Type == "table" && n.Format.TryGetValue("rows", out var r) && n.Format.TryGetValue("cols", out var c))
+            {
+                sb.Append('\t').Append($"[table {r}x{c}]");
+            }
+            else
+            {
+                // pptx Type already carries the semantic label (title/placeholder/
+                // textbox/shape/...); docx paragraphs label by style name.
+                var label = !string.IsNullOrEmpty(n.Style) ? n.Style : n.Type;
+                sb.Append('\t').Append('[').Append(label).Append(']');
+                sb.Append('\t').Append(CompactText(n.Text));
+            }
+            if (fieldList != null)
+                foreach (var f in fieldList)
+                    sb.Append('\t').Append(f).Append('=')
+                      .Append(n.Format.TryGetValue(f, out var v) && v != null ? v.ToString() : "");
+            sb.Append('\n');
+        }
+
+        var (total, containerSuffix) = CountCompactDenominator(handler);
+        sb.Append($"total: {results.Count} of {total} elements{containerSuffix}");
+        return sb.ToString();
+    }
+
+    private static string CompactText(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return "(empty)";
+        var t = text.Replace("\\", "\\\\").Replace("\t", "\\t")
+                    .Replace("\r", "").Replace("\n", "\\n").Replace("\"", "\\\"");
+        if (t.Length > 60) t = t[..60] + "…";
+        return "\"" + t + "\"";
+    }
+
+    /// <summary>
+    /// Denominator for the compact total line: every top-level frame in the
+    /// document, independent of the user's selector, so the agent can compare
+    /// "what I matched" against "what exists".
+    /// </summary>
+    private static (int Total, string ContainerSuffix) CountCompactDenominator(IDocumentHandler handler)
+    {
+        if (handler is PowerPointHandler)
+        {
+            int slides = handler.Query("slide").Count;
+            // Frame selectors overlap (title/textbox are shapes); dedupe by path.
+            var paths = new HashSet<string>();
+            foreach (var sel in new[] { "shape", "picture", "table", "chart", "connector", "group" })
+            {
+                try { foreach (var n in handler.Query(sel)) paths.Add(n.Path); }
+                catch { /* selector unsupported on this doc — skip */ }
+            }
+            return (paths.Count, $" / {slides} slides");
+        }
+        // docx: body-level content blocks (paragraphs + tables + sdt + ...).
+        // sectPr is layout metadata, not an addressable element — exclude it
+        // so the denominator matches what a selector can actually reach.
+        try
+        {
+            var body = handler.Get("/body", depth: 1);
+            return (body.Children.Count(c => c.Type != "section"), "");
+        }
+        catch
+        {
+            return (0, "");
+        }
     }
 }
