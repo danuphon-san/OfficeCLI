@@ -124,12 +124,16 @@ public partial class ExcelHandler
         {
             var cols = string.Join(", ", colConds.Select(c => $"'{StripColPrefix(c.Key)}'"));
             var scope = sheetFilter == null ? "any sheet" : $"sheet '{sheetFilter}'";
-            // If the column NAME literally exists as a cell but no table was
-            // detected around it, the honest cause is "not a recognizable table"
-            // (a blank-header gap column, or a header-only block with no data
-            // rows), NOT "column does not exist". Say so and point at explicit
-            // table creation, instead of steering the user toward a typo hunt.
-            if (FindHeaderLikeCell(sheetFilter, colConds) is {} h)
+            // If NO table structure exists in scope at all, but the column NAME
+            // literally exists as a cell, the honest cause is "not a recognizable
+            // table" (a blank-header gap column, or a header-only block with no
+            // data rows) — point at explicit table creation. Guard on an empty
+            // scopeTables: when a real table WAS detected but simply doesn't own
+            // one of a compound predicate's columns (`row[Region=X and Bonus>1]`
+            // where Bonus is absent), fall through to BuildNoColumnException so
+            // the error names the missing column and lists the available ones,
+            // instead of wrongly blaming a valid column's surrounding cells.
+            if (scopeTables.Count == 0 && FindHeaderLikeCell(sheetFilter, colConds) is {} h)
                 throw new Core.CliException(
                     $"row[col op val] found no usable table on {scope}: a header '{h.name}' exists at " +
                     $"{h.sheet}!{h.cellRef}, but the surrounding cells are not a recognizable table. " +
