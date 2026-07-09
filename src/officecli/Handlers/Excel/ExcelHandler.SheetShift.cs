@@ -65,7 +65,8 @@ public partial class ExcelHandler
         Func<string, string?> refMapper,
         Func<string, string>? formulaTextMapper,
         Func<int, int>? rowMarkerShift = null,
-        Func<int, int>? colMarkerShift = null)
+        Func<int, int>? colMarkerShift = null,
+        Func<string, string, string>? crossSheetFormulaMapper = null)
     {
         var ws = GetSheet(worksheet);
 
@@ -449,6 +450,28 @@ public partial class ExcelHandler
                         else cell.CellFormula.Remove();
                     }
                 }
+            }
+        }
+
+        // 7b. cell formulas in OTHER sheets that reference THIS sheet
+        // (`Summary!A1 = Sheet1!B4`). A row/col insert or delete in one sheet
+        // displaces its cells for every formula everywhere, not just formulas on
+        // the same sheet — otherwise a cross-sheet reference silently points at
+        // the wrong (or now-empty) cell. The per-sheet mapper uses the OTHER
+        // sheet as its "current sheet" so that sheet's UNqualified refs are left
+        // alone; only a ref explicitly qualified with this sheet is shifted.
+        if (crossSheetFormulaMapper != null)
+        {
+            foreach (var (otherName, otherPart) in GetWorksheets())
+            {
+                if (otherPart == worksheet) continue;
+                var otherData = GetSheet(otherPart).GetFirstChild<SheetData>();
+                if (otherData == null) continue;
+                foreach (var row in otherData.Elements<Row>())
+                    foreach (var cell in row.Elements<Cell>())
+                        if (cell.CellFormula != null && !string.IsNullOrEmpty(cell.CellFormula.Text))
+                            cell.CellFormula.Text = crossSheetFormulaMapper(otherName, cell.CellFormula.Text);
+                otherPart.Worksheet.Save();
             }
         }
 

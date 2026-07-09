@@ -1036,7 +1036,9 @@ public partial class ExcelHandler
             refMapper: r => ShiftRowInRefDown(r, insertRow),
             formulaTextMapper: f => Core.FormulaRefShifter.Shift(
                 f, sheetName, sheetName, Core.FormulaShiftDirection.RowsDown, insertRow),
-            rowMarkerShift: m => m >= insertRow - 1 ? m + 1 : m);
+            rowMarkerShift: m => m >= insertRow - 1 ? m + 1 : m,
+            crossSheetFormulaMapper: (other, f) => Core.FormulaRefShifter.Shift(
+                f, other, sheetName, Core.FormulaShiftDirection.RowsDown, insertRow));
     }
 
     /// <summary>
@@ -1084,7 +1086,9 @@ public partial class ExcelHandler
             refMapper: r => ShiftColInRefRight(r, insertColIdx),
             formulaTextMapper: f => Core.FormulaRefShifter.Shift(
                 f, sheetName, sheetName, Core.FormulaShiftDirection.ColumnsRight, insertColIdx),
-            colMarkerShift: m => m >= insertColIdx - 1 ? m + 1 : m);
+            colMarkerShift: m => m >= insertColIdx - 1 ? m + 1 : m,
+            crossSheetFormulaMapper: (other, f) => Core.FormulaRefShifter.Shift(
+                f, other, sheetName, Core.FormulaShiftDirection.ColumnsRight, insertColIdx));
     }
 
     private static string? ShiftRowInRefDown(string? refStr, int insertRow)
@@ -1165,7 +1169,9 @@ public partial class ExcelHandler
             refMapper: r => ShiftRowInRef(r, deletedRow),
             formulaTextMapper: f => Core.FormulaRefShifter.Shift(
                 f, sheetName, sheetName, Core.FormulaShiftDirection.RowsUp, deletedRow),
-            rowMarkerShift: m => m > deletedRow - 1 ? m - 1 : m);
+            rowMarkerShift: m => m > deletedRow - 1 ? m - 1 : m,
+            crossSheetFormulaMapper: (other, f) => Core.FormulaRefShifter.Shift(
+                f, other, sheetName, Core.FormulaShiftDirection.RowsUp, deletedRow));
     }
 
     // ==================== Column shift ====================
@@ -1215,7 +1221,9 @@ public partial class ExcelHandler
             refMapper: r => ShiftColInRef(r, deletedColIdx),
             formulaTextMapper: f => Core.FormulaRefShifter.Shift(
                 f, sheetName, sheetName, Core.FormulaShiftDirection.ColumnsLeft, deletedColIdx),
-            colMarkerShift: m => m > deletedColIdx - 1 ? m - 1 : m);
+            colMarkerShift: m => m > deletedColIdx - 1 ? m - 1 : m,
+            crossSheetFormulaMapper: (other, f) => Core.FormulaRefShifter.Shift(
+                f, other, sheetName, Core.FormulaShiftDirection.ColumnsLeft, deletedColIdx));
     }
 
     // ==================== Shift helpers ====================
