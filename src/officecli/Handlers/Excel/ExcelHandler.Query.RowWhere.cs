@@ -414,7 +414,11 @@ public partial class ExcelHandler
     // covers the row — then the caller reports the bare key.
     private string? DescribeRowColumnsHint(WorksheetPart worksheet, uint rowIdx, string key)
     {
-        var cols = new List<string>();
+        var bare = StripColPrefix(key);
+        // Every table on the sheet with its data-row span and column names, so
+        // the hint can distinguish "row is IN a table but the column is wrong"
+        // from "row is OUTSIDE the table but the column exists" (an append).
+        var tables = new List<(string refStr, int dataR1, int dataR2, int c1, List<string> cols)>();
         var realRanges = new List<(int c1, int r1, int c2, int r2)>();
         foreach (var tdp in worksheet.TableDefinitionParts)
         {
@@ -424,30 +428,51 @@ public partial class ExcelHandler
             realRanges.Add(rng);
             bool headerRow = (tbl.HeaderRowCount?.Value ?? 1) != 0;
             bool totalRow = (tbl.TotalsRowCount?.Value ?? 0) > 0 || (tbl.TotalsRowShown?.Value ?? false);
-            if (rowIdx < rng.r1 + (headerRow ? 1 : 0) || rowIdx > rng.r2 - (totalRow ? 1 : 0)) continue;
-            cols.AddRange(tbl.GetFirstChild<TableColumns>()?.Elements<TableColumn>()
-                .Select(c => c.Name?.Value ?? "") ?? Enumerable.Empty<string>());
+            var cols = tbl.GetFirstChild<TableColumns>()?.Elements<TableColumn>()
+                .Select(c => c.Name?.Value ?? "").ToList() ?? new List<string>();
+            tables.Add((tbl.Reference.Value, rng.r1 + (headerRow ? 1 : 0), rng.r2 - (totalRow ? 1 : 0), rng.c1, cols));
         }
-        if (cols.Count == 0)
+        if (tables.Count == 0)
         {
             var sheetName = GetWorksheets().FirstOrDefault(t => t.Part == worksheet).Name ?? "";
             foreach (var det in DetectTables(sheetName, worksheet, realRanges))
             {
                 var refStr = det.Format.TryGetValue("ref", out var rv) ? rv?.ToString() : null;
                 if (!TryParseRange(refStr, out var frng)) continue;
-                if (rowIdx < frng.r1 + 1 || rowIdx > frng.r2) continue;
-                cols.AddRange(DetectedTableColumns(det));
+                tables.Add((refStr!, frng.r1 + 1, frng.r2, frng.c1, DetectedTableColumns(det)));
             }
         }
-        cols = cols.Where(c => !string.IsNullOrWhiteSpace(c))
-            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        if (cols.Count == 0) return null;
 
-        var bare = StripColPrefix(key);
-        string shown = cols.Count <= ColumnListFullThreshold
-            ? string.Join(", ", cols)
-            : $"{string.Join(", ", NearestColumns(cols, new List<string> { bare }))} (of {cols.Count})";
-        return $"{key} (no such column; available: {shown})";
+        static List<string> Clean(IEnumerable<string> cs) =>
+            cs.Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        // 1. A table covers this row → the column name is simply wrong.
+        var covering = tables.Where(t => rowIdx >= t.dataR1 && rowIdx <= t.dataR2).ToList();
+        if (covering.Count > 0)
+        {
+            var cols = Clean(covering.SelectMany(t => t.cols));
+            if (cols.Count == 0) return null;
+            string shown = cols.Count <= ColumnListFullThreshold
+                ? string.Join(", ", cols)
+                : $"{string.Join(", ", NearestColumns(cols, new List<string> { bare }))} (of {cols.Count})";
+            return $"{key} (no such column; available: {shown})";
+        }
+
+        // 2. Row is just BELOW a table whose columns include the key — the user
+        // is trying to append a row by column name. Explain the boundary and the
+        // append path instead of mis-suggesting a raw row attribute. Restricted
+        // to rows past the data (not the header/above), where "append" is apt.
+        var owning = tables.FirstOrDefault(t =>
+            rowIdx > t.dataR2 && t.cols.Any(c => c.Equals(bare, StringComparison.OrdinalIgnoreCase)));
+        if (owning.cols != null)
+        {
+            var letter = IndexToColumnName(owning.c1 +
+                owning.cols.FindIndex(c => c.Equals(bare, StringComparison.OrdinalIgnoreCase)));
+            return $"{key}: row {rowIdx} is outside table {owning.refStr}; '{bare}' is a column of that " +
+                   $"table but column-name set only writes rows already in it. Append by writing cells by " +
+                   $"address (e.g. {letter}{rowIdx}), then extend the table's range to include the new row";
+        }
+        return null;
     }
 
     // True when an in-scope table (ListObject or detected) has a column whose
