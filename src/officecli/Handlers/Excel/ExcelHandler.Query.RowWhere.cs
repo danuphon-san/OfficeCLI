@@ -316,7 +316,26 @@ public partial class ExcelHandler
         absCol = 0;
         key = StripColPrefix(key);   // `col.Salary` → resolve against `Salary`
         var nameIdx = colNames.FindIndex(n => n.Equals(key, StringComparison.OrdinalIgnoreCase));
-        if (nameIdx >= 0) { absCol = c1 + nameIdx; return true; }
+        if (nameIdx >= 0)
+        {
+            // Duplicate header WITHIN one table (only possible on detected
+            // tables — Excel de-dupes real ListObject column names). Silently
+            // taking the first match mis-targets half the time; make the
+            // caller pick the exact column by LETTER instead.
+            var dupIdx = colNames.FindIndex(nameIdx + 1, n => n.Equals(key, StringComparison.OrdinalIgnoreCase));
+            if (dupIdx >= 0)
+                throw new Core.CliException(
+                    $"Column '{key}' is ambiguous: this table has {colNames.Count(n => n.Equals(key, StringComparison.OrdinalIgnoreCase))} " +
+                    $"columns with that header. Address it by column letter instead, e.g. '{IndexToColumnName(c1 + nameIdx)}' or '{IndexToColumnName(c1 + dupIdx)}'.")
+                {
+                    Code = "invalid_selector",
+                    ValidValues = colNames.Select((n, i) => (n, i))
+                        .Where(x => x.n.Equals(key, StringComparison.OrdinalIgnoreCase))
+                        .Select(x => IndexToColumnName(c1 + x.i)).ToArray(),
+                };
+            absCol = c1 + nameIdx;
+            return true;
+        }
         if (Regex.IsMatch(key, @"^[A-Za-z]{1,3}$"))
         {
             var letterIdx = ColumnNameToIndex(key.ToUpperInvariant());

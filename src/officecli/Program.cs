@@ -217,5 +217,10 @@ if (args.Length == 0)
     return 0;
 }
 
-var parseResult = rootCommand.Parse(args);
+// Response-file token replacement is OFF: a bare `@…` token must reach the
+// handler verbatim (`set row[N] --prop @height=25` forces the ROW-PROPERTY
+// side of a column-shadow collision, same escape as `query row[@height…]`);
+// the default replacer would reject it as "response file not found".
+var parseResult = rootCommand.Parse(args,
+    new System.CommandLine.ParserConfiguration { ResponseFileTokenReplacer = null });
 return parseResult.Invoke();
