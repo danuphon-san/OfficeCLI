@@ -724,7 +724,7 @@ internal static class AttributeFilter
         return null;
     }
 
-    private static decimal? ExtractNumber(string value)
+    private static double? ExtractNumber(string value)
     {
         if (string.IsNullOrEmpty(value)) return null;
 
@@ -739,7 +739,13 @@ internal static class AttributeFilter
             }
         }
 
-        return decimal.TryParse(trimmed, NumberStyles.Any, CultureInfo.InvariantCulture, out var n) ? n : null;
+        // double, not decimal: Excel's numeric domain is IEEE double
+        // (±9.99e307, 15 significant digits). decimal.TryParse silently fails
+        // past ~7.9e28, which made `[Amount>1e200]` a no-match while
+        // `[Amount=1e300]` still hit via the string-equality fallback —
+        // wrong answers with no warning. Non-finite parses (1e999) stay null.
+        return double.TryParse(trimmed, NumberStyles.Any, CultureInfo.InvariantCulture, out var n)
+            && double.IsFinite(n) ? n : null;
     }
 
     private static string ExtractUnit(string value)
