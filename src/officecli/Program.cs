@@ -30,10 +30,11 @@ if (args.Length == 1 && args[0] == "__update-check__")
     return 0;
 }
 
-// Schema fingerprint: officecli crc → CRC32 of the embedded schemas/help tree.
-// Downstream automation pins this to detect property-surface drift across
-// binary upgrades (same crc → schemas identical, safe to upgrade blind).
-if (args.Length == 1 && args[0] == "crc")
+// Schema fingerprint: officecli --output-schema-crc → CRC32 of the embedded
+// schemas/help tree. Downstream automation pins this to detect property-
+// surface drift across binary upgrades (same crc → schemas identical,
+// safe to upgrade blind). A flag, not a version: no ordering semantics.
+if (args.Length == 1 && args[0] == "--output-schema-crc")
 {
     Console.WriteLine(OfficeCli.Help.SchemaCrc.Compute());
     return 0;
