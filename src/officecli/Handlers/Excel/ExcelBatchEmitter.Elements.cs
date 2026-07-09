@@ -147,15 +147,20 @@ public static partial class ExcelBatchEmitter
     private static void EmitConditionalFormats(ExcelHandler xl, string sheetPath, int count,
         List<BatchItem> items, List<UnsupportedWarning> warnings)
     {
-        for (int i = 1; i <= count; i++)
+        // Iterate cf RULES, not cf elements. A <conditionalFormatting> element
+        // can hold several <cfRule> children (Excel stacks rules on one range);
+        // the cf[N] Get index space and `count` are per-element and only expose
+        // rule[0], so emitting per-element dropped rule[1..N] silently. The
+        // per-rule enumeration surfaces each rule as its own add-command.
+        List<DocumentNode> cfNodes;
+        try { cfNodes = xl.GetDumpCfRuleNodes(sheetPath.TrimStart('/')); }
+        catch (Exception ex)
         {
-            DocumentNode cf;
-            try { cf = xl.Get($"{sheetPath}/cf[{i}]"); }
-            catch (Exception ex)
-            {
-                warnings.Add(new UnsupportedWarning("conditionalformatting", $"{sheetPath}/cf[{i}]", ex.Message));
-                continue;
-            }
+            warnings.Add(new UnsupportedWarning("conditionalformatting", sheetPath, ex.Message));
+            return;
+        }
+        foreach (var cf in cfNodes)
+        {
             var type = cf.Format.TryGetValue("type", out var tv) ? tv as string ?? "" : "";
             var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             CopyString(cf, "ref", props, "ref");
