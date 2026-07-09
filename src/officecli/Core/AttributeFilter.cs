@@ -492,10 +492,18 @@ internal static class AttributeFilter
                 // Pathological pattern — treat as no-match rather than hanging.
                 return false;
             }
-            catch (System.ArgumentException)
+            catch (System.ArgumentException ex)
             {
-                // Malformed regex — fall through to literal contains so the
-                // user still gets usable behavior, never an opaque exception.
+                // The user explicitly asked for a regex (r"...") but it does not
+                // compile. Silently falling back to a literal contains returned
+                // an empty result, indistinguishable from "no data matched" — the
+                // user could not tell a typo'd pattern from a genuine 0 rows.
+                // Surface it, mirroring the "Malformed selector" errors.
+                throw new CliException($"Malformed regex pattern in \"{find}\": {ex.Message}")
+                {
+                    Code = "invalid_selector",
+                    Suggestion = "Fix the regex, or drop the r\"...\" prefix to match the text literally."
+                };
             }
         }
         return text.Contains(find, StringComparison.OrdinalIgnoreCase);
