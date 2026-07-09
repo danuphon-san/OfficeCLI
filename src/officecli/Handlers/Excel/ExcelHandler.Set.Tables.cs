@@ -809,6 +809,8 @@ public partial class ExcelHandler
                 case "value1":
                 {
                     // formula1: the comparison threshold for a cellIs rule.
+                    // A1-only element — reject R1C1 (mirrors Add.Cf.cs).
+                    ValidateNoR1C1Reference(value);
                     var f1 = rule?.GetFirstChild<Formula>();
                     if (f1 != null) f1.Text = value;
                     else if (rule != null) rule.InsertAt(new Formula(value), 0);
@@ -818,7 +820,8 @@ public partial class ExcelHandler
                 case "value2":
                 case "formula2":
                 {
-                    // formula2: upper bound for between/notBetween.
+                    // formula2: upper bound for between/notBetween. A1-only.
+                    ValidateNoR1C1Reference(value);
                     var formulas = rule?.Elements<Formula>().ToList();
                     if (formulas != null && formulas.Count >= 2) formulas[1].Text = value;
                     else if (formulas != null && formulas.Count == 1) rule!.InsertAfter(new Formula(value), formulas[0]);

@@ -445,6 +445,10 @@ public partial class ExcelHandler
             ?? properties.GetValueOrDefault("formula1")
             ?? properties.GetValueOrDefault("value")
             ?? throw new ArgumentException("Formula-based conditional formatting requires 'formula' property (e.g. formula=$A1>100)");
+        // The <x:formula> element is A1-only — an R1C1-style reference makes
+        // real Excel refuse the file (0x800A03EC) while schema validation
+        // stays green. Same guard cell formulas already get.
+        ValidateNoR1C1Reference(fcfFormula);
 
         // Build DifferentialFormat (dxf) for the formatting.
         // A dxf Font may carry: b, i, u, strike, sz, rFont, color.
@@ -550,6 +554,11 @@ public partial class ExcelHandler
             throw new ArgumentException(
                 $"cellIs operator '{opStr}' requires 'value2' property (e.g. value=10 value2=50).");
         }
+
+        // cellIs value/value2 land in <x:formula> (A1-only). Reject R1C1-style
+        // refs so the file doesn't silently become one Excel refuses to open.
+        ValidateNoR1C1Reference(primary);
+        if (secondary != null) ValidateNoR1C1Reference(secondary);
 
         // Build DifferentialFormat (dxf)
         var cisDxf = new DifferentialFormat();

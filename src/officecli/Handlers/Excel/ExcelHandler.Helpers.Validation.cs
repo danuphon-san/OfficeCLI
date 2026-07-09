@@ -165,12 +165,31 @@ public partial class ExcelHandler
             && displayValue != "#OCLI_NOTEVAL!";
     }
 
-    internal static void ValidateFormulaCellRefs(string formula)
+    /// <summary>
+    /// Reject R1C1-style references (R2C3, RC[1], R[-1]C) in a formula string.
+    /// The OOXML &lt;f&gt; element is A1-only; writing R1C1 verbatim makes real
+    /// Excel refuse the file (0x800A03EC) while schema validation stays green.
+    /// Shared by cell formulas and conditional-formatting formulas. Does NOT
+    /// do grid-bounds checking (out-of-range A1 refs are tolerated by Excel in
+    /// CF formulas — only cell-formula validation adds the bounds check).
+    /// </summary>
+    internal static void ValidateNoR1C1Reference(string formula)
     {
         if (string.IsNullOrEmpty(formula)) return;
-        var trimmed = formula.TrimStart('=');
-        // Strip string literals first ("...") so cell-like substrings inside
-        // strings don't trigger validation.
+        var stripped = StripFormulaStringLiterals(formula.TrimStart('='));
+        // Only unambiguous forms are rejected: bracketed offsets, or
+        // R<digits>C<digits> (never a legal A1 token or name). "RC1"/"RC"
+        // stay accepted — RC is a real A1 column / legal name.
+        if (System.Text.RegularExpressions.Regex.IsMatch(stripped,
+                @"(?<![A-Za-z0-9_$])(R\[-?\d+\]C(\[-?\d+\]|\d+)?|R\d*C\[-?\d+\]|R\d+C\d+)(?![A-Za-z0-9_])"))
+            throw new ArgumentException(
+                "Formula contains an R1C1-style reference (e.g. R2C3, RC[1]). OOXML stores formulas in A1 notation only — rewrite the reference in A1 form (e.g. C2, $B$3).");
+    }
+
+    // Blank out "..." string literals so cell-like substrings inside them
+    // don't trigger reference validation.
+    private static string StripFormulaStringLiterals(string trimmed)
+    {
         var sb = new System.Text.StringBuilder(trimmed.Length);
         bool inStr = false;
         for (int i = 0; i < trimmed.Length; i++)
@@ -184,18 +203,17 @@ public partial class ExcelHandler
             }
             sb.Append(inStr ? ' ' : c);
         }
-        var stripped = sb.ToString();
+        return sb.ToString();
+    }
 
-        // R1C1-style references (R2C3, RC[1], R[-1]C) are app-layer syntax —
-        // the OOXML <f> element is A1-only, and writing them verbatim makes
-        // real Excel refuse the file (0x800A03EC) while schema validation
-        // stays green. Only unambiguous forms are rejected: bracketed
-        // offsets, or R<digits>C<digits> (never a legal A1 token or name).
-        // "RC1"/"RC" stay accepted — RC is a real A1 column / legal name.
-        if (System.Text.RegularExpressions.Regex.IsMatch(stripped,
-                @"(?<![A-Za-z0-9_$])(R\[-?\d+\]C(\[-?\d+\]|\d+)?|R\d*C\[-?\d+\]|R\d+C\d+)(?![A-Za-z0-9_])"))
-            throw new ArgumentException(
-                "Formula contains an R1C1-style reference (e.g. R2C3, RC[1]). OOXML stores formulas in A1 notation only — rewrite the reference in A1 form (e.g. C2, $B$3).");
+    internal static void ValidateFormulaCellRefs(string formula)
+    {
+        if (string.IsNullOrEmpty(formula)) return;
+        var trimmed = formula.TrimStart('=');
+        var stripped = StripFormulaStringLiterals(trimmed);
+
+        // R1C1-style references make real Excel refuse the file.
+        ValidateNoR1C1Reference(formula);
         // Match A1-style refs: optional $ + 1-3 letters + optional $ + 1-8 digits.
         // (Excel's row ceiling 1048576 is 7-digit, but 8-digit numbers like
         // A10000000 must still be caught so they're rejected with the clean
