@@ -171,7 +171,7 @@ static partial class CommandBuilder
         var selectorArg = new Argument<string>("selector") { Description = "CSS-like selector (e.g. paragraph[style=Normal] > run[font!=Arial])" };
 
         var queryFindOpt = new Option<string?>("--find") { Description = "Filter results to elements containing this text (case-insensitive substring)" };
-        var queryCompactOpt = new Option<bool>("--compact") { Description = "One line per element: path<TAB>[label]<TAB>\"text(truncated)\" plus a final 'total: N of M elements' line for read-completeness accounting. pptx/docx only (for xlsx use 'view text --range'). Add columns with --fields." };
+        var queryCompactOpt = new Option<bool>("--compact") { Description = "One line per element in document order: path<TAB>[label]<TAB>\"text(truncated at 60, … mark)\"; empty text shows (empty); tables fold to [table RxC]. Final line is always 'total: N of M elements / K slides' (pptx) or 'total: N of M elements' (docx — never gains a container segment): N = element lines above (lineCount-1 == N proves you read everything), M = all top-level frames. Full-document listing: selector '*' (pptx) or 'paragraph, table' (docx) makes N == M. Labels are a closed set (pptx: title/placeholder/textbox/shape/picture/chart/connector/group/equation + 'table RxC'; docx: style name). This format is a stability contract: columns/labels may be added, never changed or reordered. pptx/docx only (xlsx: use 'view text --range'). Add columns with --fields." };
         var queryFieldsOpt = new Option<string?>("--fields") { Description = "Comma-separated Format keys appended as extra k=v columns in --compact output (e.g. x,y,width)" };
 
         var queryCommand = new Command("query", "Query document elements with CSS-like selectors");
@@ -299,7 +299,17 @@ static partial class CommandBuilder
     /// saw the whole result. M = all top-level frames in the document
     /// (pptx: shapes/pictures/tables/charts/connectors/groups across slides;
     /// docx: body-level blocks). The total line is always emitted (N=0
-    /// included) and is always the last line, exactly once.
+    /// included) and is always the last line, exactly once. The docx total
+    /// has NO container segment — that absence is itself frozen (appending
+    /// one later would be a total-line change, which the contract forbids).
+    ///
+    /// Element lines are in document order: pptx sorts by slide index then
+    /// z-order (multi-type selectors like '*' would otherwise group by type),
+    /// docx follows document flow. Labels are a CLOSED SET per format —
+    /// pptx: title/placeholder/textbox/shape/picture/chart/connector/group/
+    /// equation + the folded 'table RxC'; docx: the paragraph's style name
+    /// (open set of values, fixed [style] position). New label values may be
+    /// added; existing ones never change meaning.
     /// </summary>
     internal static string FormatNodesCompact(IDocumentHandler handler, List<DocumentNode> results, string? fields)
     {
@@ -311,6 +321,24 @@ static partial class CommandBuilder
         var fieldList = string.IsNullOrWhiteSpace(fields)
             ? null
             : fields.Split(',').Select(f => f.Trim()).Where(f => f.Length > 0).ToList();
+
+        // Document order (see contract above): multi-type selectors return
+        // results grouped per element type; re-sort pptx frames by slide index
+        // then z-order so the line sequence mirrors the deck. Stable sort keeps
+        // relative order where either key is missing. docx query results
+        // already follow document flow.
+        if (handler is PowerPointHandler)
+        {
+            results = results
+                .Select((n, i) => (n, i))
+                .OrderBy(t => System.Text.RegularExpressions.Regex.Match(t.n.Path, @"^/slide\[(\d+)\]") is { Success: true } m
+                    ? int.Parse(m.Groups[1].Value) : int.MaxValue)
+                .ThenBy(t => t.n.Format.TryGetValue("zorder", out var z) && int.TryParse(z?.ToString(), out var zi)
+                    ? zi : int.MaxValue)
+                .ThenBy(t => t.i)
+                .Select(t => t.n)
+                .ToList();
+        }
 
         var sb = new System.Text.StringBuilder();
         foreach (var n in results)
