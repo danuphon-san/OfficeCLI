@@ -516,7 +516,12 @@ internal static class AttributeFilter
         if ((cond.Op == FilterOp.Equal || cond.Op == FilterOp.NotEqual)
             && string.Equals(cond.Key, "style", StringComparison.OrdinalIgnoreCase))
         {
-            bool dualHit = StringEquals(node.Style ?? "", cond.Value)
+            // hasKey/actualStr covers nodes whose "style" key is NOT the Word
+            // paragraph style at all — e.g. an Excel row-where probe carrying a
+            // table column literally headed "Style" — so the dual-key sugar
+            // must not shadow the plain resolved value.
+            bool dualHit = (hasKey && StringEquals(actualStr, cond.Value))
+                || StringEquals(node.Style ?? "", cond.Value)
                 || (node.Format.TryGetValue("style", out var sid) && StringEquals(sid?.ToString() ?? "", cond.Value))
                 || (node.Format.TryGetValue("styleName", out var sname) && StringEquals(sname?.ToString() ?? "", cond.Value));
             return cond.Op == FilterOp.Equal ? dualHit : !dualHit;
