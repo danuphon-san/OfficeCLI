@@ -110,7 +110,13 @@ internal static partial class PivotTableHelper
                 var dfName = df.Name?.Value ?? "";
                 var dfFunc = df.Subtotal?.InnerText ?? "sum";
                 var dfField = df.Field?.Value ?? 0;
+                // dataField{N} keeps its documented name:func:fieldIdx shape
+                // (Set values= and existing Get consumers depend on it). But
+                // also expose the RESOLVED source field name so the dump batch
+                // emitter can build a replayable values= — a bare index breaks
+                // replay when field positions differ in the rebuilt cache.
                 node.Format[$"dataField{i + 1}"] = $"{dfName}:{dfFunc}:{dfField}";
+                node.Format[$"dataField{i + 1}.srcField"] = ResolveFieldName((uint)dfField);
                 // CONSISTENCY(canonical-format-key): showDataAs round-trips
                 // through its own structured Format key rather than being
                 // packed into the dataField{N} colon string. Existing

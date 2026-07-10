@@ -691,11 +691,15 @@ public static partial class ExcelBatchEmitter
                 { dfOk = false; break; }
                 var seg = dfS.Split(':');
                 if (seg.Length < 3) { dfOk = false; break; }
-                // Right-anchored: last two segments are func and FIELD; the
-                // display name may itself contain ':'.
-                var field = seg[^1];
+                // Right-anchored: last two segments are func and FIELD-index;
+                // the display name may itself contain ':'.
                 var func = seg[^2];
                 var displayName = string.Join(":", seg[..^2]);
+                // Prefer the resolved source field NAME (dataField{N}.srcField)
+                // over the raw index in seg[^1]: a bare index breaks replay when
+                // the rebuilt cache has a different field layout.
+                var field = (pt.Format.TryGetValue($"dataField{d}.srcField", out var sf)
+                    && sf is string sfS && sfS.Length > 0) ? sfS : seg[^1];
                 if (field.Contains(',') || displayName.Contains(','))
                 {
                     warnings.Add(new UnsupportedWarning("pivottable", pt.Path ?? sheetPath,
