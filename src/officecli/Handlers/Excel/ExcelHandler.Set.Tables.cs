@@ -191,6 +191,26 @@ public partial class ExcelHandler
                 // refused the file (0x800A03EC).
                 case "sqref" or "ref":
                     var dvNormRef = ValidateSqref(value, "validation ref");
+                    // Mirror AddValidation's R27-3 overlap guard: a validation
+                    // moved onto cells already covered by another validation is
+                    // silently inert in Excel (first wins). Reject rather than
+                    // persist a dead rule.
+                    var dvContainer = dv.Parent as DataValidations;
+                    if (dvContainer != null)
+                    {
+                        var movedRanges = dvNormRef.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        foreach (var sibling in dvContainer.Elements<DataValidation>())
+                        {
+                            if (ReferenceEquals(sibling, dv)) continue;
+                            var sibRanges = (sibling.SequenceOfReferences?.InnerText ?? "")
+                                .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                            foreach (var mr in movedRanges)
+                                foreach (var sr in sibRanges)
+                                    if (RangesOverlap(mr, sr))
+                                        throw new ArgumentException(
+                                            $"DataValidation ref '{mr}' overlaps existing validation ref '{sr}'; Excel ignores stacked validations on the same cells. Use a non-overlapping range.");
+                        }
+                    }
                     dv.SequenceOfReferences = new ListValue<StringValue>(
                         dvNormRef.Split(' ').Select(s => new StringValue(s)));
                     break;
@@ -363,8 +383,14 @@ public partial class ExcelHandler
         {
             switch (key.ToLowerInvariant())
             {
-                case "name": table.Name = value; break;
-                case "displayname": table.DisplayName = value; break;
+                case "name":
+                    ValidateTableIdentifierUnique(value, table, isDisplayName: false);
+                    table.Name = value;
+                    break;
+                case "displayname":
+                    ValidateTableIdentifierUnique(value, table, isDisplayName: true);
+                    table.DisplayName = value;
+                    break;
                 case "headerrow":
                 {
                     // A table autoFilter filters BY the header row; Excel
@@ -582,6 +608,38 @@ public partial class ExcelHandler
 
         tableParts[PathIndex.ToArrayIndex(tableIdx)].Table!.Save();
         return tblUnsupported;
+    }
+
+    /// <summary>
+    /// Reject a Set that renames a table to a name/displayName already used by
+    /// ANOTHER table or a workbook defined name. Mirrors AddTable's
+    /// CONSISTENCY(table-name-unique) guard — Excel requires both to be unique
+    /// workbook-wide and refuses the file (0x800A03EC) on a collision; the Set
+    /// path previously assigned the name with no check.
+    /// </summary>
+    private void ValidateTableIdentifierUnique(string candidate, Table self, bool isDisplayName)
+    {
+        foreach (var existing in _doc.WorkbookPart!.WorksheetParts
+            .SelectMany(wp => wp.TableDefinitionParts)
+            .Select(tdp => tdp.Table)
+            .Where(t => t != null && !ReferenceEquals(t, self))!)
+        {
+            if (string.Equals(existing!.Name?.Value, candidate, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(existing.DisplayName?.Value, candidate, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException(
+                    $"Table {(isDisplayName ? "displayName" : "name")} '{candidate}' already exists in workbook; choose a different {(isDisplayName ? "displayName" : "name")}.");
+        }
+        var definedNames = _doc.WorkbookPart.Workbook?.DefinedNames;
+        if (definedNames != null)
+        {
+            foreach (var dn in definedNames.Elements<DefinedName>())
+            {
+                if (dn.Name?.Value is { } dnName
+                    && string.Equals(dnName, candidate, StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException(
+                        $"Table {(isDisplayName ? "displayName" : "name")} '{candidate}' collides with the workbook defined name '{dnName}'; choose a different name.");
+            }
+        }
     }
 
     /// <summary>
