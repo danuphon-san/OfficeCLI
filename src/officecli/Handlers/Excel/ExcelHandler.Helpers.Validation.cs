@@ -206,6 +206,56 @@ public partial class ExcelHandler
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Reject a formula in which any single function call has more than 255
+    /// arguments — Excel's hard per-function limit. Over it, the file is
+    /// schema-valid but real Excel refuses to open it (0x800A03EC). Counts
+    /// top-level commas per parenthesis nesting level (a comma is attributed to
+    /// its innermost enclosing "()"); string literals are skipped, and "{}"
+    /// array-constant commas are not function args. 255 args (254 commas) is
+    /// fine; 256 args (255 commas) throws.
+    /// </summary>
+    internal static void ValidateFormulaArgCount(string formula)
+    {
+        if (string.IsNullOrEmpty(formula)) return;
+        var f = formula.TrimStart('=');
+        var commaStack = new Stack<int>();
+        bool inStr = false;
+        int arrayDepth = 0;
+        for (int i = 0; i < f.Length; i++)
+        {
+            char c = f[i];
+            if (c == '"')
+            {
+                if (inStr && i + 1 < f.Length && f[i + 1] == '"') { i++; continue; }
+                inStr = !inStr;
+                continue;
+            }
+            if (inStr) continue;
+            switch (c)
+            {
+                case '{': arrayDepth++; break;
+                case '}': if (arrayDepth > 0) arrayDepth--; break;
+                case '(': commaStack.Push(0); break;
+                case ')':
+                    if (commaStack.Count > 0)
+                    {
+                        var commas = commaStack.Pop();
+                        // args = commas + 1; reject 256+ args (>=255 commas).
+                        if (commas >= 255)
+                            throw new ArgumentException(
+                                $"Formula has a function call with {commas + 1} arguments; Excel's limit is 255 per function. "
+                                + "Split the call or reference a range instead.");
+                    }
+                    break;
+                case ',':
+                    if (arrayDepth == 0 && commaStack.Count > 0)
+                        commaStack.Push(commaStack.Pop() + 1);
+                    break;
+            }
+        }
+    }
+
     internal static void ValidateFormulaCellRefs(string formula)
     {
         if (string.IsNullOrEmpty(formula)) return;
@@ -214,6 +264,9 @@ public partial class ExcelHandler
 
         // R1C1-style references make real Excel refuse the file.
         ValidateNoR1C1Reference(formula);
+        // Excel caps a function call at 255 arguments; a 256-arg call passes
+        // schema validation but makes real Excel refuse the file (0x800A03EC).
+        ValidateFormulaArgCount(formula);
         // Match A1-style refs: optional $ + 1-3 letters + optional $ + 1-8 digits.
         // (Excel's row ceiling 1048576 is 7-digit, but 8-digit numbers like
         // A10000000 must still be caught so they're rejected with the clean
